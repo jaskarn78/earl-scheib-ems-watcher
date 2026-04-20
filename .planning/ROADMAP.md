@@ -35,7 +35,7 @@ Plans:
 - [x] 01-01-PLAN.md — Go module init + subcommand dispatcher with HMAC ldflags injection
 - [x] 01-02-PLAN.md — GitHub Actions CI workflow: cross-compile windows/amd64 on ubuntu-latest
 - [x] 01-03-PLAN.md — go-winres resource embedding: version info, UAC manifest, placeholder icon
-- [ ] 01-04-PLAN.md — osslsigncode signing pipeline: conditional CI signing + dev-sign fallback + cert procurement doc
+- [x] 01-04-PLAN.md — osslsigncode signing pipeline: conditional CI signing + dev-sign fallback + cert procurement doc
 
 ### Phase 2: Core Scanner
 **Goal**: `earlscheib.exe --scan` behaves identically to the Python reference watcher — same dedup, settle check, HMAC signatures, retry logic, heartbeat, and logging — fully tested in CI without a Windows VM

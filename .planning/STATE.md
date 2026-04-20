@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Ready to execute
-stopped_at: Completed 01-scaffold-signing 01-03-PLAN.md
-last_updated: "2026-04-20T22:28:51.664Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 01-scaffold-signing 01-04-PLAN.md
+last_updated: "2026-04-20T22:32:38.927Z"
 progress:
   total_phases: 5
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 4
-  completed_plans: 3
+  completed_plans: 4
 ---
 
 # Project State
@@ -49,6 +49,7 @@ Plan: 4 of 4
 | Phase 01-scaffold-signing P01 | 2 | 2 tasks | 5 files |
 | Phase 01-scaffold-signing P02 | 5 | 1 tasks | 1 files |
 | Phase 01-scaffold-signing P03 | 15 | 2 tasks | 4 files |
+| Phase 01-scaffold-signing P04 | 5 | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -67,6 +68,7 @@ Recent decisions affecting current work:
 - [Phase 01-scaffold-signing]: go-version-file: go.mod used in CI setup-go step to stay in sync as go.mod evolves
 - [Phase 01-scaffold-signing]: go-winres .syso output to cwd; Makefile mv step moves to cmd/earlscheib/ for Go auto-linking (Go only links .syso from the compiled package directory)
 - [Phase 01-scaffold-signing]: go-winres v0.3.3 schema uses #1 resource keys and 0409 LCID (not 0000/1) — plan template was incorrect; corrected from go-winres init output
+- [Phase 01-scaffold-signing]: osslsigncode on ubuntu-latest (not signtool.exe on windows-latest) — Authenticode from Linux; CI signing conditional on SIGNING_CERT_B64 secret; RFC 3161 timestamp for post-expiry validity; dev-sign uses openssl ephemeral self-signed cert + /tmp for temp files
 
 ### Pending Todos
 
@@ -80,6 +82,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-20T22:28:51.661Z
-Stopped at: Completed 01-scaffold-signing 01-03-PLAN.md
+Last session: 2026-04-20T22:32:38.917Z
+Stopped at: Completed 01-scaffold-signing 01-04-PLAN.md
 Resume file: None
