@@ -47,7 +47,13 @@ Plans:
   3. A file already in `ems_watcher.db` (same filepath + mtime) is NOT re-posted; a new file with the same name but updated mtime IS posted — verified by unit test
   4. A failing webhook POST (HTTP 503) triggers exactly 3 total attempts with exponential delays; a 400 response triggers no retry and exits immediately — verified by a mock HTTP server in CI
   5. `earlscheib.exe --status` prints last run time, files processed today, and total files sent to stdout; `earlscheib.exe --test` exits 0 on a reachable server and non-zero when the endpoint is unreachable
-**Plans**: TBD
+**Plans**: 5 plans
+Plans:
+- [ ] 02-01-PLAN.md — internal/config (INI parsing + DataDir) + internal/logging (slog + lumberjack rotation)
+- [ ] 02-02-PLAN.md — internal/db (SQLite WAL schema + dedup + retry + runs table)
+- [ ] 02-03-PLAN.md — internal/webhook (Sign + Send + retry parity) + internal/heartbeat
+- [ ] 02-04-PLAN.md — internal/scanner (settle check + scan loop + candidates)
+- [ ] 02-05-PLAN.md — Wire main.go + --status + make test target + CI test job + HMAC parity test
 
 ### Phase 3: Tray Shell + Status Window
 **Goal**: The tray icon lives in the system tray, reflects real scanner state (green/yellow/red), and opens a WebView2 status window — the full tray UX is functional without the installer
@@ -92,8 +98,8 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Scaffold + Signing | 3/4 | In Progress|  |
-| 2. Core Scanner | 0/TBD | Not started | - |
+| 1. Scaffold + Signing | 4/4 | Complete |  |
+| 2. Core Scanner | 0/5 | Not started | - |
 | 3. Tray Shell + Status Window | 0/TBD | Not started | - |
 | 4. Wizard + Installer | 0/TBD | Not started | - |
 | 5. Telemetry + Remote Config | 0/TBD | Not started | - |
