@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: In Progress
-stopped_at: Completed 02-core-scanner 02-01-PLAN.md
-last_updated: "2026-04-20T22:55:07.380Z"
+stopped_at: Completed 02-core-scanner 02-04-PLAN.md
+last_updated: "2026-04-20T23:01:14.721Z"
 progress:
   total_phases: 5
   completed_phases: 1
   total_plans: 9
-  completed_plans: 6
+  completed_plans: 7
 ---
 
 # Project State
@@ -52,6 +52,7 @@ Plan: 2 (completed)
 | Phase 01-scaffold-signing P04 | 5 | 2 tasks | 3 files |
 | Phase 02-core-scanner P02 | 3 | 1 task | 4 files |
 | Phase 02-core-scanner P02-01 | 4 | 2 tasks | 6 files |
+| Phase 02-core-scanner P04 | 12 | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -77,6 +78,8 @@ Recent decisions affecting current work:
 - [Phase 02-core-scanner 02-02]: go.mod upgraded 1.22.2 → 1.25.0 automatically (modernc.org/sqlite v1.49.1 requires go >= 1.25.0); transparent toolchain upgrade
 - [Phase 02-core-scanner 02-02]: RetryBaseDelay exported package var for test-speed control — 1ns in tests vs 500ms in prod; no interface injection needed
 - [Phase 02-core-scanner 02-02]: db functions accept *sql.DB not a wrapper struct — minimal API surface, avoids over-abstraction
+- [Phase 02-core-scanner]: Sender func injected in RunConfig; scanner never imports internal/webhook — clean boundary for unit testing
+- [Phase 02-core-scanner]: SettleCheck log param is func(string, ...any) not *slog.Logger — allows t.Logf injection in tests without wrapping
 
 ### Pending Todos
 
@@ -90,6 +93,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-20T22:55:30Z
-Stopped at: Completed 02-core-scanner 02-02-PLAN.md
+Last session: 2026-04-20T23:01:14.717Z
+Stopped at: Completed 02-core-scanner 02-04-PLAN.md
 Resume file: None

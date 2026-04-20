@@ -18,9 +18,9 @@ REQ-ID format: `[CATEGORY]-[NN]`.
 
 ### Core Scanner (SCAN)
 
-- [ ] **SCAN-01**: `--scan` mode performs a single scan of the configured watch folder and exits (matches existing Python `ems_watcher.py` behaviour for Scheduled Task invocation)
+- [x] **SCAN-01**: `--scan` mode performs a single scan of the configured watch folder and exits (matches existing Python `ems_watcher.py` behaviour for Scheduled Task invocation)
 - [x] **SCAN-02**: Deduplicate by `(filepath, mtime)` using a local SQLite database at `C:\EarlScheibWatcher\ems_watcher.db`
-- [ ] **SCAN-03**: Settle check — require mtime + size stable for 2 consecutive samples at 2-second intervals (4 samples max) before POSTing; prevents partial-read POSTs while CCC ONE is still writing
+- [x] **SCAN-03**: Settle check — require mtime + size stable for 2 consecutive samples at 2-second intervals (4 samples max) before POSTing; prevents partial-read POSTs while CCC ONE is still writing
 - [ ] **SCAN-04**: POST raw BMS XML bytes to `webhook_url` with headers `Content-Type: application/xml; charset=utf-8`, `X-EMS-Filename`, `X-EMS-Source: EarlScheibWatcher`, and `X-EMS-Signature: <hex HMAC-SHA256>`
 - [ ] **SCAN-05**: HMAC parity with existing Python — given the same secret and body, Go produces the identical `X-EMS-Signature`; verified by cross-language test
 - [ ] **SCAN-06**: Retry failed POSTs with exponential backoff — 3 attempts total, retry on transient network errors and HTTP 408/425/429/5xx only; permanent errors return immediately
@@ -115,9 +115,9 @@ REQ-ID format: `[CATEGORY]-[NN]`.
 | SCAF-04 | Phase 1 | Complete |
 | SCAF-05 | Phase 1 | Complete |
 | SCAF-06 | Phase 1 | Complete |
-| SCAN-01 | Phase 2 | Pending |
+| SCAN-01 | Phase 2 | Complete |
 | SCAN-02 | Phase 2 | Complete |
-| SCAN-03 | Phase 2 | Pending |
+| SCAN-03 | Phase 2 | Complete |
 | SCAN-04 | Phase 2 | Pending |
 | SCAN-05 | Phase 2 | Pending |
 | SCAN-06 | Phase 2 | Pending |
