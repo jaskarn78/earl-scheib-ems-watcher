@@ -7,3 +7,4 @@ rsrc_windows_386.syso
 cmd/earlscheib/rsrc_windows_amd64.syso
 winres/gen_icon.go
 winres/icon16.png
+telemetry.log
