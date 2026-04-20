@@ -1,29 +1,14 @@
 {
-  "RT_VERSION": {
-    "0": {
-      "0000": {
-        "fixed": {
-          "file_version": "0.1.0.0",
-          "product_version": "0.1.0.0"
-        },
-        "info": {
-          "0000": {
-            "CompanyName": "Earl Scheib Auto Body Concord",
-            "FileDescription": "EMS File Watcher — sends CCC ONE BMS exports to webhook",
-            "FileVersion": "0.1.0.0",
-            "InternalName": "earlscheib",
-            "LegalCopyright": "Copyright 2026 Earl Scheib Auto Body Concord",
-            "OriginalFilename": "earlscheib.exe",
-            "ProductName": "Earl Scheib EMS Watcher",
-            "ProductVersion": "0.1.0"
-          }
-        }
-      }
+  "RT_GROUP_ICON": {
+    "APP": {
+      "0000": [
+        "icon.png"
+      ]
     }
   },
   "RT_MANIFEST": {
-    "1": {
-      "#1": {
+    "#1": {
+      "0409": {
         "identity": {
           "name": "EarlScheibEMSWatcher",
           "version": "0.1.0.0"
@@ -46,9 +31,26 @@
       }
     }
   },
-  "RT_GROUP_ICON": {
-    "APP": {
-      "icon": "winres/icon.png"
+  "RT_VERSION": {
+    "#1": {
+      "0000": {
+        "fixed": {
+          "file_version": "0.1.0.0",
+          "product_version": "0.1.0.0"
+        },
+        "info": {
+          "0409": {
+            "CompanyName": "Earl Scheib Auto Body Concord",
+            "FileDescription": "EMS File Watcher - sends CCC ONE BMS exports to webhook",
+            "FileVersion": "0.1.0.0",
+            "InternalName": "earlscheib",
+            "LegalCopyright": "Copyright 2026 Earl Scheib Auto Body Concord",
+            "OriginalFilename": "earlscheib.exe",
+            "ProductName": "Earl Scheib EMS Watcher",
+            "ProductVersion": "0.1.0"
+          }
+        }
+      }
     }
   }
 }

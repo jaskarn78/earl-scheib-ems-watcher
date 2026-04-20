@@ -20,10 +20,22 @@ ifneq ($(strip $(HMAC_SECRET)),)
 LDFLAGS += -X main.secretKey=$(HMAC_SECRET)
 endif
 
-.PHONY: build-windows build-linux clean
+.PHONY: build-windows build-linux clean generate-resources install-tools
+
+## install-tools: install required build tools (go-winres)
+install-tools:
+	go install github.com/tc-hib/go-winres@v0.3.3
+
+## generate-resources: generate Windows resource file (.syso) from winres/winres.json
+## Requires go-winres: run `make install-tools` first.
+## The .syso must live in cmd/earlscheib/ so go build picks it up automatically.
+generate-resources:
+	go-winres make --in winres/winres.json
+	mv -f rsrc_windows_amd64.syso cmd/earlscheib/rsrc_windows_amd64.syso
+	rm -f rsrc_windows_386.syso
 
 ## build-windows: cross-compile windows/amd64 exe (CGO_ENABLED=0, Phase 1 only)
-build-windows:
+build-windows: generate-resources
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 \
 	  go build -ldflags "$(LDFLAGS)" -o dist/$(BINARY) ./cmd/earlscheib
 
@@ -34,7 +46,7 @@ build-linux:
 
 ## clean: remove build artifacts
 clean:
-	rm -rf dist/
+	rm -rf dist/ rsrc_windows_386.syso rsrc_windows_amd64.syso cmd/earlscheib/rsrc_windows_amd64.syso
 
 ## help: list targets
 help:
