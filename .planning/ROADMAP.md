@@ -44,15 +44,18 @@ Plans:
 ### Phase 3: Installer + Native Config
 **Goal**: A signed single-file `.exe` installer, when run on a fresh Windows 10 VM, prompts Marco once for the CCC ONE export folder, tests the webhook connection, registers the Scheduled Task, and leaves a running `earlscheib.exe --scan` on a 5-minute schedule — no terminal, no tray, no prior runtime required.
 **Depends on**: Phase 2 (and SCAF-06 OV cert must be provisioned)
-**Requirements**: INST-01, INST-02, INST-03, INST-04, INST-05 (abbreviated — see REQUIREMENTS.md Phase 3 section; TRAY-* and WebView-specific UI-* deferred out-of-scope)
+**Requirements**: INST-01, INST-02, INST-03, INST-04, INST-08, INST-09, INST-10, INST-11, UI-06, UI-07, UI-08, UI-09
 **Success Criteria** (what must be TRUE):
   1. Running the signed installer on a fresh Windows 10 VM (no Go, no Python, no WebView2 pre-installed) results in: (a) files extracted to `C:\EarlScheibWatcher\`, (b) a Scheduled Task `EarlScheibEMSWatcher` running every 5 minutes, (c) `config.ini` written with Marco's folder and the webhook URL, (d) the first scan either succeeds or surfaces a clear error before the installer closes
   2. The installer prompts for the CCC ONE export folder with an auto-detected default (scans `C:\CCC\EMS_Export`, `C:\CCC\APPS\CCCCONE\CCCCONE\DATA`, etc.); if multiple paths exist Marco picks one, if none exist Marco browses
   3. The installer runs a connection test against `{webhook_url}/status` before exiting; failure shows a plain-English error message with retry / continue-anyway options
   4. Running the installer a second time (upgrade) preserves Marco's existing `config.ini`; the installer's welcome screen explains the SmartScreen "More info → Run anyway" dialog in plain English
   5. Running the uninstaller removes the Scheduled Task and `C:\EarlScheibWatcher\`; the app no longer appears in Add/Remove Programs
-**Plans**: TBD
-**UI hint**: yes (native Inno Setup pages — no HTML/webview)
+**Plans**: 3 plans
+Plans:
+- [ ] 03-01-PLAN.md — Inno Setup script (earlscheib.iss): all wizard pages, Pascal code, Scheduled Task XMLs, uninstaller hooks
+- [ ] 03-02-PLAN.md — Build pipeline: Makefile installer target + CI build-installer job + installer Authenticode signing
+- [ ] 03-03-PLAN.md — CCC ONE diagram (SVG) + installer README.txt + CI syntax-check job (iscc parse-only)
 
 ### Phase 4: Telemetry + Remote Config
 **Goal**: Broken installs are visible within 1 minute of an unhandled crash, and webhook URL or log level can be updated on Marco's machine without re-running the installer — both sides (client + server) are in production
@@ -73,5 +76,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 |-------|----------------|--------|-----------|
 | 1. Scaffold + Signing | 4/4 | Complete | 2026-04-20 |
 | 2. Core Scanner | 5/5 | Complete | 2026-04-20 |
-| 3. Installer + Native Config | 0/TBD | Not started | - |
+| 3. Installer + Native Config | 0/3 | Not started | - |
 | 4. Telemetry + Remote Config | 0/TBD | Not started | - |
