@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to plan
-stopped_at: Completed 02-core-scanner 02-05-PLAN.md
-last_updated: "2026-04-20T23:14:17.805Z"
+stopped_at: Completed 03-installer-native-config 03-03-PLAN.md
+last_updated: "2026-04-20T23:34:44.124Z"
 progress:
-  total_phases: 5
+  total_phases: 4
   completed_phases: 2
-  total_plans: 9
-  completed_plans: 9
+  total_plans: 12
+  completed_plans: 10
 ---
 
 # Project State
@@ -55,6 +55,7 @@ Plan: Not started
 | Phase 02-core-scanner P04 | 12 | 2 tasks | 3 files |
 | Phase 02-core-scanner P03 | 4 | 2 tasks | 5 files |
 | Phase 02-core-scanner P05 | 245 | 2 tasks | 6 files |
+| Phase 03-installer-native-config P03 | 2 | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -87,6 +88,9 @@ Recent decisions affecting current work:
 - [Phase 02-core-scanner]: Heartbeat sends X-EMS-Signature even when empty (matches Python); webhook Send omits header entirely when secret empty (matches Python 'if secret_key:' guard)
 - [Phase 02-core-scanner]: Makefile test target omits CGO_ENABLED=0 for -race (race detector requires CGO; CGO_ENABLED=0 stays for cross-compile build targets only)
 - [Phase 02-core-scanner]: runStatus passes nil sqlDB when db.Open fails so status.Print shows 'No database yet' correctly
+- [Phase 03-installer-native-config]: installer-syntax-check CI job has no needs: dependency -- runs in parallel with test and build-windows for fast feedback without waiting for binary build
+- [Phase 03-installer-native-config]: iscc /Dq /O- flags used for parse-only validation: /Dq suppresses banner, /O- suppresses output file -- together validate .iss syntax without producing a binary
+- [Phase 03-installer-native-config]: Placeholder binary (touch dist/earlscheib-artifact.exe) satisfies [Files] Source: path existence check at parse time -- no real Go build needed for CI syntax check
 
 ### Pending Todos
 
@@ -100,6 +104,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-20T23:09:05.445Z
-Stopped at: Completed 02-core-scanner 02-05-PLAN.md
+Last session: 2026-04-20T23:34:44.120Z
+Stopped at: Completed 03-installer-native-config 03-03-PLAN.md
 Resume file: None

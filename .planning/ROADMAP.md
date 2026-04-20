@@ -55,7 +55,7 @@ Plans:
 Plans:
 - [ ] 03-01-PLAN.md — Inno Setup script (earlscheib.iss): all wizard pages, Pascal code, Scheduled Task XMLs, uninstaller hooks
 - [ ] 03-02-PLAN.md — Build pipeline: Makefile installer target + CI build-installer job + installer Authenticode signing
-- [ ] 03-03-PLAN.md — CCC ONE diagram (SVG) + installer README.txt + CI syntax-check job (iscc parse-only)
+- [x] 03-03-PLAN.md — CCC ONE diagram (SVG) + installer README.txt + CI syntax-check job (iscc parse-only)
 
 ### Phase 4: Telemetry + Remote Config
 **Goal**: Broken installs are visible within 1 minute of an unhandled crash, and webhook URL or log level can be updated on Marco's machine without re-running the installer — both sides (client + server) are in production
