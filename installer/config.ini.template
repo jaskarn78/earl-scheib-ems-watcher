@@ -1,0 +1,6 @@
+[watcher]
+watch_folder = C:\CCC\EMS_Export
+webhook_url = https://support.jjagpal.me/earlscheibconcord
+log_level = INFO
+
+; secret_key is baked into the binary — do not add it here
