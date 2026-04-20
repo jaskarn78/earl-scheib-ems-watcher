@@ -29,10 +29,42 @@ jobs:
           GSD_HMAC_SECRET: ${{ secrets.GSD_HMAC_SECRET }}
         run: make build-windows
 
+      - name: Install osslsigncode
+        run: |
+          sudo apt-get install -y osslsigncode
+
+      - name: Sign binary (skipped if cert secret absent)
+        if: env.SIGNING_CERT_B64 != ''
+        env:
+          SIGNING_CERT_B64: ${{ secrets.SIGNING_CERT_B64 }}
+          SIGNING_CERT_PASS: ${{ secrets.SIGNING_CERT_PASS }}
+        run: |
+          echo "$SIGNING_CERT_B64" | base64 -d > signing.pfx
+          osslsigncode sign \
+            -pkcs12 signing.pfx \
+            -pass "$SIGNING_CERT_PASS" \
+            -n "Earl Scheib EMS Watcher" \
+            -i "https://support.jjagpal.me" \
+            -t http://timestamp.digicert.com \
+            -in dist/earlscheib.exe \
+            -out dist/earlscheib-signed.exe
+          osslsigncode verify -in dist/earlscheib-signed.exe
+          rm -f signing.pfx
+
+      - name: Prepare artifact (signed if available, unsigned otherwise)
+        run: |
+          if [ -f dist/earlscheib-signed.exe ]; then
+            cp dist/earlscheib-signed.exe dist/earlscheib-artifact.exe
+            echo "Using signed artifact"
+          else
+            cp dist/earlscheib.exe dist/earlscheib-artifact.exe
+            echo "Using unsigned artifact (no signing cert configured)"
+          fi
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: earlscheib-windows-amd64
-          path: dist/earlscheib.exe
+          path: dist/earlscheib-artifact.exe
           retention-days: 7
           if-no-files-found: error
