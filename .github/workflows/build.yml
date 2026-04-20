@@ -7,6 +7,26 @@ on:
     branches: ["**"]
 
 jobs:
+  installer-syntax-check:
+    name: Installer script syntax check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create placeholder binary (parse check only -- no real binary needed)
+        run: |
+          mkdir -p dist
+          touch dist/earlscheib-artifact.exe
+
+      - name: Validate installer script syntax (iscc parse-only)
+        run: |
+          docker run --rm \
+            -v "$PWD:/work" \
+            amake/innosetup:6.7.1 \
+            iscc /Dq /O- /work/installer/earlscheib.iss
+
   test:
     name: Unit tests (linux/amd64)
     runs-on: ubuntu-latest
