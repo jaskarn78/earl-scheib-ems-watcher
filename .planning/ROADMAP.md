@@ -13,7 +13,7 @@ Five phases deliver Marco's one-download, three-click, green-icon experience. Ph
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [ ] **Phase 1: Scaffold + Signing** - Go module, CI cross-compile pipeline, OV cert procurement, and Authenticode signing infrastructure
-- [ ] **Phase 2: Core Scanner** - Pure-Go CGO-free port of all Python watcher logic (dedup, settle, HMAC, retry, heartbeat, logging)
+- [x] **Phase 2: Core Scanner** - Pure-Go CGO-free port of all Python watcher logic (dedup, settle, HMAC, retry, heartbeat, logging) (completed 2026-04-20)
 - [ ] **Phase 3: Tray Shell + Status Window** - CGO tray with three-state icon and WebView2 status window; validates cross-compile before installer
 - [ ] **Phase 4: Wizard + Installer** - First-run 3-step wizard and Inno Setup single-exe installer; first Marco-ready artifact
 - [ ] **Phase 5: Telemetry + Remote Config** - Crash telemetry, remote config poller, and coordinated server-side endpoints
@@ -53,7 +53,7 @@ Plans:
 - [x] 02-02-PLAN.md — internal/db (SQLite WAL schema + dedup + retry + runs table)
 - [x] 02-03-PLAN.md — internal/webhook (Sign + Send + retry parity) + internal/heartbeat
 - [x] 02-04-PLAN.md — internal/scanner (settle check + scan loop + candidates)
-- [ ] 02-05-PLAN.md — Wire main.go + --status + make test target + CI test job + HMAC parity test
+- [x] 02-05-PLAN.md — Wire main.go + --status + make test target + CI test job + HMAC parity test
 
 ### Phase 3: Tray Shell + Status Window
 **Goal**: The tray icon lives in the system tray, reflects real scanner state (green/yellow/red), and opens a WebView2 status window — the full tray UX is functional without the installer
@@ -99,7 +99,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Scaffold + Signing | 4/4 | Complete |  |
-| 2. Core Scanner | 4/5 | In Progress|  |
+| 2. Core Scanner | 5/5 | Complete   | 2026-04-20 |
 | 3. Tray Shell + Status Window | 0/TBD | Not started | - |
 | 4. Wizard + Installer | 0/TBD | Not started | - |
 | 5. Telemetry + Remote Config | 0/TBD | Not started | - |

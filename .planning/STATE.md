@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: In Progress
-stopped_at: Completed 02-core-scanner 02-03-PLAN.md
-last_updated: "2026-04-20T23:02:10.790Z"
+stopped_at: Completed 02-core-scanner 02-05-PLAN.md
+last_updated: "2026-04-20T23:09:05.448Z"
 progress:
   total_phases: 5
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 9
-  completed_plans: 8
+  completed_plans: 9
 ---
 
 # Project State
@@ -54,6 +54,7 @@ Plan: 2 (completed)
 | Phase 02-core-scanner P02-01 | 4 | 2 tasks | 6 files |
 | Phase 02-core-scanner P04 | 12 | 2 tasks | 3 files |
 | Phase 02-core-scanner P03 | 4 | 2 tasks | 5 files |
+| Phase 02-core-scanner P05 | 245 | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -84,6 +85,8 @@ Recent decisions affecting current work:
 - [Phase 02-core-scanner]: Manual retry loop in webhook.Send() — NOT go-retryablehttp — for exact Python semantic parity (3 attempts, 1s backoff doubling)
 - [Phase 02-core-scanner]: BackoffBase exported package var in webhook + RetryBaseDelay in db: test-speed override pattern established
 - [Phase 02-core-scanner]: Heartbeat sends X-EMS-Signature even when empty (matches Python); webhook Send omits header entirely when secret empty (matches Python 'if secret_key:' guard)
+- [Phase 02-core-scanner]: Makefile test target omits CGO_ENABLED=0 for -race (race detector requires CGO; CGO_ENABLED=0 stays for cross-compile build targets only)
+- [Phase 02-core-scanner]: runStatus passes nil sqlDB when db.Open fails so status.Print shows 'No database yet' correctly
 
 ### Pending Todos
 
@@ -97,6 +100,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-20T23:02:10.786Z
-Stopped at: Completed 02-core-scanner 02-03-PLAN.md
+Last session: 2026-04-20T23:09:05.445Z
+Stopped at: Completed 02-core-scanner 02-05-PLAN.md
 Resume file: None
