@@ -33,42 +33,34 @@ REQ-ID format: `[CATEGORY]-[NN]`.
 - [x] **SCAN-13**: Log file at `C:\EarlScheibWatcher\ems_watcher.log` with rotation at 2 MB × 5 backups; BMS XML payload content is NOT written to logs (PII — customer phone numbers / names)
 - [x] **SCAN-14**: Tolerate missing / unreachable watch folder (network drive disconnect) — log and continue, do not crash
 
-### Tray Shell (TRAY)
+### Tray Shell (TRAY) — **OUT OF SCOPE (2026-04-20 scope cut)**
 
-- [ ] **TRAY-01**: System tray icon using fyne.io/systray, with three color states — green (healthy), yellow (warning / stale heartbeat), red (error / offline)
-- [ ] **TRAY-02**: Icon state derives from local SQLite (`runs` table + last heartbeat success) via a polling goroutine (~60s)
-- [ ] **TRAY-03**: Tooltip shows "Last check-in: Xm ago" and "Files today: N"
-- [ ] **TRAY-04**: Right-click menu: "View Status", "Open Log", "Settings", "Run Now", "Exit"
-- [ ] **TRAY-05**: Double-click tray opens the Status window
-- [ ] **TRAY-06**: "Run Now" fires `--scan` as a child process; icon shows a transient "scanning" state; result is reflected in the status window within 2s of scan completion
-- [ ] **TRAY-07**: Single-instance enforcement via named Win32 mutex (`EarlScheibWatcherTray`) — second launch foregrounds the existing tray's Status window, never silently exits
-- [ ] **TRAY-08**: Tray process auto-starts on user login via `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (NOT Scheduled Task — avoids session 0 isolation)
+All TRAY-* requirements moved out of scope. Rationale: persistent foreground tray process is overkill for Marco's needs. Scheduled Task + log file is sufficient status surface.
 
-### Status Window & Wizard UI (UI)
+- ~~TRAY-01 through TRAY-08~~: deferred indefinitely
 
-- [ ] **UI-01**: WebView2-based UI using jchv/go-webview2, in-process `Bind()` + `Dispatch(Eval())` — no loopback HTTP server
-- [ ] **UI-02**: All HTML/CSS/JS assets embedded in the binary via `go:embed` — no separate resource files to manage
-- [ ] **UI-03**: Status window shows: connection status (live ping), last run time, files processed today / all time, "Run Now" button, recent activity feed (last 10 entries) rendered human-readably (not raw log lines)
-- [ ] **UI-04**: Settings option re-opens the wizard for folder / connection re-configuration (not a free-form settings form)
-- [ ] **UI-05**: First-run wizard is a 3-step flow rendered in WebView2: Step 1 folder, Step 2 connection, Step 3 CCC ONE config guide
-- [ ] **UI-06**: **Wizard Step 1 (Folder):** Auto-scan common CCC ONE install paths (`C:\CCC\EMS_Export`, `C:\CCC\APPS\CCCCONE\CCCCONE\DATA`, `C:\Program Files\CCC`, `C:\Program Files (x86)\CCC`); pre-fill detected path if exactly one match; folder picker otherwise; validate folder exists before advancing; detect mapped-drive letter paths and warn / require UNC path entry
-- [ ] **UI-07**: **Wizard Step 2 (Connection):** "Test Connection" button pings `{webhook_url}/status` with current secret; display success checkmark or specific error; advance disabled until test passes
-- [ ] **UI-08**: **Wizard Step 3 (CCC ONE config):** Render a clear diagram of the EMS Extract Preferences dialog; instruct Marco to check "Lock Estimate" + "Save Workfile"; "I've done this" confirmation button; optional live-watch mode that polls the folder for 2 minutes and shows "Got it!" / "Nothing yet — check CCC ONE settings"
-- [ ] **UI-09**: Wizard writes `C:\EarlScheibWatcher\config.ini` on completion and clears the `first_run.flag` sentinel
-- [ ] **UI-10**: Clicking the tray icon or status menu before wizard completion re-opens the wizard instead of the status window
+### Installer Config Flow (UI) — **SIMPLIFIED (2026-04-20 scope cut)**
+
+WebView2 tray/wizard removed. The Inno Setup installer now handles folder selection + connection test at install time via native pages.
+
+- ~~UI-01, UI-02, UI-03, UI-04, UI-05, UI-10~~: out of scope (WebView2 / tray-related)
+- **UI-06**: **Installer Step 1 (Folder):** Inno Setup page auto-scans common CCC ONE install paths (`C:\CCC\EMS_Export`, `C:\CCC\APPS\CCCCONE\CCCCONE\DATA`, `C:\Program Files\CCC`, `C:\Program Files (x86)\CCC`); pre-fills detected path if exactly one match; standard folder picker otherwise; validates folder exists before advancing; detects mapped-drive letter paths and warns / requires UNC path entry
+- **UI-07**: **Installer Step 2 (Connection):** Shells out to `earlscheib.exe --test` with the chosen folder + default webhook; shows success checkmark or specific error; offers retry / continue-anyway on failure
+- **UI-08**: **Installer Step 3 (CCC ONE config):** Info-only page showing the EMS Extract Preferences dialog screenshot, instructing Marco to check "Lock Estimate" + "Save Workfile"; "I've done this" checkbox required to finish. Live-watch deferred.
+- **UI-09**: Installer writes `C:\EarlScheibWatcher\config.ini` on finish (no first_run.flag sentinel needed — installer blocks until config is written)
 
 ### Installer (INST)
 
 - [ ] **INST-01**: Single-file `.exe` installer built via Inno Setup 6 from Linux CI (`amake/innosetup-docker`)
 - [ ] **INST-02**: Installer extracts binary + default `config.ini` to `C:\EarlScheibWatcher\` (data dir)
 - [ ] **INST-03**: Installer sets directory ACLs via `icacls` — SYSTEM=Full, Users=Modify on `C:\EarlScheibWatcher\`
-- [ ] **INST-04**: Installer registers Scheduled Task `EarlScheibEMSWatcher` running `earlscheib.exe --scan` every 5 minutes, highest run level, as SYSTEM by default; fall back to user account if task creation as SYSTEM fails
-- [ ] **INST-05**: Installer writes `HKCU\...\Run` entry so the tray auto-starts on login
-- [ ] **INST-06**: Installer bundles the WebView2 Evergreen offline standalone installer and runs it silently if WebView2 runtime is not detected (fallback: Fixed Version Runtime if bundling is not viable — decided during Phase 4)
-- [ ] **INST-07**: Installer creates `C:\EarlScheibWatcher\first_run.flag` so the tray launches the wizard on first start
+- [ ] **INST-04**: Installer registers Scheduled Task `EarlScheibEMSWatcher` running `earlscheib.exe --scan` every 5 minutes, highest run level, as SYSTEM by default; falls back to user account if task creation as SYSTEM fails OR if a mapped drive letter is detected in the chosen folder path
+- ~~INST-05~~: HKCU\Run entry removed from scope (no tray)
+- ~~INST-06~~: WebView2 bootstrapper removed from scope (no WebView2)
+- ~~INST-07~~: first_run.flag removed from scope (installer blocks until config is written)
 - [ ] **INST-08**: Installer uses `onlyifdoesntexist` on `config.ini` so upgrades preserve Marco's settings
-- [ ] **INST-09**: Installer triggers the tray binary at the end of install (`[Run] earlscheib.exe --tray`) so Marco sees the wizard immediately
-- [ ] **INST-10**: Uninstaller removes Scheduled Task (`schtasks /Delete /TN EarlScheibEMSWatcher /F`), removes HKCU Run key, removes `C:\EarlScheibWatcher\` (with confirmation to preserve data); is listed in Add/Remove Programs
+- [ ] **INST-09**: Installer runs the first `--scan` at the end of install to verify the pipeline works end-to-end before exiting
+- [ ] **INST-10**: Uninstaller removes Scheduled Task (`schtasks /Delete /TN EarlScheibEMSWatcher /F`) and `C:\EarlScheibWatcher\` (with confirmation to preserve data); is listed in Add/Remove Programs
 - [ ] **INST-11**: Installer displays a plain-English explanation of the SmartScreen "More info → Run anyway" dialog in its README / welcome screen so Marco isn't surprised
 
 ### Telemetry & Remote Config (OPS)
