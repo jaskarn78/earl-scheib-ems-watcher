@@ -75,7 +75,7 @@ completed: 2026-04-20
 2. **Task 2: Add dev-sign Makefile target and cert procurement doc** - `747a045` (feat)
 3. **Task 3: Checkpoint:human-verify** - auto-approved (no commit — all artifact inspection checks passed)
 
-**Plan metadata:** (pending final commit)
+**Plan metadata:** `fb5d19c` (docs: complete plan)
 
 ## Files Created/Modified
 
