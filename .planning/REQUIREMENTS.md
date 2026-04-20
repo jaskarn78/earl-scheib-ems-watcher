@@ -107,4 +107,61 @@ REQ-ID format: `[CATEGORY]-[NN]`.
 
 <!-- Filled in by roadmap creation — REQ-ID → Phase mapping. -->
 
-(Populated by `.planning/ROADMAP.md`.)
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| SCAF-01 | Phase 1 | Pending |
+| SCAF-02 | Phase 1 | Pending |
+| SCAF-03 | Phase 1 | Pending |
+| SCAF-04 | Phase 1 | Pending |
+| SCAF-05 | Phase 1 | Pending |
+| SCAF-06 | Phase 1 | Pending |
+| SCAN-01 | Phase 2 | Pending |
+| SCAN-02 | Phase 2 | Pending |
+| SCAN-03 | Phase 2 | Pending |
+| SCAN-04 | Phase 2 | Pending |
+| SCAN-05 | Phase 2 | Pending |
+| SCAN-06 | Phase 2 | Pending |
+| SCAN-07 | Phase 2 | Pending |
+| SCAN-08 | Phase 2 | Pending |
+| SCAN-09 | Phase 2 | Pending |
+| SCAN-10 | Phase 2 | Pending |
+| SCAN-11 | Phase 2 | Pending |
+| SCAN-12 | Phase 2 | Pending |
+| SCAN-13 | Phase 2 | Pending |
+| SCAN-14 | Phase 2 | Pending |
+| TRAY-01 | Phase 3 | Pending |
+| TRAY-02 | Phase 3 | Pending |
+| TRAY-03 | Phase 3 | Pending |
+| TRAY-04 | Phase 3 | Pending |
+| TRAY-05 | Phase 3 | Pending |
+| TRAY-06 | Phase 3 | Pending |
+| TRAY-07 | Phase 3 | Pending |
+| TRAY-08 | Phase 3 | Pending |
+| UI-01 | Phase 3 | Pending |
+| UI-02 | Phase 3 | Pending |
+| UI-03 | Phase 3 | Pending |
+| UI-04 | Phase 3 | Pending |
+| UI-05 | Phase 3 | Pending |
+| UI-10 | Phase 3 | Pending |
+| UI-06 | Phase 4 | Pending |
+| UI-07 | Phase 4 | Pending |
+| UI-08 | Phase 4 | Pending |
+| UI-09 | Phase 4 | Pending |
+| INST-01 | Phase 4 | Pending |
+| INST-02 | Phase 4 | Pending |
+| INST-03 | Phase 4 | Pending |
+| INST-04 | Phase 4 | Pending |
+| INST-05 | Phase 4 | Pending |
+| INST-06 | Phase 4 | Pending |
+| INST-07 | Phase 4 | Pending |
+| INST-08 | Phase 4 | Pending |
+| INST-09 | Phase 4 | Pending |
+| INST-10 | Phase 4 | Pending |
+| INST-11 | Phase 4 | Pending |
+| OPS-01 | Phase 5 | Pending |
+| OPS-02 | Phase 5 | Pending |
+| OPS-03 | Phase 5 | Pending |
+| OPS-04 | Phase 5 | Pending |
+| OPS-05 | Phase 5 | Pending |
+| OPS-06 | Phase 5 | Pending |
+| OPS-07 | Phase 5 | Pending |
