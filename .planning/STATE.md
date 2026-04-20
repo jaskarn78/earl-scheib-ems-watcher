@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Ready to plan
-stopped_at: Completed 01-scaffold-signing 01-04-PLAN.md
-last_updated: "2026-04-20T22:39:53.818Z"
+status: In Progress
+stopped_at: Completed 02-core-scanner 02-01-PLAN.md
+last_updated: "2026-04-20T22:55:07.380Z"
 progress:
   total_phases: 5
   completed_phases: 1
-  total_plans: 4
-  completed_plans: 4
+  total_plans: 9
+  completed_plans: 6
 ---
 
 # Project State
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-20)
 
 **Core value:** Marco downloads one file, clicks through a 3-step wizard, and the tray icon turns green — forever after, follow-up texts and review requests go out automatically with zero ongoing attention.
-**Current focus:** Phase 01 — Scaffold + Signing
+**Current focus:** Phase 02 — Core Scanner
 
 ## Current Position
 
 Phase: 2
-Plan: Not started
+Plan: 2 (completed)
 
 ## Performance Metrics
 
@@ -50,6 +50,8 @@ Plan: Not started
 | Phase 01-scaffold-signing P02 | 5 | 1 tasks | 1 files |
 | Phase 01-scaffold-signing P03 | 15 | 2 tasks | 4 files |
 | Phase 01-scaffold-signing P04 | 5 | 2 tasks | 3 files |
+| Phase 02-core-scanner P02 | 3 | 1 task | 4 files |
+| Phase 02-core-scanner P02-01 | 4 | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -69,6 +71,12 @@ Recent decisions affecting current work:
 - [Phase 01-scaffold-signing]: go-winres .syso output to cwd; Makefile mv step moves to cmd/earlscheib/ for Go auto-linking (Go only links .syso from the compiled package directory)
 - [Phase 01-scaffold-signing]: go-winres v0.3.3 schema uses #1 resource keys and 0409 LCID (not 0000/1) — plan template was incorrect; corrected from go-winres init output
 - [Phase 01-scaffold-signing]: osslsigncode on ubuntu-latest (not signtool.exe on windows-latest) — Authenticode from Linux; CI signing conditional on SIGNING_CERT_B64 secret; RFC 3161 timestamp for post-expiry validity; dev-sign uses openssl ephemeral self-signed cert + /tmp for temp files
+- [Phase 02-core-scanner]: Custom emsHandler implements slog.Handler directly for exact Python log format match (UTC YYYY-MM-DD HH:MM:SS [LEVEL] message)
+- [Phase 02-core-scanner]: LoadConfig returns defaults on missing/malformed INI without error — matches Python fall-through behaviour
+- [Phase 02-core-scanner]: SecretKey absent from Config struct — baked into binary via ldflags per SCAF-04; EARLSCHEIB_DATA_DIR env var enables cross-platform dev testing
+- [Phase 02-core-scanner 02-02]: go.mod upgraded 1.22.2 → 1.25.0 automatically (modernc.org/sqlite v1.49.1 requires go >= 1.25.0); transparent toolchain upgrade
+- [Phase 02-core-scanner 02-02]: RetryBaseDelay exported package var for test-speed control — 1ns in tests vs 500ms in prod; no interface injection needed
+- [Phase 02-core-scanner 02-02]: db functions accept *sql.DB not a wrapper struct — minimal API surface, avoids over-abstraction
 
 ### Pending Todos
 
@@ -82,6 +90,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-20T22:32:38.917Z
-Stopped at: Completed 01-scaffold-signing 01-04-PLAN.md
+Last session: 2026-04-20T22:55:07.376Z
+Stopped at: Completed 02-core-scanner 02-01-PLAN.md
 Resume file: None

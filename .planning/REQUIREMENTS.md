@@ -30,8 +30,8 @@ REQ-ID format: `[CATEGORY]-[NN]`.
 - [ ] **SCAN-10**: SQLite opened in WAL mode with `busy_timeout=30000` and 5-retry DB-lock backoff (matches existing Python)
 - [ ] **SCAN-11**: `--test` mode sends a canned BMS payload (matching `TEST_BMS_XML` in ems_watcher.py) and reports success/failure via exit code
 - [ ] **SCAN-12**: `--status` mode prints last run info, files processed today, total files sent, recent files, recent warnings/errors from the log — to stdout (used by the tray process internally as well)
-- [ ] **SCAN-13**: Log file at `C:\EarlScheibWatcher\ems_watcher.log` with rotation at 2 MB × 5 backups; BMS XML payload content is NOT written to logs (PII — customer phone numbers / names)
-- [ ] **SCAN-14**: Tolerate missing / unreachable watch folder (network drive disconnect) — log and continue, do not crash
+- [x] **SCAN-13**: Log file at `C:\EarlScheibWatcher\ems_watcher.log` with rotation at 2 MB × 5 backups; BMS XML payload content is NOT written to logs (PII — customer phone numbers / names)
+- [x] **SCAN-14**: Tolerate missing / unreachable watch folder (network drive disconnect) — log and continue, do not crash
 
 ### Tray Shell (TRAY)
 
@@ -127,8 +127,8 @@ REQ-ID format: `[CATEGORY]-[NN]`.
 | SCAN-10 | Phase 2 | Pending |
 | SCAN-11 | Phase 2 | Pending |
 | SCAN-12 | Phase 2 | Pending |
-| SCAN-13 | Phase 2 | Pending |
-| SCAN-14 | Phase 2 | Pending |
+| SCAN-13 | Phase 2 | Complete |
+| SCAN-14 | Phase 2 | Complete |
 | TRAY-01 | Phase 3 | Pending |
 | TRAY-02 | Phase 3 | Pending |
 | TRAY-03 | Phase 3 | Pending |

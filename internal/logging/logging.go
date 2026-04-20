@@ -18,7 +18,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"gopkg.in/natefinch/lumberjack.v2"
 )
@@ -124,6 +123,3 @@ func SetupLogging(dataDir string, level string) *slog.Logger {
 
 // ensure emsHandler satisfies the slog.Handler interface at compile time.
 var _ slog.Handler = (*emsHandler)(nil)
-
-// ensure time is used (imported for UTC format).
-var _ = time.UTC
