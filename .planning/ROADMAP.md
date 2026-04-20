@@ -33,7 +33,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 4 plans
 Plans:
 - [x] 01-01-PLAN.md — Go module init + subcommand dispatcher with HMAC ldflags injection
-- [ ] 01-02-PLAN.md — GitHub Actions CI workflow: cross-compile windows/amd64 on ubuntu-latest
+- [x] 01-02-PLAN.md — GitHub Actions CI workflow: cross-compile windows/amd64 on ubuntu-latest
 - [ ] 01-03-PLAN.md — go-winres resource embedding: version info, UAC manifest, placeholder icon
 - [ ] 01-04-PLAN.md — osslsigncode signing pipeline: conditional CI signing + dev-sign fallback + cert procurement doc
 
