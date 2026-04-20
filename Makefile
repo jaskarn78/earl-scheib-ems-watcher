@@ -20,7 +20,7 @@ ifneq ($(strip $(HMAC_SECRET)),)
 LDFLAGS += -X main.secretKey=$(HMAC_SECRET)
 endif
 
-.PHONY: build-windows build-linux test clean generate-resources install-tools dev-sign
+.PHONY: build-windows build-linux test clean generate-resources install-tools dev-sign installer installer-syntax
 
 ## install-tools: install required build tools (go-winres)
 install-tools:
@@ -75,6 +75,15 @@ dev-sign: build-windows
 	rm -f /tmp/dev-signing.key /tmp/dev-signing.crt /tmp/dev-signing.pfx
 	@echo "Dev-signed artifact: dist/earlscheib-signed.exe"
 	@echo "NOTE: self-signed cert -- SmartScreen will block this on Windows. For production use real OV cert."
+
+## installer: build the Inno Setup installer exe using Docker (requires Docker, produces installer/Output/EarlScheibWatcher-Setup.exe)
+## The binary at dist/earlscheib-artifact.exe must exist first (run make build-windows or use CI artifact).
+installer:
+	docker run --rm -v "$(CURDIR):/work" amake/innosetup:6.7.1 iscc /work/installer/earlscheib.iss
+
+## installer-syntax: parse-check the .iss script without producing output (CI fast-fail)
+installer-syntax:
+	docker run --rm -v "$(CURDIR):/work" amake/innosetup:6.7.1 iscc /Dq /O- /work/installer/earlscheib.iss
 
 ## help: list targets
 help:
