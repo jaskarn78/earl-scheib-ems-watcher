@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to plan
-stopped_at: Completed 03-installer-native-config 03-02-PLAN.md
-last_updated: "2026-04-20T23:42:42.523Z"
+stopped_at: Completed 04-telemetry-remote-config 04-02-PLAN.md
+last_updated: "2026-04-20T23:54:00Z"
 progress:
   total_phases: 4
   completed_phases: 3
@@ -24,7 +24,7 @@ See: .planning/PROJECT.md (updated 2026-04-20)
 ## Current Position
 
 Phase: 4
-Plan: Not started
+Plan: 2 (04-02-PLAN.md complete)
 
 ## Performance Metrics
 
@@ -58,6 +58,7 @@ Plan: Not started
 | Phase 03-installer-native-config P03 | 2 | 2 tasks | 3 files |
 | Phase 03-installer-native-config P01 | 2 | 2 tasks | 4 files |
 | Phase 03-installer-native-config P02 | 1 | 2 tasks | 2 files |
+| Phase 04-telemetry-remote-config P02 | 3 | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -98,6 +99,10 @@ Recent decisions affecting current work:
 - [Phase 03-installer-native-config 03-02]: CURDIR (not PWD) in Makefile installer target — GNU make built-in handles recursive make calls correctly
 - [Phase 03-installer-native-config 03-02]: build-installer CI job installs osslsigncode independently on each ephemeral runner; signing step conditional on SIGNING_CERT_B64
 - [Phase 03-installer-native-config 03-02]: Installer signing overwrites in-place so upload-artifact step is unconditional regardless of signing
+- [Phase 04-telemetry-remote-config 04-02]: HMAC-sign empty body []byte("") for GET remote-config requests — byte-identical to Python reference
+- [Phase 04-telemetry-remote-config 04-02]: AllowedKeys = [webhook_url, log_level] only — secret_key and watch_folder excluded per OPS-04 (safety boundary)
+- [Phase 04-telemetry-remote-config 04-02]: config.Merge uses temp-file + os.Rename for atomic INI write — crash-safe
+- [Phase 04-telemetry-remote-config 04-02]: remoteconfig.Fetch+Apply added directly to runScan (04-01 not yet applied); will be enclosed in telemetry.Wrap automatically when 04-01 lands
 
 ### Pending Todos
 
@@ -111,6 +116,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-20T23:37:44Z
-Stopped at: Completed 03-installer-native-config 03-02-PLAN.md
+Last session: 2026-04-20T23:54:00Z
+Stopped at: Completed 04-telemetry-remote-config 04-02-PLAN.md
 Resume file: None
