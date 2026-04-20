@@ -21,6 +21,9 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Install go-winres
+        run: go install github.com/tc-hib/go-winres@v0.3.3
+
       - name: Vet
         run: go vet ./...
 
