@@ -1,0 +1,54 @@
+{
+  "RT_VERSION": {
+    "0": {
+      "0000": {
+        "fixed": {
+          "file_version": "0.1.0.0",
+          "product_version": "0.1.0.0"
+        },
+        "info": {
+          "0000": {
+            "CompanyName": "Earl Scheib Auto Body Concord",
+            "FileDescription": "EMS File Watcher — sends CCC ONE BMS exports to webhook",
+            "FileVersion": "0.1.0.0",
+            "InternalName": "earlscheib",
+            "LegalCopyright": "Copyright 2026 Earl Scheib Auto Body Concord",
+            "OriginalFilename": "earlscheib.exe",
+            "ProductName": "Earl Scheib EMS Watcher",
+            "ProductVersion": "0.1.0"
+          }
+        }
+      }
+    }
+  },
+  "RT_MANIFEST": {
+    "1": {
+      "#1": {
+        "identity": {
+          "name": "EarlScheibEMSWatcher",
+          "version": "0.1.0.0"
+        },
+        "description": "EMS File Watcher for Earl Scheib Auto Body Concord",
+        "minimum-os": "win10",
+        "execution-level": "as invoker",
+        "ui-access": false,
+        "auto-elevate": false,
+        "dpi-awareness": "system",
+        "disable-theming": false,
+        "disable-window-filtering": false,
+        "high-resolution-scrolling-aware": false,
+        "ultra-high-resolution-scrolling-aware": false,
+        "long-path-aware": true,
+        "printer-driver-isolation": false,
+        "gdi-scaling": false,
+        "segment-heap": false,
+        "use-common-controls-v6": true
+      }
+    }
+  },
+  "RT_GROUP_ICON": {
+    "APP": {
+      "icon": "winres/icon.png"
+    }
+  }
+}

@@ -2,3 +2,5 @@ dist/*.exe
 dist/earlscheib
 signing.pfx
 *.pfx
+rsrc_windows_amd64.syso
+winres/gen_icon.go
