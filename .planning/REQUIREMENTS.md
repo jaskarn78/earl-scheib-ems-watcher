@@ -51,16 +51,16 @@ WebView2 tray/wizard removed. The Inno Setup installer now handles folder select
 
 ### Installer (INST)
 
-- [ ] **INST-01**: Single-file `.exe` installer built via Inno Setup 6 from Linux CI (`amake/innosetup-docker`)
-- [ ] **INST-02**: Installer extracts binary + default `config.ini` to `C:\EarlScheibWatcher\` (data dir)
-- [ ] **INST-03**: Installer sets directory ACLs via `icacls` — SYSTEM=Full, Users=Modify on `C:\EarlScheibWatcher\`
-- [ ] **INST-04**: Installer registers Scheduled Task `EarlScheibEMSWatcher` running `earlscheib.exe --scan` every 5 minutes, highest run level, as SYSTEM by default; falls back to user account if task creation as SYSTEM fails OR if a mapped drive letter is detected in the chosen folder path
+- [x] **INST-01**: Single-file `.exe` installer built via Inno Setup 6 from Linux CI (`amake/innosetup-docker`)
+- [x] **INST-02**: Installer extracts binary + default `config.ini` to `C:\EarlScheibWatcher\` (data dir)
+- [x] **INST-03**: Installer sets directory ACLs via `icacls` — SYSTEM=Full, Users=Modify on `C:\EarlScheibWatcher\`
+- [x] **INST-04**: Installer registers Scheduled Task `EarlScheibEMSWatcher` running `earlscheib.exe --scan` every 5 minutes, highest run level, as SYSTEM by default; falls back to user account if task creation as SYSTEM fails OR if a mapped drive letter is detected in the chosen folder path
 - ~~INST-05~~: HKCU\Run entry removed from scope (no tray)
 - ~~INST-06~~: WebView2 bootstrapper removed from scope (no WebView2)
 - ~~INST-07~~: first_run.flag removed from scope (installer blocks until config is written)
-- [ ] **INST-08**: Installer uses `onlyifdoesntexist` on `config.ini` so upgrades preserve Marco's settings
-- [ ] **INST-09**: Installer runs the first `--scan` at the end of install to verify the pipeline works end-to-end before exiting
-- [ ] **INST-10**: Uninstaller removes Scheduled Task (`schtasks /Delete /TN EarlScheibEMSWatcher /F`) and `C:\EarlScheibWatcher\` (with confirmation to preserve data); is listed in Add/Remove Programs
+- [x] **INST-08**: Installer uses `onlyifdoesntexist` on `config.ini` so upgrades preserve Marco's settings
+- [x] **INST-09**: Installer runs the first `--scan` at the end of install to verify the pipeline works end-to-end before exiting
+- [x] **INST-10**: Uninstaller removes Scheduled Task (`schtasks /Delete /TN EarlScheibEMSWatcher /F`) and `C:\EarlScheibWatcher\` (with confirmation to preserve data); is listed in Add/Remove Programs
 - [x] **INST-11**: Installer displays a plain-English explanation of the SmartScreen "More info → Run anyway" dialog in its README / welcome screen so Marco isn't surprised
 
 ### Telemetry & Remote Config (OPS)
@@ -135,20 +135,20 @@ WebView2 tray/wizard removed. The Inno Setup installer now handles folder select
 | UI-04 | Phase 3 | Pending |
 | UI-05 | Phase 3 | Pending |
 | UI-10 | Phase 3 | Pending |
-| UI-06 | Phase 4 | Pending |
-| UI-07 | Phase 4 | Pending |
+| UI-06 | Phase 4 | Complete |
+| UI-07 | Phase 4 | Complete |
 | UI-08 | Phase 4 | Complete |
-| UI-09 | Phase 4 | Pending |
-| INST-01 | Phase 4 | Pending |
-| INST-02 | Phase 4 | Pending |
-| INST-03 | Phase 4 | Pending |
-| INST-04 | Phase 4 | Pending |
+| UI-09 | Phase 4 | Complete |
+| INST-01 | Phase 4 | Complete |
+| INST-02 | Phase 4 | Complete |
+| INST-03 | Phase 4 | Complete |
+| INST-04 | Phase 4 | Complete |
 | INST-05 | Phase 4 | Pending |
 | INST-06 | Phase 4 | Pending |
 | INST-07 | Phase 4 | Pending |
-| INST-08 | Phase 4 | Pending |
-| INST-09 | Phase 4 | Pending |
-| INST-10 | Phase 4 | Pending |
+| INST-08 | Phase 4 | Complete |
+| INST-09 | Phase 4 | Complete |
+| INST-10 | Phase 4 | Complete |
 | INST-11 | Phase 4 | Complete |
 | OPS-01 | Phase 5 | Pending |
 | OPS-02 | Phase 5 | Pending |

@@ -53,7 +53,7 @@ Plans:
   5. Running the uninstaller removes the Scheduled Task and `C:\EarlScheibWatcher\`; the app no longer appears in Add/Remove Programs
 **Plans**: 3 plans
 Plans:
-- [ ] 03-01-PLAN.md — Inno Setup script (earlscheib.iss): all wizard pages, Pascal code, Scheduled Task XMLs, uninstaller hooks
+- [x] 03-01-PLAN.md — Inno Setup script (earlscheib.iss): all wizard pages, Pascal code, Scheduled Task XMLs, uninstaller hooks
 - [ ] 03-02-PLAN.md — Build pipeline: Makefile installer target + CI build-installer job + installer Authenticode signing
 - [x] 03-03-PLAN.md — CCC ONE diagram (SVG) + installer README.txt + CI syntax-check job (iscc parse-only)
 
@@ -76,5 +76,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 |-------|----------------|--------|-----------|
 | 1. Scaffold + Signing | 4/4 | Complete | 2026-04-20 |
 | 2. Core Scanner | 5/5 | Complete | 2026-04-20 |
-| 3. Installer + Native Config | 0/3 | Not started | - |
+| 3. Installer + Native Config | 2/3 | In Progress|  |
 | 4. Telemetry + Remote Config | 0/TBD | Not started | - |

@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to plan
-stopped_at: Completed 03-installer-native-config 03-03-PLAN.md
-last_updated: "2026-04-20T23:34:44.124Z"
+stopped_at: Completed 03-installer-native-config 03-01-PLAN.md
+last_updated: "2026-04-20T23:35:20.640Z"
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 12
-  completed_plans: 10
+  completed_plans: 11
 ---
 
 # Project State
@@ -56,6 +56,7 @@ Plan: Not started
 | Phase 02-core-scanner P03 | 4 | 2 tasks | 5 files |
 | Phase 02-core-scanner P05 | 245 | 2 tasks | 6 files |
 | Phase 03-installer-native-config P03 | 2 | 2 tasks | 3 files |
+| Phase 03-installer-native-config P01 | 2 | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -91,6 +92,8 @@ Recent decisions affecting current work:
 - [Phase 03-installer-native-config]: installer-syntax-check CI job has no needs: dependency -- runs in parallel with test and build-windows for fast feedback without waiting for binary build
 - [Phase 03-installer-native-config]: iscc /Dq /O- flags used for parse-only validation: /Dq suppresses banner, /O- suppresses output file -- together validate .iss syntax without producing a binary
 - [Phase 03-installer-native-config]: Placeholder binary (touch dist/earlscheib-artifact.exe) satisfies [Files] Source: path existence check at parse time -- no real Go build needed for CI syntax check
+- [Phase 03-installer-native-config]: Task XMLs use UserId=S-1-5-18 (SYSTEM SID) to avoid locale-specific name resolution; User fallback uses LogonType=InteractiveToken
+- [Phase 03-installer-native-config]: Connection test uses EARLSCHEIB_DATA_DIR env var override to point earlscheib.exe --test at {tmp} during install
 
 ### Pending Todos
 
@@ -104,6 +107,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-20T23:34:44.120Z
-Stopped at: Completed 03-installer-native-config 03-03-PLAN.md
+Last session: 2026-04-20T23:35:20.636Z
+Stopped at: Completed 03-installer-native-config 03-01-PLAN.md
 Resume file: None
