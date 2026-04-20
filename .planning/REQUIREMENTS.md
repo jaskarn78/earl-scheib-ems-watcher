@@ -13,7 +13,7 @@ REQ-ID format: `[CATEGORY]-[NN]`.
 - [x] **SCAF-02**: Cross-compile from Linux to `windows/amd64` in CI (GitHub Actions or equivalent) without needing a Windows runner for the core build
 - [ ] **SCAF-03**: Binary is Authenticode-signed in CI using osslsigncode + cloud HSM (OV certificate) — every build, not just release
 - [x] **SCAF-04**: HMAC secret key is baked into the binary via `-ldflags "-X main.secretKey=..."` — never written to `config.ini` or any user-visible file
-- [ ] **SCAF-05**: Binary embeds version info, application icon, and manifest via go-winres
+- [x] **SCAF-05**: Binary embeds version info, application icon, and manifest via go-winres
 - [ ] **SCAF-06**: OV code-signing certificate is procured and provisioned into CI HSM before Phase 4 begins
 
 ### Core Scanner (SCAN)
@@ -113,7 +113,7 @@ REQ-ID format: `[CATEGORY]-[NN]`.
 | SCAF-02 | Phase 1 | Complete |
 | SCAF-03 | Phase 1 | Pending |
 | SCAF-04 | Phase 1 | Complete |
-| SCAF-05 | Phase 1 | Pending |
+| SCAF-05 | Phase 1 | Complete |
 | SCAF-06 | Phase 1 | Pending |
 | SCAN-01 | Phase 2 | Pending |
 | SCAN-02 | Phase 2 | Pending |
