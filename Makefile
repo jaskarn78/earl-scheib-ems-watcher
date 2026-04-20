@@ -20,7 +20,7 @@ ifneq ($(strip $(HMAC_SECRET)),)
 LDFLAGS += -X main.secretKey=$(HMAC_SECRET)
 endif
 
-.PHONY: build-windows build-linux clean generate-resources install-tools
+.PHONY: build-windows build-linux clean generate-resources install-tools dev-sign
 
 ## install-tools: install required build tools (go-winres)
 install-tools:
@@ -47,6 +47,29 @@ build-linux:
 ## clean: remove build artifacts
 clean:
 	rm -rf dist/ rsrc_windows_386.syso rsrc_windows_amd64.syso cmd/earlscheib/rsrc_windows_amd64.syso
+
+## dev-sign: sign dist/earlscheib.exe with a self-signed cert (local testing only)
+## Requires: openssl, osslsigncode  (sudo apt-get install openssl osslsigncode)
+## Output: dist/earlscheib-signed.exe
+dev-sign: build-windows
+	@echo "Generating self-signed dev certificate..."
+	openssl req -new -x509 -newkey rsa:2048 -keyout /tmp/dev-signing.key \
+	  -out /tmp/dev-signing.crt -days 1 -nodes \
+	  -subj "/CN=EarlScheibDevSign/O=DevOnly/C=US" 2>/dev/null
+	openssl pkcs12 -export -out /tmp/dev-signing.pfx \
+	  -inkey /tmp/dev-signing.key -in /tmp/dev-signing.crt \
+	  -passout pass:devpass 2>/dev/null
+	osslsigncode sign \
+	  -pkcs12 /tmp/dev-signing.pfx \
+	  -pass devpass \
+	  -n "Earl Scheib EMS Watcher (DEV)" \
+	  -i "https://support.jjagpal.me" \
+	  -in dist/earlscheib.exe \
+	  -out dist/earlscheib-signed.exe
+	osslsigncode verify -in dist/earlscheib-signed.exe
+	rm -f /tmp/dev-signing.key /tmp/dev-signing.crt /tmp/dev-signing.pfx
+	@echo "Dev-signed artifact: dist/earlscheib-signed.exe"
+	@echo "NOTE: self-signed cert -- SmartScreen will block this on Windows. For production use real OV cert."
 
 ## help: list targets
 help:
