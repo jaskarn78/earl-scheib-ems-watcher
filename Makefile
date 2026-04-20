@@ -20,7 +20,7 @@ ifneq ($(strip $(HMAC_SECRET)),)
 LDFLAGS += -X main.secretKey=$(HMAC_SECRET)
 endif
 
-.PHONY: build-windows build-linux clean generate-resources install-tools dev-sign
+.PHONY: build-windows build-linux test clean generate-resources install-tools dev-sign
 
 ## install-tools: install required build tools (go-winres)
 install-tools:
@@ -43,6 +43,11 @@ build-windows: generate-resources
 build-linux:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
 	  go build -ldflags "$(LDFLAGS)" -o dist/earlscheib ./cmd/earlscheib
+
+## test: run all unit tests with race detector
+## Note: -race requires CGO on Linux; CGO_ENABLED=0 is used only for cross-compile builds.
+test:
+	go test ./... -race -count=1
 
 ## clean: remove build artifacts
 clean:

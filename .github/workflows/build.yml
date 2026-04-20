@@ -7,9 +7,29 @@ on:
     branches: ["**"]
 
 jobs:
+  test:
+    name: Unit tests (linux/amd64)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        # Note: -race requires cgo (C race detector runtime). CGO_ENABLED=0 is for
+        # the Windows cross-compile build only; tests run with CGO enabled for -race.
+        run: go test ./... -race -count=1
+
   build-windows:
     name: Cross-compile windows/amd64
     runs-on: ubuntu-latest
+    needs: [test]
 
     steps:
       - name: Checkout

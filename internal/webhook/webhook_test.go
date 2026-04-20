@@ -27,37 +27,22 @@ func TestSignHMACParity(t *testing.T) {
 	// Pinned hex values computed from Python:
 	//   import hmac, hashlib
 	//   hmac.new(b"test-secret-1234", body, hashlib.sha256).hexdigest()
-	fixtures := []struct {
-		name     string
-		body     []byte
-		expected string
+	// These are the canonical cross-language parity fixtures (SCAN-05).
+	const secret = "test-secret-1234"
+	cases := []struct {
+		name string
+		body []byte
+		want string
 	}{
-		{
-			name:     "empty body",
-			body:     []byte{},
-			expected: "7d5e48d090279ce242b5b05aaf181049eb2ff179addbdc46df55c05a81dab082",
-		},
-		{
-			name:     "ASCII string",
-			body:     []byte("TestSigningParity"),
-			expected: "e187375b21749c469539f5196bc0dac9168f7486da30174facf29752b7a5bba6",
-		},
-		{
-			name: "UTF-8 BMS XML with unicode (André)",
-			// Canonical 283-byte UTF-8 BMS XML with André unicode character.
-			// HMAC computed via Python:
-			//   hmac.new(b"test-secret-1234", body, hashlib.sha256).hexdigest()
-			// Body is exactly 283 bytes in UTF-8 (é in André is 2 bytes: c3 a9).
-			body: []byte("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<VehicleDamageEstimateAddRq xmlns=\"http://www.cieca.com/BMS\">\n  <DocumentInfo><DocumentID>TEST-EMS-WATCHER-V1XXAB</DocumentID></DocumentInfo>\n  <Owner><GivenName>André</GivenName><Surname>Watcher</Surname></Owner>\n</VehicleDamageEstimateAddRq>"),
-			expected: "6273efee2fd31ecdb515af117da606487502ee7fb9392dfbddfe1a91213d0182",
-		},
+		{"empty", []byte{}, "7d5e48d090279ce242b5b05aaf181049eb2ff179addbdc46df55c05a81dab082"},
+		{"ascii", []byte("TestSigningParity"), "e187375b21749c469539f5196bc0dac9168f7486da30174facf29752b7a5bba6"},
+		{"unicode_bms", []byte("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<VehicleDamageEstimateAddRq xmlns=\"http://www.cieca.com/BMS\">\n  <DocumentInfo><DocumentID>TEST-EMS-WATCHER</DocumentID></DocumentInfo>\n  <Owner><GivenName>Andr\u00e9</GivenName><CommPhone>5555550123</CommPhone></Owner>\n</VehicleDamageEstimateAddRq>"), "149db2bc39aeafe700021d262a196b8562c06366b51d0222539c5f8f49323df2"},
 	}
-
-	for _, tt := range fixtures {
-		t.Run(tt.name, func(t *testing.T) {
-			got := webhook.Sign("test-secret-1234", tt.body)
-			if got != tt.expected {
-				t.Errorf("Sign() = %q\nwant    %q", got, tt.expected)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := webhook.Sign(secret, tc.body)
+			if got != tc.want {
+				t.Errorf("Sign() = %q, want %q", got, tc.want)
 			}
 		})
 	}
