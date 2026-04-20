@@ -32,7 +32,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   5. The binary's Properties > Details tab on Windows shows the correct version, product name, and embedded icon from go-winres
 **Plans**: 4 plans
 Plans:
-- [ ] 01-01-PLAN.md — Go module init + subcommand dispatcher with HMAC ldflags injection
+- [x] 01-01-PLAN.md — Go module init + subcommand dispatcher with HMAC ldflags injection
 - [ ] 01-02-PLAN.md — GitHub Actions CI workflow: cross-compile windows/amd64 on ubuntu-latest
 - [ ] 01-03-PLAN.md — go-winres resource embedding: version info, UAC manifest, placeholder icon
 - [ ] 01-04-PLAN.md — osslsigncode signing pipeline: conditional CI signing + dev-sign fallback + cert procurement doc
@@ -92,7 +92,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Scaffold + Signing | 0/4 | Ready to execute | - |
+| 1. Scaffold + Signing | 1/4 | In Progress|  |
 | 2. Core Scanner | 0/TBD | Not started | - |
 | 3. Tray Shell + Status Window | 0/TBD | Not started | - |
 | 4. Wizard + Installer | 0/TBD | Not started | - |
