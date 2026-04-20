@@ -30,7 +30,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. OV code-signing certificate is procured, HSM-provisioned, and the signing step is non-interactive in CI (cert procurement in progress from day one, provisioned before Phase 4 ships)
   4. Running `earlscheib.exe --scan` on Windows prints a "subcommand not yet implemented" stub and exits 0; all other subcommands (`--tray`, `--wizard`, `--test`, `--status`, `--install`) respond similarly — no crash
   5. The binary's Properties > Details tab on Windows shows the correct version, product name, and embedded icon from go-winres
-**Plans**: TBD
+**Plans**: 4 plans
+Plans:
+- [ ] 01-01-PLAN.md — Go module init + subcommand dispatcher with HMAC ldflags injection
+- [ ] 01-02-PLAN.md — GitHub Actions CI workflow: cross-compile windows/amd64 on ubuntu-latest
+- [ ] 01-03-PLAN.md — go-winres resource embedding: version info, UAC manifest, placeholder icon
+- [ ] 01-04-PLAN.md — osslsigncode signing pipeline: conditional CI signing + dev-sign fallback + cert procurement doc
 
 ### Phase 2: Core Scanner
 **Goal**: `earlscheib.exe --scan` behaves identically to the Python reference watcher — same dedup, settle check, HMAC signatures, retry logic, heartbeat, and logging — fully tested in CI without a Windows VM
@@ -87,7 +92,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Scaffold + Signing | 0/TBD | Not started | - |
+| 1. Scaffold + Signing | 0/4 | Ready to execute | - |
 | 2. Core Scanner | 0/TBD | Not started | - |
 | 3. Tray Shell + Status Window | 0/TBD | Not started | - |
 | 4. Wizard + Installer | 0/TBD | Not started | - |
