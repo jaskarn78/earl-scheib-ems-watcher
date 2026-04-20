@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"github.com/jjagpal/earl-scheib-watcher/internal/db"
 	"github.com/jjagpal/earl-scheib-watcher/internal/heartbeat"
 	"github.com/jjagpal/earl-scheib-watcher/internal/logging"
+	"github.com/jjagpal/earl-scheib-watcher/internal/remoteconfig"
 	"github.com/jjagpal/earl-scheib-watcher/internal/scanner"
 	"github.com/jjagpal/earl-scheib-watcher/internal/status"
 	"github.com/jjagpal/earl-scheib-watcher/internal/webhook"
@@ -52,7 +54,25 @@ func main() {
 // Exits 0 on success, 1 if any errors occurred during the scan run.
 func runScan() {
 	dataDir := config.DataDir()
-	cfg, _ := config.LoadConfig(filepath.Join(dataDir, "config.ini"))
+	cfgPath := filepath.Join(dataDir, "config.ini")
+
+	// --- remote-config: best-effort, runs BEFORE loading effective config ---
+	// Load defaults to get the webhook URL for the remote-config fetch.
+	// A 5-second timeout is built into remoteconfig.Fetch; failures are logged
+	// to stderr and the scan continues with the local config (OPS-05).
+	rcCfg, _ := config.LoadConfig(cfgPath)
+	remote, rcErr := remoteconfig.Fetch(context.Background(), rcCfg.WebhookURL, secretKey, nil)
+	if rcErr != nil {
+		// Best-effort: log to stderr only, do not fail scan.
+		fmt.Fprintf(os.Stderr, "remote-config fetch: %v\n", rcErr)
+	} else if len(remote) > 0 {
+		if _, applyErr := remoteconfig.Apply(cfgPath, remote, nil); applyErr != nil {
+			fmt.Fprintf(os.Stderr, "remote-config apply: %v\n", applyErr)
+		}
+	}
+	// --- now load effective config (may have been updated by remote-config above) ---
+
+	cfg, _ := config.LoadConfig(cfgPath)
 	logger := logging.SetupLogging(dataDir, cfg.LogLevel)
 
 	sqlDB, err := db.Open(filepath.Join(dataDir, "ems_watcher.db"))
