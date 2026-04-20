@@ -10,8 +10,8 @@
 
 BINARY   := earlscheib.exe
 MODULE   := github.com/jjagpal/earl-scheib-watcher
-VERSION  ?= dev
-LDFLAGS  := -s -w
+VERSION  ?= 0.1.0-dev
+LDFLAGS  := -s -w -X main.appVersion=$(VERSION)
 HMAC_SECRET ?= $(GSD_HMAC_SECRET)
 
 # Inject HMAC secret if provided; fall back to in-source dev default otherwise.
