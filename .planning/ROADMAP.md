@@ -51,7 +51,7 @@ Plans:
 Plans:
 - [x] 02-01-PLAN.md — internal/config (INI parsing + DataDir) + internal/logging (slog + lumberjack rotation)
 - [x] 02-02-PLAN.md — internal/db (SQLite WAL schema + dedup + retry + runs table)
-- [ ] 02-03-PLAN.md — internal/webhook (Sign + Send + retry parity) + internal/heartbeat
+- [x] 02-03-PLAN.md — internal/webhook (Sign + Send + retry parity) + internal/heartbeat
 - [x] 02-04-PLAN.md — internal/scanner (settle check + scan loop + candidates)
 - [ ] 02-05-PLAN.md — Wire main.go + --status + make test target + CI test job + HMAC parity test
 
@@ -99,7 +99,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Scaffold + Signing | 4/4 | Complete |  |
-| 2. Core Scanner | 3/5 | In Progress|  |
+| 2. Core Scanner | 4/5 | In Progress|  |
 | 3. Tray Shell + Status Window | 0/TBD | Not started | - |
 | 4. Wizard + Installer | 0/TBD | Not started | - |
 | 5. Telemetry + Remote Config | 0/TBD | Not started | - |

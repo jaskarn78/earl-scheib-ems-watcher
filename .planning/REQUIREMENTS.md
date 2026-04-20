@@ -21,12 +21,12 @@ REQ-ID format: `[CATEGORY]-[NN]`.
 - [x] **SCAN-01**: `--scan` mode performs a single scan of the configured watch folder and exits (matches existing Python `ems_watcher.py` behaviour for Scheduled Task invocation)
 - [x] **SCAN-02**: Deduplicate by `(filepath, mtime)` using a local SQLite database at `C:\EarlScheibWatcher\ems_watcher.db`
 - [x] **SCAN-03**: Settle check — require mtime + size stable for 2 consecutive samples at 2-second intervals (4 samples max) before POSTing; prevents partial-read POSTs while CCC ONE is still writing
-- [ ] **SCAN-04**: POST raw BMS XML bytes to `webhook_url` with headers `Content-Type: application/xml; charset=utf-8`, `X-EMS-Filename`, `X-EMS-Source: EarlScheibWatcher`, and `X-EMS-Signature: <hex HMAC-SHA256>`
-- [ ] **SCAN-05**: HMAC parity with existing Python — given the same secret and body, Go produces the identical `X-EMS-Signature`; verified by cross-language test
-- [ ] **SCAN-06**: Retry failed POSTs with exponential backoff — 3 attempts total, retry on transient network errors and HTTP 408/425/429/5xx only; permanent errors return immediately
+- [x] **SCAN-04**: POST raw BMS XML bytes to `webhook_url` with headers `Content-Type: application/xml; charset=utf-8`, `X-EMS-Filename`, `X-EMS-Source: EarlScheibWatcher`, and `X-EMS-Signature: <hex HMAC-SHA256>`
+- [x] **SCAN-05**: HMAC parity with existing Python — given the same secret and body, Go produces the identical `X-EMS-Signature`; verified by cross-language test
+- [x] **SCAN-06**: Retry failed POSTs with exponential backoff — 3 attempts total, retry on transient network errors and HTTP 408/425/429/5xx only; permanent errors return immediately
 - [x] **SCAN-07**: Track SHA256 of file bytes alongside the `(filepath, mtime)` dedup key for forensics
 - [x] **SCAN-08**: Record each run in a `runs` table (timestamp, processed, errors, note)
-- [ ] **SCAN-09**: Send a lightweight heartbeat POST to `{webhook_url}/heartbeat` on each run (current Python behaviour preserved)
+- [x] **SCAN-09**: Send a lightweight heartbeat POST to `{webhook_url}/heartbeat` on each run (current Python behaviour preserved)
 - [x] **SCAN-10**: SQLite opened in WAL mode with `busy_timeout=30000` and 5-retry DB-lock backoff (matches existing Python)
 - [ ] **SCAN-11**: `--test` mode sends a canned BMS payload (matching `TEST_BMS_XML` in ems_watcher.py) and reports success/failure via exit code
 - [ ] **SCAN-12**: `--status` mode prints last run info, files processed today, total files sent, recent files, recent warnings/errors from the log — to stdout (used by the tray process internally as well)
@@ -118,12 +118,12 @@ REQ-ID format: `[CATEGORY]-[NN]`.
 | SCAN-01 | Phase 2 | Complete |
 | SCAN-02 | Phase 2 | Complete |
 | SCAN-03 | Phase 2 | Complete |
-| SCAN-04 | Phase 2 | Pending |
-| SCAN-05 | Phase 2 | Pending |
-| SCAN-06 | Phase 2 | Pending |
+| SCAN-04 | Phase 2 | Complete |
+| SCAN-05 | Phase 2 | Complete |
+| SCAN-06 | Phase 2 | Complete |
 | SCAN-07 | Phase 2 | Complete |
 | SCAN-08 | Phase 2 | Complete |
-| SCAN-09 | Phase 2 | Pending |
+| SCAN-09 | Phase 2 | Complete |
 | SCAN-10 | Phase 2 | Complete |
 | SCAN-11 | Phase 2 | Pending |
 | SCAN-12 | Phase 2 | Pending |

@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: In Progress
-stopped_at: Completed 02-core-scanner 02-04-PLAN.md
-last_updated: "2026-04-20T23:01:14.721Z"
+stopped_at: Completed 02-core-scanner 02-03-PLAN.md
+last_updated: "2026-04-20T23:02:10.790Z"
 progress:
   total_phases: 5
   completed_phases: 1
   total_plans: 9
-  completed_plans: 7
+  completed_plans: 8
 ---
 
 # Project State
@@ -53,6 +53,7 @@ Plan: 2 (completed)
 | Phase 02-core-scanner P02 | 3 | 1 task | 4 files |
 | Phase 02-core-scanner P02-01 | 4 | 2 tasks | 6 files |
 | Phase 02-core-scanner P04 | 12 | 2 tasks | 3 files |
+| Phase 02-core-scanner P03 | 4 | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -80,6 +81,9 @@ Recent decisions affecting current work:
 - [Phase 02-core-scanner 02-02]: db functions accept *sql.DB not a wrapper struct — minimal API surface, avoids over-abstraction
 - [Phase 02-core-scanner]: Sender func injected in RunConfig; scanner never imports internal/webhook — clean boundary for unit testing
 - [Phase 02-core-scanner]: SettleCheck log param is func(string, ...any) not *slog.Logger — allows t.Logf injection in tests without wrapping
+- [Phase 02-core-scanner]: Manual retry loop in webhook.Send() — NOT go-retryablehttp — for exact Python semantic parity (3 attempts, 1s backoff doubling)
+- [Phase 02-core-scanner]: BackoffBase exported package var in webhook + RetryBaseDelay in db: test-speed override pattern established
+- [Phase 02-core-scanner]: Heartbeat sends X-EMS-Signature even when empty (matches Python); webhook Send omits header entirely when secret empty (matches Python 'if secret_key:' guard)
 
 ### Pending Todos
 
@@ -93,6 +97,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-20T23:01:14.717Z
-Stopped at: Completed 02-core-scanner 02-04-PLAN.md
+Last session: 2026-04-20T23:02:10.786Z
+Stopped at: Completed 02-core-scanner 02-03-PLAN.md
 Resume file: None
