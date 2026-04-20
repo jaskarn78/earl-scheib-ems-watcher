@@ -1,0 +1,4 @@
+dist/*.exe
+dist/earlscheib
+signing.pfx
+*.pfx
