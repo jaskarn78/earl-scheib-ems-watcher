@@ -13,7 +13,7 @@ Four phases deliver Marco's one-download install. Phase 1 established the cross-
 
 - [x] **Phase 1: Scaffold + Signing** - Go module, CI cross-compile pipeline, OV cert procurement, and Authenticode signing infrastructure (completed 2026-04-20)
 - [x] **Phase 2: Core Scanner** - Pure-Go CGO-free port of all Python watcher logic (dedup, settle, HMAC, retry, heartbeat, logging) (completed 2026-04-20)
-- [ ] **Phase 3: Installer + Native Config** - Inno Setup single-exe installer with install-time folder picker + connection test + Scheduled Task registration; no tray, no WebView2
+- [x] **Phase 3: Installer + Native Config** - Inno Setup single-exe installer with install-time folder picker + connection test + Scheduled Task registration; no tray, no WebView2 (completed 2026-04-20)
 - [ ] **Phase 4: Telemetry + Remote Config** - Crash telemetry, remote config poller, and coordinated server-side endpoints
 
 ## Phase Details
@@ -54,7 +54,7 @@ Plans:
 **Plans**: 3 plans
 Plans:
 - [x] 03-01-PLAN.md — Inno Setup script (earlscheib.iss): all wizard pages, Pascal code, Scheduled Task XMLs, uninstaller hooks
-- [ ] 03-02-PLAN.md — Build pipeline: Makefile installer target + CI build-installer job + installer Authenticode signing
+- [x] 03-02-PLAN.md — Build pipeline: Makefile installer target + CI build-installer job + installer Authenticode signing
 - [x] 03-03-PLAN.md — CCC ONE diagram (SVG) + installer README.txt + CI syntax-check job (iscc parse-only)
 
 ### Phase 4: Telemetry + Remote Config
@@ -76,5 +76,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 |-------|----------------|--------|-----------|
 | 1. Scaffold + Signing | 4/4 | Complete | 2026-04-20 |
 | 2. Core Scanner | 5/5 | Complete | 2026-04-20 |
-| 3. Installer + Native Config | 2/3 | In Progress|  |
+| 3. Installer + Native Config | 3/3 | Complete   | 2026-04-20 |
 | 4. Telemetry + Remote Config | 0/TBD | Not started | - |

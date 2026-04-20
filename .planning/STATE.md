@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to plan
-stopped_at: Completed 03-installer-native-config 03-01-PLAN.md
-last_updated: "2026-04-20T23:35:20.640Z"
+stopped_at: Completed 03-installer-native-config 03-02-PLAN.md
+last_updated: "2026-04-20T23:37:44Z"
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 12
-  completed_plans: 11
+  completed_plans: 12
 ---
 
 # Project State
@@ -24,7 +24,7 @@ See: .planning/PROJECT.md (updated 2026-04-20)
 ## Current Position
 
 Phase: 3
-Plan: Not started
+Plan: 02 (complete)
 
 ## Performance Metrics
 
@@ -57,6 +57,7 @@ Plan: Not started
 | Phase 02-core-scanner P05 | 245 | 2 tasks | 6 files |
 | Phase 03-installer-native-config P03 | 2 | 2 tasks | 3 files |
 | Phase 03-installer-native-config P01 | 2 | 2 tasks | 4 files |
+| Phase 03-installer-native-config P02 | 1 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -94,6 +95,9 @@ Recent decisions affecting current work:
 - [Phase 03-installer-native-config]: Placeholder binary (touch dist/earlscheib-artifact.exe) satisfies [Files] Source: path existence check at parse time -- no real Go build needed for CI syntax check
 - [Phase 03-installer-native-config]: Task XMLs use UserId=S-1-5-18 (SYSTEM SID) to avoid locale-specific name resolution; User fallback uses LogonType=InteractiveToken
 - [Phase 03-installer-native-config]: Connection test uses EARLSCHEIB_DATA_DIR env var override to point earlscheib.exe --test at {tmp} during install
+- [Phase 03-installer-native-config 03-02]: CURDIR (not PWD) in Makefile installer target — GNU make built-in handles recursive make calls correctly
+- [Phase 03-installer-native-config 03-02]: build-installer CI job installs osslsigncode independently on each ephemeral runner; signing step conditional on SIGNING_CERT_B64
+- [Phase 03-installer-native-config 03-02]: Installer signing overwrites in-place so upload-artifact step is unconditional regardless of signing
 
 ### Pending Todos
 
@@ -107,6 +111,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-20T23:35:20.636Z
-Stopped at: Completed 03-installer-native-config 03-01-PLAN.md
+Last session: 2026-04-20T23:37:44Z
+Stopped at: Completed 03-installer-native-config 03-02-PLAN.md
 Resume file: None
