@@ -65,8 +65,8 @@ WebView2 tray/wizard removed. The Inno Setup installer now handles folder select
 
 ### Telemetry & Remote Config (OPS)
 
-- [ ] **OPS-01**: Global `recover()` wrapper on goroutines and command entry points; unhandled panics serialize a minimal error record (type, file:line, OS version, app version, timestamp) — NO BMS XML content, NO variable values, NO customer PII
-- [ ] **OPS-02**: Error record POSTed HMAC-signed to `{webhook_url}/telemetry` with header `X-EMS-Telemetry: 1`; failures to post are silent (no infinite recursion)
+- [x] **OPS-01**: Global `recover()` wrapper on goroutines and command entry points; unhandled panics serialize a minimal error record (type, file:line, OS version, app version, timestamp) — NO BMS XML content, NO variable values, NO customer PII
+- [x] **OPS-02**: Error record POSTed HMAC-signed to `{webhook_url}/telemetry` with header `X-EMS-Telemetry: 1`; failures to post are silent (no infinite recursion)
 - [ ] **OPS-03**: Background poller in the tray process fetches `{webhook_url}/remote-config` every 15 minutes (HMAC-authenticated GET)
 - [ ] **OPS-04**: Remote config supports ONLY whitelisted fields: `webhook_url`, `log_level`. Never `secret_key`, never `watch_folder`, never arbitrary keys
 - [ ] **OPS-05**: On change, remote config is atomically merged into local `config.ini`; tray logs the change; next `--scan` picks up new values
@@ -150,8 +150,8 @@ WebView2 tray/wizard removed. The Inno Setup installer now handles folder select
 | INST-09 | Phase 4 | Complete |
 | INST-10 | Phase 4 | Complete |
 | INST-11 | Phase 4 | Complete |
-| OPS-01 | Phase 5 | Pending |
-| OPS-02 | Phase 5 | Pending |
+| OPS-01 | Phase 4 | Complete |
+| OPS-02 | Phase 4 | Complete |
 | OPS-03 | Phase 5 | Pending |
 | OPS-04 | Phase 5 | Pending |
 | OPS-05 | Phase 5 | Pending |

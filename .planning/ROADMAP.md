@@ -63,9 +63,14 @@ Plans:
 **Requirements**: OPS-01, OPS-02, OPS-03, OPS-04, OPS-05, OPS-06, OPS-07
 **Success Criteria** (what must be TRUE):
   1. An unhandled panic in the scan process appears as a telemetry POST on the server (`/earlscheibconcord/telemetry`) within 1 minute; the payload contains error type, file:line, OS version, and app version — it contains NO BMS XML content, NO variable values, NO customer PII
-  2. Updating `webhook_url` in the server's remote-config response causes `C:\EarlScheibWatcher\config.ini` to reflect the new value within 20 minutes (polled from a long-running helper or from each scan); the next `--scan` uses the updated URL; `secret_key` and `watch_folder` are never overridden
+  2. Updating `webhook_url` in the server's remote-config response causes `C:\EarlScheibWatcher\config.ini` to reflect the new value within 5 minutes (next --scan picks it up); the next `--scan` uses the updated URL; `secret_key` and `watch_folder` are never overridden
   3. Server-side `/earlscheibconcord/telemetry` and `/earlscheibconcord/remote-config` endpoints are deployed in `app.py`, HMAC-validated on every request, and reject unsigned requests with 401
-**Plans**: TBD
+  4. Twilio WhatsApp→SMS switch documented in `app.py` as a clearly-labeled comment block
+**Plans**: 3 plans
+Plans:
+- [x] 04-01-PLAN.md — internal/telemetry package (panic recovery + HMAC POST) + wire into main.go runScan/runTest/runStatus
+- [x] 04-02-PLAN.md — internal/remoteconfig (Fetch + Apply) + config.Merge atomic helper + wire into main.go runScan
+- [ ] 04-03-PLAN.md — app.py: /telemetry + /remote-config endpoints + HMAC validation + remote_config.json + Twilio SMS comment
 
 ## Progress
 
@@ -77,4 +82,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | 1. Scaffold + Signing | 4/4 | Complete | 2026-04-20 |
 | 2. Core Scanner | 5/5 | Complete | 2026-04-20 |
 | 3. Installer + Native Config | 3/3 | Complete   | 2026-04-20 |
-| 4. Telemetry + Remote Config | 0/TBD | Not started | - |
+| 4. Telemetry + Remote Config | 2/3 | In progress | - |
