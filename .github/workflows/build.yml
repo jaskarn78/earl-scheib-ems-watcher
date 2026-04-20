@@ -111,3 +111,66 @@ jobs:
           path: dist/earlscheib-artifact.exe
           retention-days: 7
           if-no-files-found: error
+
+  build-installer:
+    name: Build installer (Inno Setup)
+    runs-on: ubuntu-latest
+    needs: [build-windows]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download signed binary artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: earlscheib-windows-amd64
+          path: dist/
+
+      - name: Rename artifact to expected name
+        run: mv dist/earlscheib-artifact.exe dist/earlscheib-artifact.exe || true
+        # The artifact is already named earlscheib-artifact.exe from build-windows
+
+      - name: Build installer via Docker (amake/innosetup 6.7.1)
+        run: |
+          docker run --rm \
+            -v "$PWD:/work" \
+            amake/innosetup:6.7.1 \
+            iscc /work/installer/earlscheib.iss
+
+      - name: Verify installer output exists
+        run: |
+          test -f installer/Output/EarlScheibWatcher-Setup.exe || \
+            (echo "ERROR: installer exe not produced" && exit 1)
+          ls -lh installer/Output/EarlScheibWatcher-Setup.exe
+
+      - name: Install osslsigncode
+        run: sudo apt-get install -y osslsigncode
+
+      - name: Sign installer (skipped if cert secret absent)
+        if: env.SIGNING_CERT_B64 != ''
+        env:
+          SIGNING_CERT_B64: ${{ secrets.SIGNING_CERT_B64 }}
+          SIGNING_CERT_PASS: ${{ secrets.SIGNING_CERT_PASS }}
+        run: |
+          echo "$SIGNING_CERT_B64" | base64 -d > signing.pfx
+          osslsigncode sign \
+            -pkcs12 signing.pfx \
+            -pass "$SIGNING_CERT_PASS" \
+            -n "Earl Scheib EMS Watcher Setup" \
+            -i "https://support.jjagpal.me" \
+            -t http://timestamp.digicert.com \
+            -in installer/Output/EarlScheibWatcher-Setup.exe \
+            -out installer/Output/EarlScheibWatcher-Setup-signed.exe
+          osslsigncode verify -in installer/Output/EarlScheibWatcher-Setup-signed.exe
+          mv installer/Output/EarlScheibWatcher-Setup-signed.exe \
+             installer/Output/EarlScheibWatcher-Setup.exe
+          rm -f signing.pfx
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: earlscheib-installer
+          path: installer/Output/EarlScheibWatcher-Setup.exe
+          retention-days: 7
+          if-no-files-found: error
