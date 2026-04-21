@@ -1215,17 +1215,34 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
         if path == "/earlscheibconcord/download":
             import os
-            zip_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "watcher.zip")
-            if not os.path.exists(zip_path):
+            app_dir = os.path.dirname(os.path.abspath(__file__))
+            # Preferred: signed Inno Setup installer (v1.0+ — native wizard, one-click install).
+            # Fallback: legacy watcher.zip (pre-v1.0 Python bundle).
+            installer_path = os.path.join(app_dir, "EarlScheibWatcher-Setup.exe")
+            legacy_zip = os.path.join(app_dir, "watcher.zip")
+            if os.path.exists(installer_path):
+                serve_path = installer_path
+                content_type = "application/octet-stream"
+                filename = "EarlScheibWatcher-Setup.exe"
+            elif os.path.exists(legacy_zip):
+                serve_path = legacy_zip
+                content_type = "application/zip"
+                filename = "earl-scheib-ems-watcher.zip"
+            else:
                 self.send_response(404); self.end_headers(); return
-            with open(zip_path, "rb") as z:
-                data = z.read()
+            file_size = os.path.getsize(serve_path)
             self.send_response(200)
-            self.send_header("Content-Type", "application/zip")
-            self.send_header("Content-Disposition", "attachment; filename=earl-scheib-ems-watcher.zip")
-            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+            self.send_header("Content-Length", str(file_size))
+            self.send_header("Cache-Control", "no-cache")
             self.end_headers()
-            self.wfile.write(data)
+            with open(serve_path, "rb") as f:
+                while True:
+                    chunk = f.read(65536)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
             return
 
         if path == "/earlscheibconcord":

@@ -108,6 +108,13 @@ var
   FWatchFolder: String;               // Chosen watch folder (global)
   FUseMappedFallback: Boolean;        // True if user chose user-mode task fallback
 
+// External Windows API — SetEnvironmentVariable (unicode) from kernel32.dll.
+// Used by RunConnectionTest to override EARLSCHEIB_DATA_DIR for the --test subprocess
+// so it reads our temp config.ini instead of the final C:\EarlScheibWatcher\config.ini
+// (which doesn't exist yet during install).
+function SetEnvironmentVariable(lpName, lpValue: String): Boolean;
+  external 'SetEnvironmentVariableW@kernel32.dll stdcall';
+
 // ---------------------------------------------------------------
 // IsMappedDrive: returns True if path starts with a single drive
 // letter that is not C: (heuristic for mapped network drive).
@@ -283,20 +290,13 @@ begin
 
   // -- Page 3: CCC ONE Configuration (UI-08) --
   InfoText :=
-    'Before finishing, make sure CCC ONE is configured to save EMS files automatically.' +
-    #13#10#13#10 +
-    'In CCC ONE, open: Tools > Extract > EMS Extract Preferences' +
-    #13#10#13#10 +
-    'Check both of these boxes:' +
-    #13#10 +
-    '   [x] Lock Estimate' +
-    #13#10 +
-    '   [x] Save Workfile' +
-    #13#10#13#10 +
-    'Set the Output Folder to the path you just entered.' +
-    #13#10#13#10 +
-    'Once checked, click Save and close the preferences window.' +
-    #13#10#13#10 +
+    'Before finishing, make sure CCC ONE is configured to save EMS files automatically.' + #13#10 + #13#10 +
+    'In CCC ONE, open: Tools > Extract > EMS Extract Preferences' + #13#10 + #13#10 +
+    'Check both of these boxes:' + #13#10 +
+    '   [x] Lock Estimate' + #13#10 +
+    '   [x] Save Workfile' + #13#10 + #13#10 +
+    'Set the Output Folder to the path you just entered.' + #13#10 + #13#10 +
+    'Once checked, click Save and close the preferences window.' + #13#10 + #13#10 +
     'Check the box below when you have done this:';
 
   CCCInfoPage := CreateOutputMsgPage(ConnPage.ID,
@@ -341,16 +341,11 @@ begin
     // Mapped drive detection (per INST-04, Pitfall #3 in CONTEXT.md)
     if IsMappedDrive(Folder) then begin
       MsgResult := MsgBox(
-        'The folder "' + Folder + '" appears to be on a mapped network drive.' +
-        #13#10#13#10 +
-        'The Windows background task runs as SYSTEM, which cannot see mapped drive letters.' +
-        #13#10#13#10 +
-        'Options:' +
-        #13#10 +
-        '  - Enter a UNC path instead (e.g. \\server\share\CCC_Export)' +
-        #13#10 +
-        '  - Or click OK to use a user-mode task (requires you to be logged in)' +
-        #13#10#13#10 +
+        'The folder "' + Folder + '" appears to be on a mapped network drive.' + #13#10#13#10 +
+        'The Windows background task runs as SYSTEM, which cannot see mapped drive letters.' + #13#10#13#10 +
+        'Options:' + #13#10 +
+        '  - Enter a UNC path instead (e.g. \\server\share\CCC_Export)' + #13#10 +
+        '  - Or click OK to use a user-mode task (requires you to be logged in)' + #13#10#13#10 +
         'Click Cancel to go back and change the path.',
         mbConfirmation, MB_OKCANCEL);
       if MsgResult = IDCANCEL then begin
@@ -380,16 +375,11 @@ begin
     if not TestResult then begin
       MsgResult := MsgBox(
         'Connection test failed.' + #13#10#13#10 +
-        'The watcher could not reach the follow-up service.' +
-        #13#10#13#10 +
-        'Possible causes:' +
-        #13#10 +
-        '  - No internet connection' +
-        #13#10 +
-        '  - Firewall blocking outbound HTTPS' +
-        #13#10#13#10 +
-        'Check the log at: ' + ExpandConstant('{tmp}\ems_watcher.log') +
-        #13#10#13#10 +
+        'The watcher could not reach the follow-up service.' + #13#10#13#10 +
+        'Possible causes:' + #13#10 +
+        '  - No internet connection' + #13#10 +
+        '  - Firewall blocking outbound HTTPS' + #13#10#13#10 +
+        'Check the log at: ' + ExpandConstant('{tmp}\ems_watcher.log') + #13#10#13#10 +
         'Click Retry to test again, or Ignore to continue anyway.',
         mbError, MB_ABORTRETRYIGNORE);
 
@@ -430,14 +420,10 @@ begin
 
     // Register Scheduled Task (INST-04)
     if not RegisterScheduledTask(FUseMappedFallback) then begin
-      MsgBox('Warning: could not register the background task automatically.' +
-             #13#10 +
-             'The watcher was installed but will not run on a schedule.' +
-             #13#10 +
-             'Open Task Scheduler and create a task manually to run:' +
-             #13#10 +
-             '  ' + ExpandConstant('{app}\earlscheib.exe') + ' --scan' +
-             #13#10 +
+      MsgBox('Warning: could not register the background task automatically.' + #13#10 +
+             'The watcher was installed but will not run on a schedule.' + #13#10 +
+             'Open Task Scheduler and create a task manually to run:' + #13#10 +
+             '  ' + ExpandConstant('{app}\earlscheib.exe') + ' --scan' + #13#10 +
              'every 5 minutes.',
              mbError, MB_OK);
     end;
@@ -456,12 +442,9 @@ begin
   DataDir := ExpandConstant('{app}');
   if DirExists(DataDir) then begin
     MsgResult := MsgBox(
-      'Do you want to delete all data in ' + DataDir + '?' +
-      #13#10#13#10 +
-      'This includes the log file (ems_watcher.log) and deduplication database.' +
-      #13#10#13#10 +
-      'Click Yes to delete everything.' +
-      #13#10 +
+      'Do you want to delete all data in ' + DataDir + '?' + #13#10#13#10 +
+      'This includes the log file (ems_watcher.log) and deduplication database.' + #13#10#13#10 +
+      'Click Yes to delete everything.' + #13#10 +
       'Click No to keep the log and database files.',
       mbConfirmation, MB_YESNO);
     if MsgResult = IDYES then begin
