@@ -35,6 +35,6 @@ server.py
 
 # Ad-hoc assets
 .playwright-mcp/
-admin-ui-*.png
+/admin-ui-*.png
 CLAUDE_CODE_PROMPT.md
 claude-code-project/

@@ -72,6 +72,15 @@ Source: "tasks\EarlScheibEMSWatcher-User.xml"; DestDir: "{tmp}"; Flags: deleteaf
 Name: "{app}"; Permissions: users-modify system-full
 
 ; ============================================================
+; [Icons]
+; Desktop + Start Menu shortcuts for the Queue Admin UI (ADMIN-11)
+; ============================================================
+[Icons]
+Name: "{commondesktop}\Earl Scheib Queue"; Filename: "{app}\earlscheib.exe"; Parameters: "--admin"; IconFilename: "{app}\earlscheib.exe"; Comment: "View and cancel pending SMS messages"
+Name: "{group}\Earl Scheib Queue"; Filename: "{app}\earlscheib.exe"; Parameters: "--admin"; IconFilename: "{app}\earlscheib.exe"; Comment: "View and cancel pending SMS messages"
+Name: "{group}\Uninstall Earl Scheib EMS Watcher"; Filename: "{uninstallexe}"
+
+; ============================================================
 ; [Run]
 ; Post-install steps in order (INST-03, INST-04, INST-09)
 ; ============================================================
@@ -84,6 +93,9 @@ Filename: "{sys}\icacls.exe"; Parameters: """{app}"" /grant ""SYSTEM:(OI)(CI)F""
 
 ; 3. First scan to prove the pipeline is live (per INST-09)
 Filename: "{app}\earlscheib.exe"; Parameters: "--scan"; Flags: runhidden nowait; StatusMsg: "Running first scan..."
+
+; 4. Optional: launch the Queue Admin UI on the finish page (default checked)
+Filename: "{app}\earlscheib.exe"; Parameters: "--admin"; Description: "Launch Queue Viewer now"; Flags: nowait postinstall skipifsilent
 
 ; ============================================================
 ; [UninstallRun]

@@ -26,7 +26,11 @@ Sends CCC ONE estimate files to the Earl Scheib follow-up service automatically.
    | **2. Connection Test** | Checks that your PC can reach the follow-up service over the internet. | Should show a ✓ check. If it fails, check your Wi-Fi; you can also click **Continue anyway**. |
    | **3. CCC ONE Settings** | Shows a reminder to set CCC ONE to save EMS files. | Open CCC ONE on the side, go to **Tools → Extract → EMS Extract Preferences**, check **Lock Estimate** and **Save Workfile**, save. Then check the **"I've done this"** box and click **Finish**. |
 
-6. Done. The watcher now runs every 5 minutes automatically. **You can close any windows.**
+6. Done. The watcher now runs every 5 minutes automatically.
+
+7. On the final wizard page there's a checkbox **"Launch Queue Viewer now"** — leave it checked and click **Finish**. Your browser will open to the Queue Admin page (see below) so you can see the system is working.
+
+8. A **"Earl Scheib Queue"** shortcut is added to both your **Desktop** and the **Start Menu** — use it any time to reopen the Queue Admin page.
 
 ### 2. What happens after install
 
@@ -35,26 +39,35 @@ Sends CCC ONE estimate files to the Earl Scheib follow-up service automatically.
 - The service schedules text messages to the customer automatically (24-hour follow-up, 3-day follow-up, review request).
 - You don't need to do anything else, ever.
 
-### 3. Seeing what's about to go out (optional)
+### 3. Seeing what's about to go out
 
-If you want to check which messages are queued, or cancel one before it sends:
+The installer puts an **"Earl Scheib Queue"** shortcut on your Desktop and in the Start Menu. Double-click either one, or run this in a Command Prompt:
 
-1. Open the **Start menu** and type `cmd`, then press Enter.
-2. In the black window, type (or paste):
+```
+"C:\EarlScheibWatcher\earlscheib.exe" --admin
+```
 
-   ```
-   "C:\EarlScheibWatcher\earlscheib.exe" --admin
-   ```
+A small black window opens briefly, then your browser auto-opens to the Queue page:
 
-3. Press Enter. Your browser will open to a page titled **"Earl Scheib Concord — Queue"**.
+![Queue default view](docs/screenshots/admin-ui-default.png)
 
-4. Each pending message shows the send time, the customer's name, and the repair job number.
+Each pending message shows the **send time** (Pacific), **customer name**, **phone**, **job type** (24-hour / 3-day / review), and the **repair job reference** — grouped by customer.
 
-5. Click **cancel** on any row to stop that message. You get 5 seconds to click the amber **"click to undo"** pill if you change your mind.
+**To cancel a message:** click the `cancel` link on the row. It strikes through and an amber **"click to undo"** pill appears with a 5-second countdown ring:
 
-6. When you're done, close the browser tab. The black cmd window will close itself after about 30 seconds.
+![Cancel undo countdown](docs/screenshots/admin-ui-cancel-undo.png)
 
-Full details in [`docs/admin-ui-guide.md`](docs/admin-ui-guide.md).
+If you change your mind, click the pill within 5 seconds and the cancel is aborted. Otherwise the message is permanently removed from the queue:
+
+![After cancel — row removed](docs/screenshots/admin-ui-after-settled.png)
+
+**When nothing is queued** (overnight, weekends, before the first estimate of the day):
+
+![Empty queue state](docs/screenshots/admin-ui-empty.png)
+
+The page **auto-refreshes every 15 seconds**. Press **`R`** (with no text field focused) to refresh manually. Close the browser tab when done — the background window closes itself within 30 seconds.
+
+Full guide: [`docs/admin-ui-guide.md`](docs/admin-ui-guide.md).
 
 ### 4. Something's wrong — what do I check?
 
