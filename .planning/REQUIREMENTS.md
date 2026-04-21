@@ -75,16 +75,16 @@ WebView2 tray/wizard removed. The Inno Setup installer now handles folder select
 
 ### Queue Admin UI (ADMIN)
 
-- [ ] **ADMIN-01**: `earlscheib.exe --admin` subcommand launches a local HTTP server on `127.0.0.1:<ephemeral>`, prints the bound URL to stdout, and opens the default browser to it.
-- [ ] **ADMIN-02**: Local `GET /api/queue` proxy HMAC-signs an empty body and forwards as GET to `{webhook_url}/earlscheibconcord/queue`, returning the remote response verbatim. Secret never leaves the Go process.
-- [ ] **ADMIN-03**: Local `POST /api/cancel` proxy accepts `{"id": N}`, re-encodes to canonical compact JSON, HMAC-signs those exact bytes, and forwards as DELETE to `{webhook_url}/earlscheibconcord/queue`.
-- [ ] **ADMIN-04**: Server lifecycle — SIGINT/SIGTERM, parent `ctx.Done()`, or 30 s without a `POST /alive` heartbeat triggers `http.Server.Shutdown` with a 5 s grace; process exits 0 on clean shutdown.
-- [ ] **ADMIN-05**: Server-side `/earlscheibconcord/queue` **GET** endpoint returns pending jobs (sent=0) as a JSON array ordered by send_at ASC; HMAC-validated with empty body per remote-config precedent; 401 on missing/invalid signature.
-- [ ] **ADMIN-06**: Server-side `/earlscheibconcord/queue` **DELETE** endpoint accepts JSON body `{"id": N}`, HMAC-validated over the exact bytes; deletes the row only when sent=0; returns `{"deleted": 1}` on success, `{"error": "not found or already sent"}` with 404 otherwise.
-- [ ] **ADMIN-07**: UI assets under `internal/admin/ui/` compile into the binary via `//go:embed ui` and are served at `/` through `http.FileServer(http.FS(uiFS))`. No on-disk UI files on Marco's machine.
-- [ ] **ADMIN-08**: The UI lists pending jobs grouped by customer phone, shows send-time in `America/Los_Angeles` (e.g. "Tue 2:30 PM"), and offers a **5-second optimistic undo** on cancel — the DELETE fires only after the timer elapses.
-- [ ] **ADMIN-09**: UI sends `POST /alive` heartbeats every 10 seconds via `navigator.sendBeacon`. Auto-refresh every 15 seconds plus an **R** keyboard shortcut (when no input is focused) for manual refresh.
-- [ ] **ADMIN-10**: "Concord Garage" aesthetic is locked: palette `--ink #1B1B1B`, `--paper #F4EDE0`, `--oxblood #7A2E2A`, `--amber #E8A33D`, `--steel #8B8478`; typography Fraunces + JetBrains Mono; paper-grain SVG noise at 3%; 60 ms entrance stagger on customer cards; no emoji, no purple, no SaaS blue.
+- [x] **ADMIN-01**: `earlscheib.exe --admin` subcommand launches a local HTTP server on `127.0.0.1:<ephemeral>`, prints the bound URL to stdout, and opens the default browser to it.
+- [x] **ADMIN-02**: Local `GET /api/queue` proxy HMAC-signs an empty body and forwards as GET to `{webhook_url}/earlscheibconcord/queue`, returning the remote response verbatim. Secret never leaves the Go process.
+- [x] **ADMIN-03**: Local `POST /api/cancel` proxy accepts `{"id": N}`, re-encodes to canonical compact JSON, HMAC-signs those exact bytes, and forwards as DELETE to `{webhook_url}/earlscheibconcord/queue`.
+- [x] **ADMIN-04**: Server lifecycle — SIGINT/SIGTERM, parent `ctx.Done()`, or 30 s without a `POST /alive` heartbeat triggers `http.Server.Shutdown` with a 5 s grace; process exits 0 on clean shutdown.
+- [x] **ADMIN-05**: Server-side `/earlscheibconcord/queue` **GET** endpoint returns pending jobs (sent=0) as a JSON array ordered by send_at ASC; HMAC-validated with empty body per remote-config precedent; 401 on missing/invalid signature.
+- [x] **ADMIN-06**: Server-side `/earlscheibconcord/queue` **DELETE** endpoint accepts JSON body `{"id": N}`, HMAC-validated over the exact bytes; deletes the row only when sent=0; returns `{"deleted": 1}` on success, `{"error": "not found or already sent"}` with 404 otherwise.
+- [x] **ADMIN-07**: UI assets under `internal/admin/ui/` compile into the binary via `//go:embed ui` and are served at `/` through `http.FileServer(http.FS(uiFS))`. No on-disk UI files on Marco's machine.
+- [x] **ADMIN-08**: The UI lists pending jobs grouped by customer phone, shows send-time in `America/Los_Angeles` (e.g. "Tue 2:30 PM"), and offers a **5-second optimistic undo** on cancel — the DELETE fires only after the timer elapses.
+- [x] **ADMIN-09**: UI sends `POST /alive` heartbeats every 10 seconds via `navigator.sendBeacon`. Auto-refresh every 15 seconds plus an **R** keyboard shortcut (when no input is focused) for manual refresh.
+- [x] **ADMIN-10**: "Concord Garage" aesthetic is locked: palette `--ink #1B1B1B`, `--paper #F4EDE0`, `--oxblood #7A2E2A`, `--amber #E8A33D`, `--steel #8B8478`; typography Fraunces + JetBrains Mono; paper-grain SVG noise at 3%; 60 ms entrance stagger on customer cards; no emoji, no purple, no SaaS blue.
 - [x] **ADMIN-11**: `--admin` is wired into `cmd/earlscheib/main.go` following the existing dispatcher pattern, wrapped in `telemetry.Wrap` so panics are captured, and documented in `docs/admin-ui-guide.md` for Marco.
 
 ## v2 / Deferred Requirements
@@ -171,14 +171,14 @@ WebView2 tray/wizard removed. The Inno Setup installer now handles folder select
 | OPS-05 | Phase 5 | Pending |
 | OPS-06 | Phase 5 | Complete |
 | OPS-07 | Phase 5 | Complete |
-| ADMIN-01 | Phase 5 | Pending |
-| ADMIN-02 | Phase 5 | Pending |
-| ADMIN-03 | Phase 5 | Pending |
-| ADMIN-04 | Phase 5 | Pending |
-| ADMIN-05 | Phase 5 | Pending |
-| ADMIN-06 | Phase 5 | Pending |
-| ADMIN-07 | Phase 5 | Pending |
-| ADMIN-08 | Phase 5 | Pending |
-| ADMIN-09 | Phase 5 | Pending |
-| ADMIN-10 | Phase 5 | Pending |
+| ADMIN-01 | Phase 5 | Complete |
+| ADMIN-02 | Phase 5 | Complete |
+| ADMIN-03 | Phase 5 | Complete |
+| ADMIN-04 | Phase 5 | Complete |
+| ADMIN-05 | Phase 5 | Complete |
+| ADMIN-06 | Phase 5 | Complete |
+| ADMIN-07 | Phase 5 | Complete |
+| ADMIN-08 | Phase 5 | Complete |
+| ADMIN-09 | Phase 5 | Complete |
+| ADMIN-10 | Phase 5 | Complete |
 | ADMIN-11 | Phase 5 | Complete |
