@@ -17,7 +17,10 @@ import (
 )
 
 // Config bundles the values admin.Run needs. Logger may be nil.
-// HeartbeatTimeout / ShutdownGrace default to 30s and 5s when zero.
+// HeartbeatTimeout / ShutdownGrace default to 5m and 5s when zero.
+// 5 minutes forgives Chrome's background-tab throttling of the periodic
+// /alive POST from the browser; short enough that an actually-closed tab
+// still releases the port in a reasonable window.
 // OpenBrowser is nil in tests; nil means "do not attempt to open a browser".
 // URLCh, when non-nil, receives the bound URL exactly once immediately
 // after net.Listen succeeds. Used by tests; production callers leave it nil.
@@ -48,7 +51,7 @@ type server struct {
 // non-http.ErrServerClosed serve errors.
 func Run(ctx context.Context, cfg Config) error {
 	if cfg.HeartbeatTimeout == 0 {
-		cfg.HeartbeatTimeout = 30 * time.Second
+		cfg.HeartbeatTimeout = 5 * time.Minute
 	}
 	if cfg.ShutdownGrace == 0 {
 		cfg.ShutdownGrace = 5 * time.Second

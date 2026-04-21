@@ -231,13 +231,11 @@
   // ---------- Heartbeat ------------------------------------------------
 
   function sendAlive() {
+    // Use fetch (not sendBeacon) — Chrome throttles sendBeacon in backgrounded
+    // tabs, which would let our watchdog kill a perfectly good session just
+    // because Marco alt-tabbed. fetch() with keepalive runs regardless.
     try {
-      if (navigator.sendBeacon) {
-        navigator.sendBeacon('/alive', '');
-      } else {
-        // Fallback for older browsers
-        fetch('/alive', { method: 'POST', keepalive: true, body: '' }).catch(() => {});
-      }
+      fetch('/alive', { method: 'POST', keepalive: true, body: '' }).catch(() => {});
     } catch (_) { /* never throw from heartbeat */ }
   }
 
