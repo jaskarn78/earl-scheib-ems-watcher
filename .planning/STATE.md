@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to plan
-stopped_at: Completed 04-telemetry-remote-config 04-01-PLAN.md
-last_updated: "2026-04-20T23:55:00Z"
+stopped_at: Completed 04-telemetry-remote-config 04-03-PLAN.md
+last_updated: "2026-04-21T00:15:00Z"
 progress:
   total_phases: 4
   completed_phases: 3
@@ -24,7 +24,7 @@ See: .planning/PROJECT.md (updated 2026-04-20)
 ## Current Position
 
 Phase: 4
-Plan: 2 (04-02-PLAN.md complete)
+Plan: 3 (04-03-PLAN.md complete — phase 4 all plans done)
 
 ## Performance Metrics
 
@@ -60,6 +60,7 @@ Plan: 2 (04-02-PLAN.md complete)
 | Phase 03-installer-native-config P02 | 1 | 2 tasks | 2 files |
 | Phase 04-telemetry-remote-config P02 | 3 | 2 tasks | 4 files |
 | Phase 04-telemetry-remote-config P01 | 5 | 2 tasks | 4 files |
+| Phase 04-telemetry-remote-config P03 | 15 | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -108,6 +109,10 @@ Recent decisions affecting current work:
 - [Phase 04-telemetry-remote-config 04-01]: Message truncated to 200 chars max to cap accidental PII exposure per OPS-01
 - [Phase 04-telemetry-remote-config 04-01]: tel re-init inside each command after logger is available gives crash-in-Wrap a real logger
 - [Phase 04-telemetry-remote-config 04-01]: appVersion injected via ldflags; Makefile VERSION default changed to 0.1.0-dev
+- [Phase 04-telemetry-remote-config 04-03]: _validate_hmac(body, sig_header) helper uses hmac.compare_digest for constant-time comparison — prevents timing attacks
+- [Phase 04-telemetry-remote-config 04-03]: GET /remote-config validates HMAC of empty body b"" — matches Go client's webhook.Sign(secret, []byte(""))
+- [Phase 04-telemetry-remote-config 04-03]: 204 No Content when remote_config.json is {} — client skips merge; avoids unnecessary file writes
+- [Phase 04-telemetry-remote-config 04-03]: telemetry.log is JSONL append-only; rotation deferred as tech debt
 
 ### Pending Todos
 
@@ -121,6 +126,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-20T23:55:00Z
-Stopped at: Completed 04-telemetry-remote-config 04-01-PLAN.md
+Last session: 2026-04-21T00:15:00Z
+Stopped at: Completed 04-telemetry-remote-config 04-03-PLAN.md
 Resume file: None

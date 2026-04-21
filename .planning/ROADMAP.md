@@ -14,7 +14,7 @@ Four phases deliver Marco's one-download install. Phase 1 established the cross-
 - [x] **Phase 1: Scaffold + Signing** - Go module, CI cross-compile pipeline, OV cert procurement, and Authenticode signing infrastructure (completed 2026-04-20)
 - [x] **Phase 2: Core Scanner** - Pure-Go CGO-free port of all Python watcher logic (dedup, settle, HMAC, retry, heartbeat, logging) (completed 2026-04-20)
 - [x] **Phase 3: Installer + Native Config** - Inno Setup single-exe installer with install-time folder picker + connection test + Scheduled Task registration; no tray, no WebView2 (completed 2026-04-20)
-- [ ] **Phase 4: Telemetry + Remote Config** - Crash telemetry, remote config poller, and coordinated server-side endpoints
+- [x] **Phase 4: Telemetry + Remote Config** - Crash telemetry, remote config poller, and coordinated server-side endpoints (completed 2026-04-21)
 
 ## Phase Details
 
@@ -70,7 +70,7 @@ Plans:
 Plans:
 - [x] 04-01-PLAN.md — internal/telemetry package (panic recovery + HMAC POST) + wire into main.go runScan/runTest/runStatus
 - [x] 04-02-PLAN.md — internal/remoteconfig (Fetch + Apply) + config.Merge atomic helper + wire into main.go runScan
-- [ ] 04-03-PLAN.md — app.py: /telemetry + /remote-config endpoints + HMAC validation + remote_config.json + Twilio SMS comment
+- [x] 04-03-PLAN.md — app.py: /telemetry + /remote-config endpoints + HMAC validation + remote_config.json + Twilio SMS comment
 
 ## Progress
 
@@ -82,4 +82,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | 1. Scaffold + Signing | 4/4 | Complete | 2026-04-20 |
 | 2. Core Scanner | 5/5 | Complete | 2026-04-20 |
 | 3. Installer + Native Config | 3/3 | Complete   | 2026-04-20 |
-| 4. Telemetry + Remote Config | 2/3 | In progress | - |
+| 4. Telemetry + Remote Config | 3/3 | Complete   | 2026-04-21 |

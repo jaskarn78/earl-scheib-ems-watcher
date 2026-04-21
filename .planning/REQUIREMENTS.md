@@ -70,8 +70,8 @@ WebView2 tray/wizard removed. The Inno Setup installer now handles folder select
 - [ ] **OPS-03**: Background poller in the tray process fetches `{webhook_url}/remote-config` every 15 minutes (HMAC-authenticated GET)
 - [ ] **OPS-04**: Remote config supports ONLY whitelisted fields: `webhook_url`, `log_level`. Never `secret_key`, never `watch_folder`, never arbitrary keys
 - [ ] **OPS-05**: On change, remote config is atomically merged into local `config.ini`; tray logs the change; next `--scan` picks up new values
-- [ ] **OPS-06**: Server-side: `app.py` gains `/earlscheibconcord/telemetry` (POST) and `/earlscheibconcord/remote-config` (GET) endpoints, HMAC-validated like existing routes
-- [ ] **OPS-07**: Document the Twilio WhatsApp-sandbox → production-SMS switch in `app.py` — comment block explaining: change `TWILIO_FROM` in `.env`, remove the `whatsapp:` prefix from To/From in the Twilio API call; no other changes needed
+- [x] **OPS-06**: Server-side: `app.py` gains `/earlscheibconcord/telemetry` (POST) and `/earlscheibconcord/remote-config` (GET) endpoints, HMAC-validated like existing routes
+- [x] **OPS-07**: Document the Twilio WhatsApp-sandbox → production-SMS switch in `app.py` — comment block explaining: change `TWILIO_FROM` in `.env`, remove the `whatsapp:` prefix from To/From in the Twilio API call; no other changes needed
 
 ## v2 / Deferred Requirements
 
@@ -155,5 +155,5 @@ WebView2 tray/wizard removed. The Inno Setup installer now handles folder select
 | OPS-03 | Phase 5 | Pending |
 | OPS-04 | Phase 5 | Pending |
 | OPS-05 | Phase 5 | Pending |
-| OPS-06 | Phase 5 | Pending |
-| OPS-07 | Phase 5 | Pending |
+| OPS-06 | Phase 5 | Complete |
+| OPS-07 | Phase 5 | Complete |
