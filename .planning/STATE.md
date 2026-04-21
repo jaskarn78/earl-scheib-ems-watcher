@@ -142,8 +142,14 @@ None yet.
 - Phase 3 research flag: jchv/go-webview2 Dispatch() threading for background-goroutine → UI updates is error-prone; review examples before coding
 - Phase 5 research flag: /remote-config JSON schema + server-side storage not yet specified; design during Phase 5 plan
 
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260421-shq | Debuggability improvements — scanner error detail, admin Diagnostic panel, server /diagnostic endpoint | 2026-04-21 | b54eb96 | [260421-shq-debuggability-improvements-scanner-admin](./quick/260421-shq-debuggability-improvements-scanner-admin/) |
+
 ## Session Continuity
 
-Last session: 2026-04-21T06:58:24.623Z
-Stopped at: Completed 05-queue-admin-ui 05-04-PLAN.md
+Last session: 2026-04-21T20:30:52.778Z
+Stopped at: Completed quick task 260421-shq — debuggability improvements
 Resume file: None
