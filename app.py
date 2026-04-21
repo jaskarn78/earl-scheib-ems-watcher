@@ -1695,6 +1695,27 @@ class WebhookHandler(BaseHTTPRequestHandler):
             self._send_html(200, html)
             return
 
+        # Operator log-upload trigger (client polls, HMAC-authenticated empty body).
+        # Returns {"upload_log": true} if commands.json has the flag set, else 204.
+        # Trigger from this box: `echo '{"upload_log": true}' > commands.json`
+        if path == "/earlscheibconcord/commands":
+            import os
+            sig = self.headers.get("X-EMS-Signature", "")
+            if not _validate_hmac(b"", sig):
+                self._send_json(401, {"error": "invalid signature"})
+                return
+            app_dir = os.path.dirname(os.path.abspath(__file__))
+            cmd_path = os.path.join(app_dir, "commands.json")
+            try:
+                with open(cmd_path, "r", encoding="utf-8") as f:
+                    commands = json.load(f)
+            except (FileNotFoundError, json.JSONDecodeError):
+                commands = {}
+            if not commands or all(not v for v in commands.values()):
+                self.send_response(204); self.end_headers(); return
+            self._send_json(200, commands)
+            return
+
         # Static screenshot assets referenced by /instructions.
         # Safelist: only specific PNG filenames; no path traversal.
         if path.startswith("/earlscheibconcord/static/"):
@@ -1787,6 +1808,59 @@ class WebhookHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         content_length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(content_length)
+
+        # Operator log upload: client sends tail of ems_watcher.log after seeing
+        # "upload_log": true from /commands. Saved to received_logs/{host}-{iso}.log
+        # and a symlink `received_logs/latest.log` for quick inspection. Clears
+        # commands.json upload_log flag on successful write so the next scan
+        # doesn't re-upload.
+        if self.path.split("?")[0] == "/earlscheibconcord/logs":
+            import os
+            sig = self.headers.get("X-EMS-Signature", "")
+            if not _validate_hmac(raw, sig):
+                self._send_json(401, {"error": "invalid signature"})
+                return
+            try:
+                payload = json.loads(raw.decode("utf-8", errors="replace"))
+                host = str(payload.get("host", "unknown"))[:64]
+                content = str(payload.get("log", ""))
+            except Exception as exc:
+                self._send_json(400, {"error": f"invalid payload: {exc}"})
+                return
+            safe_host = "".join(c if c.isalnum() or c in "-_" else "_" for c in host)
+            app_dir = os.path.dirname(os.path.abspath(__file__))
+            logs_dir = os.path.join(app_dir, "received_logs")
+            os.makedirs(logs_dir, exist_ok=True)
+            ts_str = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            fname = f"{safe_host}-{ts_str}.log"
+            fpath = os.path.join(logs_dir, fname)
+            try:
+                with open(fpath, "w", encoding="utf-8") as f:
+                    f.write(f"# received from {host} at {ts_str}\n# {len(content)} chars\n\n")
+                    f.write(content)
+                # Refresh latest.log symlink
+                latest = os.path.join(logs_dir, "latest.log")
+                try: os.remove(latest)
+                except FileNotFoundError: pass
+                try: os.symlink(fname, latest)
+                except OSError: pass  # non-POSIX fallback unneeded on Linux VM
+                log.info("Log tail received: host=%s bytes=%d path=%s", host, len(content), fname)
+                # Clear the upload_log flag so we don't loop
+                cmd_path = os.path.join(app_dir, "commands.json")
+                try:
+                    with open(cmd_path, "r", encoding="utf-8") as f:
+                        commands = json.load(f)
+                except (FileNotFoundError, json.JSONDecodeError):
+                    commands = {}
+                commands["upload_log"] = False
+                with open(cmd_path, "w", encoding="utf-8") as f:
+                    json.dump(commands, f)
+            except OSError as exc:
+                log.error("Log upload write failed: %s", exc)
+                self._send_json(500, {"error": "write failed"})
+                return
+            self._send_json(200, {"saved": fname})
+            return
 
         if self.path.split("?")[0] == "/earlscheibconcord/telemetry":
             sig = self.headers.get("X-EMS-Signature", "")

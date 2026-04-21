@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jjagpal/earl-scheib-watcher/internal/admin"
+	"github.com/jjagpal/earl-scheib-watcher/internal/commands"
 	"github.com/jjagpal/earl-scheib-watcher/internal/config"
 	"github.com/jjagpal/earl-scheib-watcher/internal/db"
 	"github.com/jjagpal/earl-scheib-watcher/internal/heartbeat"
@@ -119,6 +120,13 @@ func runScan(tel *telemetry.Telemetry) {
 		}
 
 		heartbeat.Send(cfg.WebhookURL, secretKey, logger)
+
+		// Operator commands: best-effort poll, act on any pending command
+		// (today just "upload_log"). Failures here never block the scan.
+		if cmds := commands.Poll(context.Background(), cfg.WebhookURL, secretKey, logger); cmds != nil {
+			hostName, _ := os.Hostname()
+			commands.Handle(context.Background(), cmds, cfg.WebhookURL, secretKey, dataDir, hostName, logger)
+		}
 
 		sendFn := func(filePath string, body []byte) bool {
 			return webhook.Send(webhook.SendConfig{
