@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/jjagpal/earl-scheib-watcher/internal/admin"
 	"github.com/jjagpal/earl-scheib-watcher/internal/config"
 	"github.com/jjagpal/earl-scheib-watcher/internal/db"
 	"github.com/jjagpal/earl-scheib-watcher/internal/heartbeat"
@@ -64,6 +65,8 @@ func main() {
 		runUninstall()
 	case "--configure":
 		runConfigure()
+	case "--admin":
+		runAdmin(tel)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n", os.Args[1])
 		printUsage()
@@ -245,11 +248,56 @@ func runConfigure() {
 	}
 }
 
+// runAdmin launches the local browser-based queue admin UI.
+//
+// Starts an HTTP server on 127.0.0.1:EPHEMERAL, opens Marco's default
+// browser to it, and proxies /api/queue + /api/cancel to the remote
+// webhook server with HMAC-signed requests. Blocks until the browser tab
+// is closed (30 s heartbeat timeout) or Ctrl+C is pressed.
+//
+// Wrapped in tel.Wrap so any panic in the admin server is captured and
+// POSTed to {webhookURL}/telemetry before exit.
+func runAdmin(tel *telemetry.Telemetry) {
+	dataDir := config.DataDir()
+	cfg, _ := config.LoadConfig(filepath.Join(dataDir, "config.ini"))
+	logger := logging.SetupLogging(dataDir, cfg.LogLevel)
+
+	// Re-init telemetry with the real logger now that logging is up.
+	tel = telemetry.Init(cfg.WebhookURL, secretKey, appVersion, logger)
+
+	_ = tel.Wrap(func() error {
+		if cfg.WebhookURL == "" {
+			logger.Error("admin: webhook_url is empty — edit config.ini or re-run installer")
+			fmt.Fprintln(os.Stderr, "admin: webhook_url is empty — cannot proxy to remote queue.")
+			os.Exit(1)
+		}
+
+		logger.Info("admin: starting", "webhook_url", cfg.WebhookURL)
+
+		err := admin.Run(context.Background(), admin.Config{
+			WebhookURL:       cfg.WebhookURL,
+			Secret:           secretKey,
+			AppVersion:       appVersion,
+			Logger:           logger,
+			HeartbeatTimeout: 30 * time.Second,
+			ShutdownGrace:    5 * time.Second,
+			OpenBrowser:      admin.Open,
+		})
+		if err != nil {
+			logger.Error("admin: server exited with error", "err", err)
+			fmt.Fprintf(os.Stderr, "admin: %v\n", err)
+			os.Exit(1)
+		}
+		logger.Info("admin: exited cleanly")
+		return nil
+	})
+}
+
 func runStub(name string) {
 	fmt.Printf("earlscheib %s: not yet implemented\n", name)
 	os.Exit(0)
 }
 
 func printUsage() {
-	fmt.Println("usage: earlscheib [--tray|--scan|--wizard|--test|--status|--install|--uninstall|--configure]")
+	fmt.Println("usage: earlscheib [--tray|--scan|--wizard|--test|--status|--install|--uninstall|--configure|--admin]")
 }
