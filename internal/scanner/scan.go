@@ -16,8 +16,16 @@ import (
 // Sender and SettleOpts are injectable for unit tests.
 type RunConfig struct {
 	WatchFolder string
-	DB          *sql.DB
-	Logger      *slog.Logger
+	// WebhookURL is logged in the per-cycle "scan start" INFO line so ops can
+	// grep a single log line to see which webhook the client was pointed at
+	// on any given scan. Empty string is acceptable (rendered as empty).
+	WebhookURL string
+	// AppVersion is logged in the per-cycle "scan start" INFO line so a log
+	// tail immediately reveals which binary version produced it. Empty string
+	// is acceptable (rendered as empty).
+	AppVersion string
+	DB         *sql.DB
+	Logger     *slog.Logger
 	// Sender is called with (filePath, raw XML bytes); returns true on success.
 	// In production use webhook.Send. In tests, provide a mock.
 	Sender     func(filePath string, body []byte) bool
@@ -31,7 +39,11 @@ type RunConfig struct {
 func Candidates(dir string, logger *slog.Logger) []string {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		logger.Warn("Cannot read watch folder", "dir", dir, "err", err)
+		// "path" (not "dir") is the contract ops rely on to grep for the bad
+		// folder; "err" carries the verbatim OS error (ENOENT / permission /
+		// network-share timeout) so Marco's 5-minute cycles produce actionable
+		// log lines without a round-trip.
+		logger.Warn("Cannot read watch folder", "path", dir, "err", err)
 		return []string{}
 	}
 
@@ -58,6 +70,17 @@ func Run(cfg RunConfig) (int, int) {
 	}
 
 	logger := cfg.Logger
+
+	// Per-cycle startup line: one record with the three values ops most
+	// commonly needs when debugging live (which folder, which webhook, which
+	// binary). Emitted BEFORE the folder probe so it fires even when the
+	// scan bails out on a missing directory.
+	logger.Info("scan start",
+		"watch_folder", cfg.WatchFolder,
+		"webhook", cfg.WebhookURL,
+		"version", cfg.AppVersion,
+	)
+
 	candidates := Candidates(cfg.WatchFolder, logger)
 	if len(candidates) == 0 {
 		logger.Debug("No .xml/.ems files found", "folder", cfg.WatchFolder)

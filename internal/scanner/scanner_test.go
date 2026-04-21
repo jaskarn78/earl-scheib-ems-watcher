@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"context"
 	"database/sql"
 	"log/slog"
 	"os"
@@ -12,6 +13,54 @@ import (
 
 	"github.com/jjagpal/earl-scheib-watcher/internal/db"
 )
+
+// recordingHandler is a slog.Handler that captures every Record into a slice
+// (protected by a mutex) so tests can assert on level, message, and attrs.
+type recordingHandler struct {
+	mu      sync.Mutex
+	records []slog.Record
+}
+
+func (h *recordingHandler) Enabled(_ context.Context, _ slog.Level) bool { return true }
+
+func (h *recordingHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.records = append(h.records, r.Clone())
+	return nil
+}
+
+func (h *recordingHandler) WithAttrs(_ []slog.Attr) slog.Handler { return h }
+func (h *recordingHandler) WithGroup(_ string) slog.Handler      { return h }
+
+// snapshot returns a copy of the captured records.
+func (h *recordingHandler) snapshot() []slog.Record {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make([]slog.Record, len(h.records))
+	copy(out, h.records)
+	return out
+}
+
+// findRecord returns the first captured record whose Message == msg, or nil.
+func findRecord(recs []slog.Record, msg string) *slog.Record {
+	for i := range recs {
+		if recs[i].Message == msg {
+			return &recs[i]
+		}
+	}
+	return nil
+}
+
+// attrMap flattens a record's attrs into a map[string]any for easy assertions.
+func attrMap(r slog.Record) map[string]any {
+	m := make(map[string]any)
+	r.Attrs(func(a slog.Attr) bool {
+		m[a.Key] = a.Value.Any()
+		return true
+	})
+	return m
+}
 
 // testLogger returns an slog.Logger backed by testing.T for output capture.
 func testLogger(t *testing.T) *slog.Logger {
@@ -350,5 +399,138 @@ func TestRunMissingFolder(t *testing.T) {
 	proc, errs := Run(cfg)
 	if proc != 0 || errs != 0 {
 		t.Fatalf("expected (0, 0) for missing folder, got (%d, %d)", proc, errs)
+	}
+}
+
+// ---- Debuggability tests (Task 1: 260421-shq) ------------------------------
+
+// TestRunEmitsScanStartINFO: every Run() call emits exactly one INFO record
+// at cycle start with keys watch_folder, webhook, version — for ops grep.
+func TestRunEmitsScanStartINFO(t *testing.T) {
+	t.Parallel()
+	h := &recordingHandler{}
+	logger := slog.New(h)
+	d := openTestDB(t)
+	dir := t.TempDir()
+
+	cfg := RunConfig{
+		WatchFolder: dir,
+		WebhookURL:  "https://example.test/earlscheibconcord",
+		AppVersion:  "0.4.0-test",
+		DB:          d,
+		Logger:      logger,
+		Sender:      func(_ string, _ []byte) bool { return true },
+		SettleOpts:  SettleOptions{Samples: 2, Interval: 1 * time.Millisecond},
+	}
+
+	_, _ = Run(cfg)
+
+	rec := findRecord(h.snapshot(), "scan start")
+	if rec == nil {
+		t.Fatal(`expected a record with message "scan start"; got none`)
+	}
+	if rec.Level != slog.LevelInfo {
+		t.Fatalf("scan start: expected level INFO, got %s", rec.Level)
+	}
+	attrs := attrMap(*rec)
+	if got, want := attrs["watch_folder"], dir; got != want {
+		t.Errorf("scan start: watch_folder=%v; want %q", got, want)
+	}
+	if got, want := attrs["webhook"], cfg.WebhookURL; got != want {
+		t.Errorf("scan start: webhook=%v; want %q", got, want)
+	}
+	if got, want := attrs["version"], cfg.AppVersion; got != want {
+		t.Errorf("scan start: version=%v; want %q", got, want)
+	}
+}
+
+// TestCandidatesLogsPathAndError: Candidates on a non-existent directory
+// logs a WARN record whose attrs include the exact path AND a non-nil err
+// whose Error() string contains the path (proves the OS error is forwarded,
+// not replaced with a generic message).
+func TestCandidatesLogsPathAndError(t *testing.T) {
+	t.Parallel()
+	h := &recordingHandler{}
+	logger := slog.New(h)
+
+	missing := filepath.Join(t.TempDir(), "does-not-exist-9z")
+	_ = Candidates(missing, logger)
+
+	rec := findRecord(h.snapshot(), "Cannot read watch folder")
+	if rec == nil {
+		t.Fatal(`expected WARN record "Cannot read watch folder"; got none`)
+	}
+	if rec.Level != slog.LevelWarn {
+		t.Fatalf("expected WARN, got %s", rec.Level)
+	}
+	attrs := attrMap(*rec)
+
+	// Spec uses key "path" (renamed from the old "dir") so ops greps/dashboards
+	// know exactly which directory the OS rejected.
+	gotPath, ok := attrs["path"].(string)
+	if !ok {
+		t.Fatalf(`expected attr "path" to be a string; attrs=%v`, attrs)
+	}
+	if gotPath != missing {
+		t.Errorf(`path attr=%q; want %q`, gotPath, missing)
+	}
+
+	// err must be the real underlying OS error — not nil, not a sanitized string.
+	gotErr, ok := attrs["err"].(error)
+	if !ok {
+		// slog may surface the error via its String representation depending on
+		// handler rendering; accept both but reject nil/empty.
+		if s, isStr := attrs["err"].(string); isStr {
+			if s == "" {
+				t.Fatalf("err attr empty")
+			}
+			if !strings.Contains(s, missing) {
+				t.Errorf("err string %q does not contain path %q — OS error was not forwarded", s, missing)
+			}
+			return
+		}
+		t.Fatalf(`expected attr "err" to be an error or string; got %T (%v)`, attrs["err"], attrs["err"])
+	}
+	if gotErr == nil {
+		t.Fatal("err is nil — OS error swallowed")
+	}
+	if !strings.Contains(gotErr.Error(), missing) {
+		t.Errorf("err %q does not contain path %q — OS error not forwarded verbatim", gotErr.Error(), missing)
+	}
+}
+
+// TestRunEmptyFolderStillRecordsRun: regression — new INFO line does not change
+// the (0, 0) + "no files" note semantics for an empty watch folder.
+func TestRunEmptyFolderStillRecordsRun(t *testing.T) {
+	t.Parallel()
+	h := &recordingHandler{}
+	logger := slog.New(h)
+	d := openTestDB(t)
+	dir := t.TempDir()
+
+	cfg := RunConfig{
+		WatchFolder: dir,
+		WebhookURL:  "https://example.test/earlscheibconcord",
+		AppVersion:  "0.4.0-test",
+		DB:          d,
+		Logger:      logger,
+		Sender:      func(_ string, _ []byte) bool { return true },
+		SettleOpts:  SettleOptions{Samples: 2, Interval: 1 * time.Millisecond},
+	}
+
+	proc, errs := Run(cfg)
+	if proc != 0 || errs != 0 {
+		t.Fatalf("empty folder: expected (0, 0), got (%d, %d)", proc, errs)
+	}
+
+	// "no files" note must be recorded in the runs table.
+	var note string
+	if err := d.QueryRow(
+		"SELECT note FROM runs ORDER BY rowid DESC LIMIT 1",
+	).Scan(&note); err != nil {
+		t.Fatalf("query last run note: %v", err)
+	}
+	if note != "no files" {
+		t.Errorf(`runs.note = %q; want "no files"`, note)
 	}
 }

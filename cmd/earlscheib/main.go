@@ -138,6 +138,8 @@ func runScan(tel *telemetry.Telemetry) {
 
 		processed, errors := scanner.Run(scanner.RunConfig{
 			WatchFolder: cfg.WatchFolder,
+			WebhookURL:  cfg.WebhookURL,
+			AppVersion:  appVersion,
 			DB:          sqlDB,
 			Logger:      logger,
 			Sender:      sendFn,
