@@ -38,13 +38,36 @@ func (h *emsHandler) Enabled(_ context.Context, level slog.Level) bool {
 	return level >= h.level
 }
 
-// Handle formats and writes the log record.
+// Handle formats and writes the log record. Attributes are appended as
+// space-separated key=value pairs (quoted when the value contains whitespace),
+// so structured fields survive the Python-style single-line format.
 func (h *emsHandler) Handle(_ context.Context, r slog.Record) error {
 	levelStr := levelLabel(r.Level)
 	timestamp := r.Time.UTC().Format("2006-01-02 15:04:05")
-	line := fmt.Sprintf("%s [%s] %s\n", timestamp, levelStr, r.Message)
-	_, err := fmt.Fprint(h.w, line)
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s [%s] %s", timestamp, levelStr, r.Message)
+	r.Attrs(func(a slog.Attr) bool {
+		fmt.Fprintf(&b, " %s=%s", a.Key, formatAttrValue(a.Value))
+		return true
+	})
+	b.WriteByte('\n')
+	_, err := fmt.Fprint(h.w, b.String())
 	return err
+}
+
+// formatAttrValue renders an slog value for single-line output. Strings and
+// errors are %q-quoted so whitespace and control chars stay on-line; everything
+// else uses the default slog formatter.
+func formatAttrValue(v slog.Value) string {
+	switch v.Kind() {
+	case slog.KindString:
+		return fmt.Sprintf("%q", v.String())
+	case slog.KindAny:
+		if err, ok := v.Any().(error); ok {
+			return fmt.Sprintf("%q", err.Error())
+		}
+	}
+	return v.String()
 }
 
 // WithAttrs returns a new handler with added attributes (no-op for our minimal format).
