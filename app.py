@@ -1271,29 +1271,28 @@ class WebhookHandler(BaseHTTPRequestHandler):
             self._send_json(200, remote_cfg)
             return
 
+        if path == "/earlscheibconcord/queue":
+            sig = self.headers.get("X-EMS-Signature", "")
+            # GET signs empty body b"" — matches remote-config precedent
+            if not _validate_hmac(b"", sig):
+                self._send_json(401, {"error": "invalid signature"})
+                return
+            con = get_db()
+            try:
+                cur = con.cursor()
+                cur.execute(
+                    "SELECT id, doc_id, job_type, phone, name, send_at, created_at "
+                    "FROM jobs WHERE sent = 0 ORDER BY send_at ASC"
+                )
+                rows = [dict(r) for r in cur.fetchall()]
+            finally:
+                con.close()
+            self._send_json(200, rows)
+            return
+
         # Default: 404
         self.send_response(404); self.end_headers()
         return
-
-        # Status (internal only)
-        # Default: JSON status
-        con = get_db()
-        try:
-            cur = con.cursor()
-            cur.execute("SELECT COUNT(*) FROM jobs WHERE sent = 0")
-            pending = cur.fetchone()[0]
-            cur.execute("SELECT COUNT(*) FROM jobs WHERE sent = 1")
-            sent = cur.fetchone()[0]
-        finally:
-            con.close()
-
-        self._send_json(200, {
-            "service": "earl-scheib-followup",
-            "status": "ok",
-            "pending_jobs": pending,
-            "sent_jobs": sent,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        })
 
     # ------------------------------------------------------------------
     def do_POST(self):
