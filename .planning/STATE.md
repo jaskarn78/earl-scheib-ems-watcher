@@ -2,11 +2,11 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Milestone complete
-stopped_at: Completed 04-telemetry-remote-config 04-03-PLAN.md
-last_updated: "2026-04-21T00:06:18.321Z"
+status: Phase 5 added (post-audit extension)
+stopped_at: Phase 5 — Queue Admin UI — planning pending
+last_updated: "2026-04-21T00:40:00.000Z"
 progress:
-  total_phases: 4
+  total_phases: 5
   completed_phases: 4
   total_plans: 15
   completed_plans: 15
@@ -113,6 +113,10 @@ Recent decisions affecting current work:
 - [Phase 04-telemetry-remote-config 04-03]: GET /remote-config validates HMAC of empty body b"" — matches Go client's webhook.Sign(secret, []byte(""))
 - [Phase 04-telemetry-remote-config 04-03]: 204 No Content when remote_config.json is {} — client skips merge; avoids unnecessary file writes
 - [Phase 04-telemetry-remote-config 04-03]: telemetry.log is JSONL append-only; rotation deferred as tech debt
+
+### Roadmap Evolution
+
+- 2026-04-21: Phase 5 added (Queue Admin UI) — post-v1.0 audit extension. Client-side launcher (`earlscheib.exe --admin`) opens local-browser SPA backed by a new server-side `/queue` endpoint on app.py. Run `/gsd:ui-phase 5` before `/gsd:plan-phase 5`.
 
 ### Pending Todos
 

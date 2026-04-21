@@ -15,6 +15,7 @@ Four phases deliver Marco's one-download install. Phase 1 established the cross-
 - [x] **Phase 2: Core Scanner** - Pure-Go CGO-free port of all Python watcher logic (dedup, settle, HMAC, retry, heartbeat, logging) (completed 2026-04-20)
 - [x] **Phase 3: Installer + Native Config** - Inno Setup single-exe installer with install-time folder picker + connection test + Scheduled Task registration; no tray, no WebView2 (completed 2026-04-20)
 - [x] **Phase 4: Telemetry + Remote Config** - Crash telemetry, remote config poller, and coordinated server-side endpoints (completed 2026-04-21)
+- [ ] **Phase 5: Queue Admin UI** - Marco-facing window to view & cancel queued outbound SMS messages; `earlscheib.exe --admin` launches a local HTTP server + opens default browser to an embedded SPA; new server-side `/queue` endpoint reads/deletes against jobs.db
 
 ## Phase Details
 
@@ -72,6 +73,20 @@ Plans:
 - [x] 04-02-PLAN.md — internal/remoteconfig (Fetch + Apply) + config.Merge atomic helper + wire into main.go runScan
 - [x] 04-03-PLAN.md — app.py: /telemetry + /remote-config endpoints + HMAC validation + remote_config.json + Twilio SMS comment
 
+### Phase 5: Queue Admin UI
+**Goal**: `earlscheib.exe --admin` launches a local HTTP server, opens Marco's default browser, and shows a clean modern UI listing all queued/pending outbound SMS messages from the server's `jobs.db`, grouped by customer with scheduled send time and repair-job reference. Marco can cancel a queued message before it sends.
+**Depends on**: Phase 4 (reuses HMAC signing + config patterns)
+**Requirements**: TBD (to be defined during discuss/UI-SPEC)
+**Success Criteria** (what must be TRUE):
+  1. Running `earlscheib.exe --admin` on Windows starts a local HTTP server bound to `127.0.0.1:RANDOM_PORT`, opens the default browser to that URL, and serves a single-page app
+  2. The page lists all pending (not yet sent) SMS jobs from the server's `jobs.db` — grouped by customer, showing scheduled send time, customer name, phone, repair-job reference
+  3. Marco can cancel a queued message via a single click; the server removes it from `jobs.db` and the UI updates
+  4. New server endpoint `/earlscheibconcord/queue` (GET + DELETE) is HMAC-authenticated like existing routes; rejects unsigned with 401
+  5. The UI is visually distinct and polished — not generic SaaS templates; per `ui-brand.md` (committed palette, distinctive typography, intentional layout)
+  6. Closing the browser tab / pressing Ctrl+C on the launcher exits the HTTP server cleanly
+**Plans**: TBD
+**UI hint**: yes (run /gsd:ui-phase 5 before /gsd:plan-phase 5)
+
 ## Progress
 
 **Execution Order:**
@@ -83,3 +98,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | 2. Core Scanner | 5/5 | Complete | 2026-04-20 |
 | 3. Installer + Native Config | 3/3 | Complete   | 2026-04-20 |
 | 4. Telemetry + Remote Config | 3/3 | Complete   | 2026-04-21 |
+| 5. Queue Admin UI | 0/TBD | Not started | - |
+
