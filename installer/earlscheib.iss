@@ -287,6 +287,10 @@ begin
     'The Earl Scheib Watcher monitors this folder for new estimates. ' +
     'It must be a local folder path (not a mapped network drive letter).',
     False, '');
+  // CreateInputDirPage does not add a directory-edit field automatically —
+  // Add() is required before Values[0] is valid. Without this, setting
+  // FolderPage.Values[0] below raises "List index out of bounds (0)."
+  FolderPage.Add('CCC ONE export folder:');
 
   DetectedPath := DetectCCCOnePath();
   if DetectedPath <> '' then
