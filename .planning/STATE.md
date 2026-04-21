@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Phase 5 added (post-audit extension)
-stopped_at: Phase 5 — Queue Admin UI — planning pending
-last_updated: "2026-04-21T00:40:00.000Z"
+status: Ready to execute
+stopped_at: Completed 05-queue-admin-ui 05-01-PLAN.md
+last_updated: "2026-04-21T06:45:03.836Z"
 progress:
   total_phases: 5
   completed_phases: 4
-  total_plans: 15
-  completed_plans: 15
+  total_plans: 19
+  completed_plans: 16
 ---
 
 # Project State
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-20)
 
 **Core value:** Marco downloads one file, clicks through a 3-step wizard, and the tray icon turns green — forever after, follow-up texts and review requests go out automatically with zero ongoing attention.
-**Current focus:** Phase 02 — Core Scanner
+**Current focus:** Phase 05 — queue-admin-ui
 
 ## Current Position
 
-Phase: 04
-Plan: Not started
+Phase: 05 (queue-admin-ui) — EXECUTING
+Plan: 2 of 4
 
 ## Performance Metrics
 
@@ -61,6 +61,7 @@ Plan: Not started
 | Phase 04-telemetry-remote-config P02 | 3 | 2 tasks | 4 files |
 | Phase 04-telemetry-remote-config P01 | 5 | 2 tasks | 4 files |
 | Phase 04-telemetry-remote-config P03 | 15 | 2 tasks | 3 files |
+| Phase 05-queue-admin-ui P01 | 3 | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -113,6 +114,9 @@ Recent decisions affecting current work:
 - [Phase 04-telemetry-remote-config 04-03]: GET /remote-config validates HMAC of empty body b"" — matches Go client's webhook.Sign(secret, []byte(""))
 - [Phase 04-telemetry-remote-config 04-03]: 204 No Content when remote_config.json is {} — client skips merge; avoids unnecessary file writes
 - [Phase 04-telemetry-remote-config 04-03]: telemetry.log is JSONL append-only; rotation deferred as tech debt
+- [Phase 05-queue-admin-ui]: GET /queue response is bare JSON array, not wrapped object — CONTEXT.md canonical spec
+- [Phase 05-queue-admin-ui]: DELETE /queue response {"deleted": 1} integer count; 404 collapses missing-row and already-sent into same error message
+- [Phase 05-queue-admin-ui]: do_DELETE on WebhookHandler dispatched automatically by Python http.server — no route registration needed
 
 ### Roadmap Evolution
 
@@ -130,6 +134,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-21T00:15:00Z
-Stopped at: Completed 04-telemetry-remote-config 04-03-PLAN.md
+Last session: 2026-04-21T06:45:03.832Z
+Stopped at: Completed 05-queue-admin-ui 05-01-PLAN.md
 Resume file: None
