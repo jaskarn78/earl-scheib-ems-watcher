@@ -1800,6 +1800,60 @@ class WebhookHandler(BaseHTTPRequestHandler):
             self._send_json(200, rows)
             return
 
+        # Live debug snapshot — consumed by Claude (not Marco). Returns heartbeat
+        # freshness, current commands.json state (READ-ONLY), log tail of the
+        # most recently uploaded client log, and the count of logs received.
+        # HMAC-authed so only holders of CCC_SECRET can inspect.
+        if path == "/earlscheibconcord/diagnostic":
+            import os as _os
+            sig = self.headers.get("X-EMS-Signature", "")
+            if not _validate_hmac(b"", sig):
+                self._send_json(401, {"error": "invalid signature"})
+                return
+
+            ts = LAST_HEARTBEAT["ts"]
+            host = LAST_HEARTBEAT["host"]
+            seconds_ago = int(time.time()) - ts if ts else None
+            last_heartbeat = {"ts": ts, "host": host, "seconds_ago": seconds_ago}
+            client_online = bool(ts and (int(time.time()) - ts) < 600)
+
+            app_dir = _os.path.dirname(_os.path.abspath(__file__))
+
+            # Read commands.json — READ-ONLY, never written by this handler.
+            cmd_path = _os.path.join(app_dir, "commands.json")
+            try:
+                with open(cmd_path, "r", encoding="utf-8") as f:
+                    commands_state = json.load(f)
+            except (FileNotFoundError, json.JSONDecodeError):
+                commands_state = {}
+
+            # Tail the newest non-symlink *.log in received_logs/ (last 20 lines).
+            logs_dir = _os.path.join(app_dir, "received_logs")
+            tail = ""
+            received_logs_count = 0
+            try:
+                entries = [
+                    _os.path.join(logs_dir, f) for f in _os.listdir(logs_dir)
+                    if f.endswith(".log") and f != "latest.log"
+                ]
+                received_logs_count = len(entries)
+                if entries:
+                    latest = max(entries, key=_os.path.getmtime)
+                    with open(latest, "r", encoding="utf-8", errors="replace") as fh:
+                        lines = fh.readlines()
+                    tail = "".join(lines[-20:])
+            except OSError:
+                tail = ""
+
+            self._send_json(200, {
+                "last_heartbeat": last_heartbeat,
+                "client_online": client_online,
+                "commands_state": commands_state,
+                "recent_log_tail": tail,
+                "received_logs_count": received_logs_count,
+            })
+            return
+
         # Default: 404
         self.send_response(404); self.end_headers()
         return
