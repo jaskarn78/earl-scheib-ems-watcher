@@ -5,6 +5,7 @@ status: draft
 shadcn_initialized: false
 preset: none
 created: 2026-04-20
+revised: 2026-04-20
 ---
 
 # Phase 5 — Queue Admin UI: Design Contract
@@ -44,16 +45,22 @@ The Queue Admin UI reads like a foreman's manifest pinned to a shop wall — not
 - JetBrains Mono is a monospace body font — unusual for a data UI, intentional here. Phone numbers, timestamps, and repair refs are all alphanumeric codes. Monospace makes them scannable in columns even without a formal table, gives a technical precision feel, and avoids the "Inter + any display font" cliché the project explicitly bans.
 - This pairing has never appeared in any GSD project before.
 
-### Type Scale
+### Type Scale — EXACTLY 4 SIZES
 
-| Role | Size | Weight | Line Height | Font |
-|------|------|--------|-------------|------|
-| Page title (h1) | 48px | 400 (Bebas Neue is always bold optically) | 1.0 | Bebas Neue |
-| Section heading / customer name (h2) | 22px | 400 | 1.1 | Bebas Neue |
-| Job type label / badge (h3) | 11px | 700 | 1.0 | JetBrains Mono (uppercase, 0.12em letter-spacing) |
-| Body / message preview | 13px | 400 | 1.6 | JetBrains Mono |
-| Data fields (phone, time, ref) | 12px | 400 | 1.4 | JetBrains Mono |
-| Caption / metadata | 11px | 400 | 1.4 | JetBrains Mono |
+| Role | Size | Weight | Line Height | Font | Notes |
+|------|------|--------|-------------|------|-------|
+| Page title (h1) AND empty/error state headings | **48px** | 400 (optically bold) | 1.0 | Bebas Neue | `QUEUE`, `QUEUE CLEAR`, `CANNOT REACH SERVER` — same size, context differentiates |
+| Customer group heading AND pending count badge in header | **22px** | 400 | 1.1 | Bebas Neue | Customer name (h2) and `{N} PENDING` count reuse this size |
+| Body / message preview | **14px** | 400 | 1.6 | JetBrains Mono | Job body preview text, inline cancel failure message |
+| Data fields, badge labels, captions, metadata | **12px** | 400 | 1.4 | JetBrains Mono | Phone, time, repair ref, `PENDING` badge label, `Updated {N}s ago`, group message count, `REF:` label |
+
+**Removed sizes (do not use):** 36px, 20px, 13px, 11px. These are eliminated entirely. All content formerly at those sizes maps to one of the four sizes above:
+- 36px empty/error headings → 48px (reuses page title)
+- 20px pending count in header → 22px (reuses customer group heading)
+- 13px body text → 14px
+- 11px captions, badge labels, button labels → 12px
+
+**Button label font:** `CANCEL`, `CONFIRM?`, `FAILED — RETRY?` — Bebas Neue is inappropriate for small button text; use JetBrains Mono **12px**, weight 700, uppercase, `letter-spacing: 0.10em`. This is a deliberate exception to the display-font-for-headings rule: button labels are functional controls, not headings.
 
 **Loading:** Both fonts loaded via Google Fonts CDN with `display=swap`. Single `<link>` in `<head>`. No self-hosting required for a local-only tool.
 
@@ -68,11 +75,10 @@ The Queue Admin UI reads like a foreman's manifest pinned to a shop wall — not
 | Dominant (60%) | `#111210` | `--bg` | Page background — near-black with a warm graphite undertone, not pure black |
 | Secondary (30%) | `#1C1B18` | `--surface` | Customer group blocks, the "sheet" each customer's jobs sit on |
 | Tertiary | `#252420` | `--surface-hover` | Row hover state |
-| Accent (10%) | `#CC2200` | `--red` | Cancel button only. Pending badge only. Nothing else. |
-| Accent muted | `#3A1A14` | `--red-dim` | Cancel button background at rest (dark red fill, not flat) |
-| Text primary | `#E8E4DC` | `--text` | Body copy, customer names — warm off-white, not pure white |
-| Text secondary | `#7A7570` | `--text-muted` | Labels, captions, phone numbers, timestamps |
-| Text accent | `#CC2200` | `--text-red` | Pending badge text |
+| Accent (10%) | `#CC2200` | `--red` | Cancel button (armed + hover). Error state heading. Nothing else. |
+| Accent muted | `#3A1A14` | `--red-dim` | Cancel button background at rest. PENDING badge background. |
+| Text primary | `#E8E4DC` | `--text` | Body copy, customer names, PENDING badge label — warm off-white, not pure white |
+| Text secondary | `#8E8883` | `--text-muted` | Labels, captions, phone numbers, timestamps (lightened from #7A7570 for contrast) |
 | Divider | `#2E2C28` | `--rule` | Horizontal rules between customer groups |
 | Border | `#333028` | `--border` | Thin borders on surface blocks |
 | Success flash | `#1A3A1A` | `--success-bg` | Transient background on successful cancel |
@@ -80,11 +86,16 @@ The Queue Admin UI reads like a foreman's manifest pinned to a shop wall — not
 **Background treatment:** NOT a solid flat color. The `--bg` surface has a subtle grain overlay — a 150px×150px SVG noise pattern tiled at 3% opacity over the background. This adds depth without adding any assets (the SVG is a 12-line inline data URI). No gradient mesh. The grain is the texture, aligned with the "oil-stained paper" metaphor.
 
 **Contrast ratios (WCAG AA):**
-- `--text` (#E8E4DC) on `--bg` (#111210): ~14.2:1 — AAA
-- `--text-muted` (#7A7570) on `--bg` (#111210): ~5.1:1 — AA
-- `--text` on `--surface` (#1C1B18): ~12.8:1 — AAA
-- `--text-red` (#CC2200) on `--red-dim` (#3A1A14): ~4.6:1 — AA (badge only, large text)
-- White (#FFF) on `--red` (#CC2200) for cancel button text: ~5.8:1 — AA
+- `--text` (#E8E4DC) on `--bg` (#111210): 14.2:1 — AAA
+- `--text-muted` (#8E8883) on `--bg` (#111210): **5.4:1** — AA (was #7A7570 at ~4.1:1, which failed; now passing)
+- `--text` on `--surface` (#1C1B18): 12.8:1 — AAA
+- `--text` (#E8E4DC) on `--red-dim` (#3A1A14) for PENDING badge label: **12.4:1** — AAA (badge text is off-white, not red-on-dark-red)
+- White (#FFF) on `--red` (#CC2200) for cancel button text: 5.5:1 — AA
+- `--red` (#CC2200) on `--bg` (#111210) for error heading at 48px: 3.4:1 — passes AA for large text (48px Bebas Neue qualifies as large text under WCAG)
+
+**PENDING badge color correction note:** The previous spec declared `--text-red` (#CC2200) as badge text on `--red-dim` (#3A1A14), yielding ~2.8:1, which fails WCAG AA at any size. The badge text is now `--text` (#E8E4DC) on `--red-dim` (#3A1A14). The badge's dark-red fill already signals urgency; off-white label text is more legible and equally on-brand.
+
+**Inline cancel-failure message color:** The error sentence `Could not cancel. Server error — try again.` renders in `--text` (#E8E4DC) at 14px, not in `--red`. The button label `FAILED — RETRY?` and the armed row's red tint already communicate error state. Using `--red` for the sentence below would fail AA at 12px (3.4:1 on #111210) and is unnecessary for comprehension.
 
 ---
 
@@ -98,13 +109,14 @@ No formal CSS grid framework. Single-column layout, max-width 860px, centered, w
 Page
 └── Header bar (full width, 72px tall)
     ├── Left: "QUEUE" title (Bebas Neue 48px) + "Earl Scheib Auto Body" caption
-    └── Right: pending count badge + last-updated timestamp
+    └── Right: pending count badge (Bebas Neue 22px, --red) + last-updated timestamp
 └── Content area (max-width 860px, centered)
     ├── Customer Group Block (repeats)
-    │   ├── Customer header: NAME + PHONE (thick top border, 3px, --rule color)
+    │   ├── Customer header: NAME (Bebas Neue 22px) + PHONE (JetBrains Mono 12px)
+    │   │   3px top border in --rule. Right-aligned phone. Below: "2 messages pending" (12px --text-muted)
     │   └── Job Row (repeats within customer)
-    │       ├── Left: job-type badge + message body preview
-    │       ├── Center: send-at time + repair ref
+    │       ├── Left: job-type badge (12px JetBrains Mono 700 uppercase) + message body preview (14px)
+    │       ├── Center: send-at time (12px) + repair ref (12px)
     │       └── Right: Cancel button
     └── Empty state (full content area)
 ```
@@ -121,11 +133,11 @@ Each job is a row separated by a thin 1px `--rule` line. No rounded cards, no bo
 
 ### Page Header / Branding
 
-The header is a full-bleed dark bar (same `--bg` color, with a 1px bottom border in `--rule`). Left side: "QUEUE" in Bebas Neue 48px, tracked slightly wide (`letter-spacing: 0.04em`), followed immediately on the same baseline by a 12px `--text-muted` caption "Earl Scheib Auto Body · Message Queue". Right side: a pending count like "4 PENDING" in Bebas Neue 20px with the `--red` color, plus a `--text-muted` caption "Updated 12s ago". The header does NOT scroll away — it is `position: sticky; top: 0`.
+The header is a full-bleed dark bar (same `--bg` color, with a 1px bottom border in `--rule`). Left side: "QUEUE" in Bebas Neue 48px, tracked slightly wide (`letter-spacing: 0.04em`), followed immediately on the same baseline by a 12px `--text-muted` caption "Earl Scheib Auto Body · Message Queue". Right side: a pending count like "4 PENDING" in Bebas Neue **22px** with the `--red` color, plus a `--text-muted` caption "Updated 12s ago" in JetBrains Mono 12px. The header does NOT scroll away — it is `position: sticky; top: 0`.
 
 ### Customer Group Header
 
-3px top border in `--rule` color (decorative ledger line). Customer name in Bebas Neue 22px (`--text`). Phone number in JetBrains Mono 12px (`--text-muted`) on the same line, right-aligned. Below the name, a subtle count: "2 messages pending" in 11px `--text-muted`.
+3px top border in `--rule` color (decorative ledger line). Customer name in Bebas Neue 22px (`--text`). Phone number in JetBrains Mono 12px (`--text-muted`) on the same line, right-aligned. Below the name, a subtle count: "2 messages pending" in 12px `--text-muted`.
 
 ### Empty State
 
@@ -137,7 +149,7 @@ Nothing scheduled — texts will go out
 as new estimates and closed jobs come in.
 ```
 
-"QUEUE CLEAR" in Bebas Neue 36px `--text-muted`. Body in JetBrains Mono 13px `--text-muted`, line-height 1.6.
+"QUEUE CLEAR" in Bebas Neue **48px** `--text-muted`. Body in JetBrains Mono 14px `--text-muted`, line-height 1.6.
 
 ### Error State (server unreachable)
 
@@ -149,7 +161,7 @@ The queue server is not responding.
 Check that app.py is running, then refresh this page.
 ```
 
-"CANNOT REACH SERVER" in Bebas Neue 36px `--red`. Body in JetBrains Mono 13px `--text-muted`.
+"CANNOT REACH SERVER" in Bebas Neue **48px** `--red`. Body in JetBrains Mono 14px `--text-muted`.
 
 ### Density Decision: Industrial-Mid
 
@@ -182,10 +194,11 @@ Implementation: CSS `@keyframes fadeUp` applied with inline `animation-delay` se
 **Rationale:** An undo toast means the cancel fires immediately (potentially allowing an SMS to slip through during the undo window if the scheduler fires within those 3 seconds). A modal is too heavy for a single-row action and interrupts Marco's scanning. The 2-step click keeps the confirmation inline at the row level, is reversible by doing nothing, and is fast to confirm intentionally. This pattern is common in destructive CLI tools and aligns with the "industrial precision" aesthetic.
 
 **Step 1 (armed):**
-- Button label changes from "CANCEL" to "CONFIRM?" (same Bebas Neue 11px uppercase)
+- Button label changes from "CANCEL" to "CONFIRM?" (JetBrains Mono 12px, weight 700, uppercase)
 - Button background changes from `--red-dim` to `--red` (full red)
 - A thin red progress bar appears below the button, animating from full width to zero over 4 seconds (CSS `animation: countdown 4s linear forwards`)
 - Job row background shifts to a very subtle red tint (`rgba(204, 34, 0, 0.06)`)
+- Focus moves to the cancel button (see Accessibility §10) so that Enter or Space immediately fires Step 2
 
 **Step 2 (confirmed):**
 - DELETE request sent to server
@@ -195,8 +208,8 @@ Implementation: CSS `@keyframes fadeUp` applied with inline `animation-delay` se
 
 **Cancel fails (server error):**
 - Row stays visible.
-- Button label becomes "FAILED — RETRY?" in `--red`.
-- A one-line error message appears below the row in 11px JetBrains Mono `--red`: "Could not cancel. Server error — try again."
+- Button label becomes "FAILED — RETRY?" in white on `--red` background.
+- A one-line error message appears below the row in 14px JetBrains Mono `--text` (#E8E4DC): "Could not cancel. Server error — try again."
 - Button disarms after 6 seconds and returns to normal "CANCEL" state.
 
 **Disarm (4-second timeout, user did nothing):**
@@ -391,10 +404,10 @@ Exceptions:
 |------|-------|-------|
 | Dominant (60%) | `#111210` | Page background |
 | Secondary (30%) | `#1C1B18` | Customer group surface blocks |
-| Accent (10%) | `#CC2200` | Cancel button (armed + hover). Pending badge. Error state heading. Count badge. Nothing else. |
+| Accent (10%) | `#CC2200` | Cancel button (armed + hover). Error state heading. Nothing else. |
 | Destructive | `#CC2200` | Same as accent — cancel is the only destructive action |
 
-Accent reserved for: cancel button (armed state), pending count in header, error state "CANNOT REACH SERVER" heading, `PENDING` badge on each job row. NOT on: links, hover effects, section dividers, non-destructive interactive elements.
+Accent reserved for: cancel button (armed state), pending count badge in header, error state "CANNOT REACH SERVER" heading. NOT on: PENDING badge label (that is off-white on dark-red), links, hover effects, section dividers, non-destructive interactive elements.
 
 ---
 
@@ -413,7 +426,44 @@ Accent reserved for: cancel button (armed state), pending count in header, error
 
 ---
 
-## 12. Registry Safety
+## 12. Accessibility
+
+### Focus States
+
+The page has exactly one interactive element per job row: the cancel button. Tab order is designed for keyboard-first cancellation.
+
+**Focus ring specification:**
+
+```css
+.cancel-button:focus-visible {
+  outline: 2px solid var(--red);
+  outline-offset: 2px;
+}
+```
+
+Use `:focus-visible` (not `:focus`) so the ring appears only for keyboard navigation, not after mouse clicks. The 2px `--red` ring is consistent with the button's armed-state color, making the focused element immediately recognizable without introducing a new color.
+
+**Tab order:**
+
+1. The sticky header is skipped entirely — no focusable elements in the header. The pending count and timestamp are display-only.
+2. Tab moves through job rows top-to-bottom.
+3. Within each row, focus lands directly on the cancel button — the only interactive element. The job type badge, message preview, time, and repair ref are not focusable.
+4. No skip-link is needed: the header contains no interactive controls, so the first Tab keypress lands immediately on the first cancel button in the content area.
+
+**Keyboard cancel flow:**
+
+After Step 1 (arm): focus is explicitly set (via `element.focus()`) to the cancel button of the armed row. This means the user can immediately press Enter or Space to fire Step 2 without a second mouse click or repositioning. This makes the 2-step cancel fully keyboard-operable.
+
+```
+Tab → [Cancel button, Row 1]  →  Space/Enter: arm  →  focus stays  →  Space/Enter: confirm
+Tab → [Cancel button, Row 2]  →  Space/Enter: arm  →  ...
+```
+
+**Disarm via keyboard:** Pressing Escape while a button is armed disarms it (same as the 4-second timeout). Button returns to rest state, focus remains on the button.
+
+---
+
+## 13. Registry Safety
 
 | Registry | Blocks Used | Safety Gate |
 |----------|-------------|-------------|
