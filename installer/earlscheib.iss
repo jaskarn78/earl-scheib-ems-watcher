@@ -196,38 +196,32 @@ begin
 end;
 
 // ---------------------------------------------------------------
-// RunConnectionTest: writes a temp config.ini to %TEMP%, runs
-// earlscheib.exe --test with that config (via EARLSCHEIB_DATA_DIR),
-// captures exit code. Returns True on exit code 0.
+// RunConnectionTest: HTTPS ping to the webhook status endpoint via
+// Inno Setup's built-in DownloadTemporaryFile. Tests the real failure
+// mode (no internet / server down) without needing {app}\earlscheib.exe
+// — {app} is NOT expandable during pre-install wizard pages.
+// Returns True if we can reach the server and it returns a 2xx body.
 // ---------------------------------------------------------------
 function RunConnectionTest(WatchFolder: String): Boolean;
 var
-  TempConfig: String;
-  Lines: TArrayOfString;
-  ExePath: String;
-  ResultCode: Integer;
+  DownloadedBytes: Int64;
 begin
   Result := False;
-  TempConfig := ExpandConstant('{tmp}\earlscheib-install-test.ini');
-  SetArrayLength(Lines, 4);
-  Lines[0] := '[watcher]';
-  Lines[1] := 'watch_folder = ' + WatchFolder;
-  Lines[2] := 'webhook_url = https://support.jjagpal.me/earlscheibconcord';
-  Lines[3] := 'log_level = INFO';
-  SaveStringsToFile(TempConfig, Lines, False);
-
-  ExePath := ExpandConstant('{app}\earlscheib.exe');
-  // EARLSCHEIB_DATA_DIR env var tells the binary to use our temp dir
-  SetEnvironmentVariable('EARLSCHEIB_DATA_DIR', ExpandConstant('{tmp}'));
-  // Copy temp config to tmp dir as config.ini so LoadConfig picks it up
-  FileCopy(TempConfig, ExpandConstant('{tmp}\config.ini'), False);
-
-  if Exec(ExePath, '--test', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then begin
-    Result := (ResultCode = 0);
+  try
+    // Hit the unauthenticated /status JSON endpoint. Any 2xx = internet
+    // works and our server is reachable. Saved to {tmp}, deleted after.
+    DownloadedBytes := DownloadTemporaryFile(
+      'https://support.jjagpal.me/earlscheibconcord/status',
+      'earlscheib-connection-check.json',
+      '',
+      nil);
+    Result := (DownloadedBytes > 0);
+  except
+    // Any exception — DNS failure, TLS problem, HTTP non-2xx — means
+    // the shop's PC cannot reach the service. Return False; the wizard
+    // surfaces "Continue anyway / Retry" via the existing UI branch.
+    Result := False;
   end;
-
-  // Clean up env override
-  SetEnvironmentVariable('EARLSCHEIB_DATA_DIR', '');
 end;
 
 // ---------------------------------------------------------------
