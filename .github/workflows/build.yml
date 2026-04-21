@@ -112,6 +112,55 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
+  build-portable:
+    name: Build portable zip
+    runs-on: ubuntu-latest
+    needs: [build-windows]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install zip
+        run: sudo apt-get install -y zip
+
+      - name: Download Windows binary artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: earlscheib-windows-amd64
+          path: dist/
+
+      - name: Rename artifact to earlscheib.exe
+        run: mv dist/earlscheib-artifact.exe dist/earlscheib.exe
+
+      - name: Build portable zip (skip build-windows step; binary already in dist/)
+        run: |
+          mkdir -p dist/portable-staging/tasks
+          cp dist/earlscheib.exe                                    dist/portable-staging/earlscheib.exe
+          cp portable/setup.cmd                                      dist/portable-staging/setup.cmd
+          cp portable/uninstall.cmd                                  dist/portable-staging/uninstall.cmd
+          cp portable/README.txt                                     dist/portable-staging/README.txt
+          cp portable/config.ini.template                            dist/portable-staging/config.ini.template
+          cp portable/tasks/EarlScheibEMSWatcher-SYSTEM.xml         dist/portable-staging/tasks/
+          cp portable/tasks/EarlScheibEMSWatcher-User.xml           dist/portable-staging/tasks/
+          cd dist/portable-staging && zip -r ../EarlScheibWatcher-Portable.zip .
+          rm -rf dist/portable-staging
+
+      - name: Verify portable zip exists
+        run: |
+          test -f dist/EarlScheibWatcher-Portable.zip || \
+            (echo "ERROR: portable zip not produced" && exit 1)
+          ls -lh dist/EarlScheibWatcher-Portable.zip
+          unzip -l dist/EarlScheibWatcher-Portable.zip
+
+      - name: Upload portable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: earlscheib-portable
+          path: dist/EarlScheibWatcher-Portable.zip
+          retention-days: 7
+          if-no-files-found: error
+
   build-installer:
     name: Build installer (Inno Setup)
     runs-on: ubuntu-latest
