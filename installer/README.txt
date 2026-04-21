@@ -2,6 +2,14 @@ Earl Scheib EMS Watcher
 =======================
 Version 1.0
 
+DISTRIBUTION NOTE: The portable ZIP (EarlScheibWatcher-Portable.zip) is the
+recommended distribution. It does not require a traditional installer and
+causes fewer SmartScreen prompts on unrecognized machines. See portable/README.txt
+for setup instructions.
+
+The Inno Setup installer (EarlScheibWatcher-Setup.exe) described in this file
+is an alternative for teams that prefer a traditional Windows installer experience.
+
 WHAT THIS DOES
 --------------
 The EMS Watcher automatically sends CCC ONE estimate files to the

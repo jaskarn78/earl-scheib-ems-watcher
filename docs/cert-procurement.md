@@ -1,7 +1,13 @@
 # OV Code-Signing Certificate — Procurement Checklist
 
-**Must complete before Phase 4 ships.**
-Lead time: 2–10 business days (CA identity validation).
+> **Code signing is now optional.** The portable-zip distribution
+> (`EarlScheibWatcher-Portable.zip`) sidesteps most SmartScreen friction
+> without a certificate — unsigned `.cmd` launchers and `.exe` binaries
+> extracted from a zip archive trigger meaningfully less SmartScreen scrutiny
+> than an unsigned installer `.exe`. Only procure an OV certificate if
+> SmartScreen warnings become a real blocker for end users.
+
+Lead time if you do proceed: 2–10 business days (CA identity validation).
 
 ## Why This Is Required
 
