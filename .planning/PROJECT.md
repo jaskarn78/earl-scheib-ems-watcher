@@ -43,7 +43,7 @@ If everything else slips, this must hold: a single installer that configures CCC
 
 - **Messaging logic in the Windows client** — server handles Twilio. Client only POSTs BMS XML. *Why: separation of concerns; swapping WhatsApp sandbox → real SMS happens server-side only.*
 - **macOS or Linux client builds** — Marco runs Windows; CCC ONE is Windows-only. *Why: no user need.*
-- **Web-based admin UI for Marco** — the system tray + wizard is the entire UX. *Why: scope creep; Marco doesn't need it.*
+- **Web-based admin UI for settings / configuration** — settings changes still happen via `--configure` or installer re-run. *Why: no user-editable config surface Marco can break.* (Phase 5 added a **read-only queue admin UI** via `earlscheib.exe --admin` — an opt-in local-browser SPA with a single cancel action — see ADMIN-01..11. This is in scope and distinct from a settings UI.)
 - **Multi-shop / multi-tenant support** — one-off deployment for Earl Scheib Concord. *Why: single customer today; revisit if others want it.*
 - **Customer-facing features (reply handling, opt-outs beyond STOP)** — handled server-side via Twilio's built-in STOP keyword. *Why: server concern.*
 - **Rewriting the webhook server** — already in production, reliable. *Why: focus on the client.*
@@ -91,6 +91,7 @@ If everything else slips, this must hold: a single installer that configures CCC
 | Add crash telemetry (beyond PRD) | Without it, broken installs are invisible until Marco calls — delaying fixes | — Pending |
 | Add remote config override (beyond PRD) | Webhook URL / secret rotation without re-running installer; critical for production ops | — Pending |
 | Linux dev + Windows VM test (dev workflow) | Developer's environment; Go cross-compile makes this cheap | — Pending |
+| Phase 5: scope_reversal — read-only queue admin UI in scope | A **read-only queue admin UI** with a single cancel action is now in scope. Settings/config UI remains out of scope. Implemented via `earlscheib.exe --admin` → local browser SPA + existing HMAC auth. See ADMIN-01..11. | — Completed Phase 5 |
 
 ## Evolution
 

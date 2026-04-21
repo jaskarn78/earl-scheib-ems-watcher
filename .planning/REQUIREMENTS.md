@@ -73,6 +73,20 @@ WebView2 tray/wizard removed. The Inno Setup installer now handles folder select
 - [x] **OPS-06**: Server-side: `app.py` gains `/earlscheibconcord/telemetry` (POST) and `/earlscheibconcord/remote-config` (GET) endpoints, HMAC-validated like existing routes
 - [x] **OPS-07**: Document the Twilio WhatsApp-sandbox → production-SMS switch in `app.py` — comment block explaining: change `TWILIO_FROM` in `.env`, remove the `whatsapp:` prefix from To/From in the Twilio API call; no other changes needed
 
+### Queue Admin UI (ADMIN)
+
+- [ ] **ADMIN-01**: `earlscheib.exe --admin` subcommand launches a local HTTP server on `127.0.0.1:<ephemeral>`, prints the bound URL to stdout, and opens the default browser to it.
+- [ ] **ADMIN-02**: Local `GET /api/queue` proxy HMAC-signs an empty body and forwards as GET to `{webhook_url}/earlscheibconcord/queue`, returning the remote response verbatim. Secret never leaves the Go process.
+- [ ] **ADMIN-03**: Local `POST /api/cancel` proxy accepts `{"id": N}`, re-encodes to canonical compact JSON, HMAC-signs those exact bytes, and forwards as DELETE to `{webhook_url}/earlscheibconcord/queue`.
+- [ ] **ADMIN-04**: Server lifecycle — SIGINT/SIGTERM, parent `ctx.Done()`, or 30 s without a `POST /alive` heartbeat triggers `http.Server.Shutdown` with a 5 s grace; process exits 0 on clean shutdown.
+- [ ] **ADMIN-05**: Server-side `/earlscheibconcord/queue` **GET** endpoint returns pending jobs (sent=0) as a JSON array ordered by send_at ASC; HMAC-validated with empty body per remote-config precedent; 401 on missing/invalid signature.
+- [ ] **ADMIN-06**: Server-side `/earlscheibconcord/queue` **DELETE** endpoint accepts JSON body `{"id": N}`, HMAC-validated over the exact bytes; deletes the row only when sent=0; returns `{"deleted": 1}` on success, `{"error": "not found or already sent"}` with 404 otherwise.
+- [ ] **ADMIN-07**: UI assets under `internal/admin/ui/` compile into the binary via `//go:embed ui` and are served at `/` through `http.FileServer(http.FS(uiFS))`. No on-disk UI files on Marco's machine.
+- [ ] **ADMIN-08**: The UI lists pending jobs grouped by customer phone, shows send-time in `America/Los_Angeles` (e.g. "Tue 2:30 PM"), and offers a **5-second optimistic undo** on cancel — the DELETE fires only after the timer elapses.
+- [ ] **ADMIN-09**: UI sends `POST /alive` heartbeats every 10 seconds via `navigator.sendBeacon`. Auto-refresh every 15 seconds plus an **R** keyboard shortcut (when no input is focused) for manual refresh.
+- [ ] **ADMIN-10**: "Concord Garage" aesthetic is locked: palette `--ink #1B1B1B`, `--paper #F4EDE0`, `--oxblood #7A2E2A`, `--amber #E8A33D`, `--steel #8B8478`; typography Fraunces + JetBrains Mono; paper-grain SVG noise at 3%; 60 ms entrance stagger on customer cards; no emoji, no purple, no SaaS blue.
+- [ ] **ADMIN-11**: `--admin` is wired into `cmd/earlscheib/main.go` following the existing dispatcher pattern, wrapped in `telemetry.Wrap` so panics are captured, and documented in `docs/admin-ui-guide.md` for Marco.
+
 ## v2 / Deferred Requirements
 
 - Auto-update mechanism for the client binary
@@ -88,7 +102,7 @@ WebView2 tray/wizard removed. The Inno Setup installer now handles folder select
 - **Messaging logic in the Windows client** — Twilio integration is server-side only; client only POSTs BMS XML. *Why: separation of concerns.*
 - **Rewriting the webhook server** — `app.py` is in production and reliable; only the two new endpoints above are added. *Why: focus on the client.*
 - **macOS / Linux builds** — Marco runs Windows; CCC ONE is Windows-only. *Why: no user need.*
-- **Web-based admin UI** — tray + wizard is the entire UX. *Why: scope creep.*
+- **Web-based admin UI for settings / configuration** — settings changes still happen via `--configure` or installer re-run. *Why: no user-editable config surface Marco can break.* (Phase 5 added a **read-only queue inspector** with a single cancel action — see ADMIN-01..11 — which is in scope and distinct from a settings UI.)
 - **User-editable secret key** — baked into binary only. *Why: prevents Marco from accidentally breaking auth.*
 - **Third-party SaaS crash reporter (Sentry etc.)** — telemetry goes to existing webhook server only. *Why: data egress risk with BMS PII.*
 - **Customer-facing reply handling / STOP flow** — handled server-side via Twilio STOP keyword. *Why: server concern.*
@@ -157,3 +171,14 @@ WebView2 tray/wizard removed. The Inno Setup installer now handles folder select
 | OPS-05 | Phase 5 | Pending |
 | OPS-06 | Phase 5 | Complete |
 | OPS-07 | Phase 5 | Complete |
+| ADMIN-01 | Phase 5 | Pending |
+| ADMIN-02 | Phase 5 | Pending |
+| ADMIN-03 | Phase 5 | Pending |
+| ADMIN-04 | Phase 5 | Pending |
+| ADMIN-05 | Phase 5 | Pending |
+| ADMIN-06 | Phase 5 | Pending |
+| ADMIN-07 | Phase 5 | Pending |
+| ADMIN-08 | Phase 5 | Pending |
+| ADMIN-09 | Phase 5 | Pending |
+| ADMIN-10 | Phase 5 | Pending |
+| ADMIN-11 | Phase 5 | Pending |
