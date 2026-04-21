@@ -2,13 +2,17 @@ Earl Scheib EMS Watcher
 =======================
 Version 1.0
 
-DISTRIBUTION NOTE: The portable ZIP (EarlScheibWatcher-Portable.zip) is the
-recommended distribution. It does not require a traditional installer and
-causes fewer SmartScreen prompts on unrecognized machines. See portable/README.txt
-for setup instructions.
+DOWNLOAD
+--------
+Get the latest installer from:
 
-The Inno Setup installer (EarlScheibWatcher-Setup.exe) described in this file
-is an alternative for teams that prefer a traditional Windows installer experience.
+  https://support.jjagpal.me/earlscheibconcord/download
+
+The download is a single file, EarlScheibWatcher-Setup.exe (about 10 MB).
+Save it to your Desktop or Downloads folder, then double-click to run.
+
+If you prefer not to run a traditional installer, a portable ZIP
+(EarlScheibWatcher-Portable.zip) is also available -- contact App Support.
 
 WHAT THIS DOES
 --------------

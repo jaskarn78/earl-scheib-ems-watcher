@@ -18,6 +18,7 @@ telemetry.log
 installer/Output/
 /earlscheib
 /earlscheib.exe
+/EarlScheibWatcher-Setup.exe
 earl-scheib-ems-watcher.zip*
 
 # Runtime data / logs

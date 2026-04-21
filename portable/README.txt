@@ -2,10 +2,18 @@ Earl Scheib EMS Watcher
 =======================
 Version 1.0 -- Portable ZIP Edition
 
-RECOMMENDED DISTRIBUTION. If you received an EarlScheibWatcher-Portable.zip
-file, this is the right way to install. The Inno Setup installer
-(EarlScheibWatcher-Setup.exe) is an alternative for teams that prefer a
-traditional Windows installer.
+ALTERNATIVE DISTRIBUTION. Most shops should use the signed installer
+(EarlScheibWatcher-Setup.exe) from:
+
+  https://support.jjagpal.me/earlscheibconcord/download
+
+This portable ZIP is a no-installer alternative: unzip it anywhere and
+run setup.cmd. Useful when:
+  - You cannot run .exe installers on the PC (corporate IT restriction)
+  - You prefer not to add an "Add/Remove Programs" entry
+  - You want to see what's being installed before running it
+
+Functionally identical to the installer version once setup.cmd finishes.
 
 
 WHAT THIS DOES
