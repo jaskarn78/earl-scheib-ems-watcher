@@ -15,7 +15,7 @@ Four phases deliver Marco's one-download install. Phase 1 established the cross-
 - [x] **Phase 2: Core Scanner** - Pure-Go CGO-free port of all Python watcher logic (dedup, settle, HMAC, retry, heartbeat, logging) (completed 2026-04-20)
 - [x] **Phase 3: Installer + Native Config** - Inno Setup single-exe installer with install-time folder picker + connection test + Scheduled Task registration; no tray, no WebView2 (completed 2026-04-20)
 - [x] **Phase 4: Telemetry + Remote Config** - Crash telemetry, remote config poller, and coordinated server-side endpoints (completed 2026-04-21)
-- [ ] **Phase 5: Queue Admin UI** - Marco-facing window to view & cancel queued outbound SMS messages; `earlscheib.exe --admin` launches a local HTTP server + opens default browser to an embedded SPA; new server-side `/queue` endpoint reads/deletes against jobs.db
+- [x] **Phase 5: Queue Admin UI** - Marco-facing window to view & cancel queued outbound SMS messages; `earlscheib.exe --admin` launches a local HTTP server + opens default browser to an embedded SPA; new server-side `/queue` endpoint reads/deletes against jobs.db (completed 2026-04-21)
 
 ## Phase Details
 
@@ -89,7 +89,7 @@ Plans:
 - [x] 05-01-PLAN.md — Server-side /earlscheibconcord/queue GET + DELETE on app.py + pytest coverage + dead-code cleanup
 - [x] 05-02-PLAN.md — internal/admin Go package: local HTTP server, HMAC-signing proxy, cross-platform launcher, tests
 - [x] 05-03-PLAN.md — Embedded UI assets: index.html + main.css + main.js (Concord Garage aesthetic)
-- [ ] 05-04-PLAN.md — Wire --admin into cmd/earlscheib/main.go + docs/admin-ui-guide.md + REQUIREMENTS.md ADMIN-01..11 block
+- [x] 05-04-PLAN.md — Wire --admin into cmd/earlscheib/main.go + docs/admin-ui-guide.md + REQUIREMENTS.md ADMIN-01..11 block
 **UI hint**: yes (run /gsd:ui-phase 5 before /gsd:plan-phase 5)
 
 ## Progress
@@ -103,5 +103,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 2. Core Scanner | 5/5 | Complete | 2026-04-20 |
 | 3. Installer + Native Config | 3/3 | Complete   | 2026-04-20 |
 | 4. Telemetry + Remote Config | 3/3 | Complete   | 2026-04-21 |
-| 5. Queue Admin UI | 3/4 | In Progress|  |
+| 5. Queue Admin UI | 4/4 | Complete   | 2026-04-21 |
 

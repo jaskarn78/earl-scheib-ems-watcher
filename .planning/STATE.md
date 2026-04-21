@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Ready to execute
-stopped_at: Completed 05-queue-admin-ui 05-02-PLAN.md
-last_updated: "2026-04-21T06:51:47.365Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 05-queue-admin-ui 05-04-PLAN.md
+last_updated: "2026-04-21T06:58:24.627Z"
 progress:
   total_phases: 5
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 19
-  completed_plans: 18
+  completed_plans: 19
 ---
 
 # Project State
@@ -64,6 +64,7 @@ Plan: 4 of 4
 | Phase 05-queue-admin-ui P01 | 3 | 3 tasks | 5 files |
 | Phase 05-queue-admin-ui P03 | 3 | 3 tasks | 3 files |
 | Phase 05-queue-admin-ui P02 | 249 | 3 tasks | 8 files |
+| Phase 05-queue-admin-ui P04 | 4 | 4 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -123,6 +124,9 @@ Recent decisions affecting current work:
 - [Phase 05-queue-admin-ui]: URLCh chan<- string in admin.Config is the sole test-startup mechanism — no stdout capture or port scanning
 - [Phase 05-queue-admin-ui]: admin proxy re-marshals incoming JSON to canonical compact form before HMAC signing (no whitespace; stable field order)
 - [Phase 05-queue-admin-ui]: signal.NotifyContext wraps parent ctx with SIGINT/SIGTERM for clean integration with the heartbeat watchdog context
+- [Phase 05-queue-admin-ui]: runAdmin uses context.Background() — admin.Run manages its own SIGINT watchdog via signal.NotifyContext internally
+- [Phase 05-queue-admin-ui]: ui_test.go sequenced in plan 05-04 (Wave 3) to compile after both 05-02 (uiFS) and 05-03 (UI assets) — prevents parallel-wave compile race
+- [Phase 05-queue-admin-ui]: Go 1.25.0 already in go.mod satisfies Go 1.22+ for min builtin; no go.mod bump needed for ui_test.go
 
 ### Roadmap Evolution
 
@@ -140,6 +144,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-21T06:51:47.362Z
-Stopped at: Completed 05-queue-admin-ui 05-02-PLAN.md
+Last session: 2026-04-21T06:58:24.623Z
+Stopped at: Completed 05-queue-admin-ui 05-04-PLAN.md
 Resume file: None

@@ -85,7 +85,7 @@ WebView2 tray/wizard removed. The Inno Setup installer now handles folder select
 - [ ] **ADMIN-08**: The UI lists pending jobs grouped by customer phone, shows send-time in `America/Los_Angeles` (e.g. "Tue 2:30 PM"), and offers a **5-second optimistic undo** on cancel — the DELETE fires only after the timer elapses.
 - [ ] **ADMIN-09**: UI sends `POST /alive` heartbeats every 10 seconds via `navigator.sendBeacon`. Auto-refresh every 15 seconds plus an **R** keyboard shortcut (when no input is focused) for manual refresh.
 - [ ] **ADMIN-10**: "Concord Garage" aesthetic is locked: palette `--ink #1B1B1B`, `--paper #F4EDE0`, `--oxblood #7A2E2A`, `--amber #E8A33D`, `--steel #8B8478`; typography Fraunces + JetBrains Mono; paper-grain SVG noise at 3%; 60 ms entrance stagger on customer cards; no emoji, no purple, no SaaS blue.
-- [ ] **ADMIN-11**: `--admin` is wired into `cmd/earlscheib/main.go` following the existing dispatcher pattern, wrapped in `telemetry.Wrap` so panics are captured, and documented in `docs/admin-ui-guide.md` for Marco.
+- [x] **ADMIN-11**: `--admin` is wired into `cmd/earlscheib/main.go` following the existing dispatcher pattern, wrapped in `telemetry.Wrap` so panics are captured, and documented in `docs/admin-ui-guide.md` for Marco.
 
 ## v2 / Deferred Requirements
 
@@ -181,4 +181,4 @@ WebView2 tray/wizard removed. The Inno Setup installer now handles folder select
 | ADMIN-08 | Phase 5 | Pending |
 | ADMIN-09 | Phase 5 | Pending |
 | ADMIN-10 | Phase 5 | Pending |
-| ADMIN-11 | Phase 5 | Pending |
+| ADMIN-11 | Phase 5 | Complete |
