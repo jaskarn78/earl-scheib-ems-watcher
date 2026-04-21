@@ -88,7 +88,7 @@ Plans:
 Plans:
 - [x] 05-01-PLAN.md — Server-side /earlscheibconcord/queue GET + DELETE on app.py + pytest coverage + dead-code cleanup
 - [ ] 05-02-PLAN.md — internal/admin Go package: local HTTP server, HMAC-signing proxy, cross-platform launcher, tests
-- [ ] 05-03-PLAN.md — Embedded UI assets: index.html + main.css + main.js (Concord Garage aesthetic)
+- [x] 05-03-PLAN.md — Embedded UI assets: index.html + main.css + main.js (Concord Garage aesthetic)
 - [ ] 05-04-PLAN.md — Wire --admin into cmd/earlscheib/main.go + docs/admin-ui-guide.md + REQUIREMENTS.md ADMIN-01..11 block
 **UI hint**: yes (run /gsd:ui-phase 5 before /gsd:plan-phase 5)
 
@@ -103,5 +103,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 2. Core Scanner | 5/5 | Complete | 2026-04-20 |
 | 3. Installer + Native Config | 3/3 | Complete   | 2026-04-20 |
 | 4. Telemetry + Remote Config | 3/3 | Complete   | 2026-04-21 |
-| 5. Queue Admin UI | 1/4 | In Progress|  |
+| 5. Queue Admin UI | 2/4 | In Progress|  |
 
