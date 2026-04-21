@@ -76,7 +76,7 @@ Plans:
 ### Phase 5: Queue Admin UI
 **Goal**: `earlscheib.exe --admin` launches a local HTTP server, opens Marco's default browser, and shows a clean modern UI listing all queued/pending outbound SMS messages from the server's `jobs.db`, grouped by customer with scheduled send time and repair-job reference. Marco can cancel a queued message before it sends.
 **Depends on**: Phase 4 (reuses HMAC signing + config patterns)
-**Requirements**: TBD (to be defined during discuss/UI-SPEC)
+**Requirements**: ADMIN-01, ADMIN-02, ADMIN-03, ADMIN-04, ADMIN-05, ADMIN-06, ADMIN-07, ADMIN-08, ADMIN-09, ADMIN-10, ADMIN-11
 **Success Criteria** (what must be TRUE):
   1. Running `earlscheib.exe --admin` on Windows starts a local HTTP server bound to `127.0.0.1:RANDOM_PORT`, opens the default browser to that URL, and serves a single-page app
   2. The page lists all pending (not yet sent) SMS jobs from the server's `jobs.db` — grouped by customer, showing scheduled send time, customer name, phone, repair-job reference
@@ -84,13 +84,18 @@ Plans:
   4. New server endpoint `/earlscheibconcord/queue` (GET + DELETE) is HMAC-authenticated like existing routes; rejects unsigned with 401
   5. The UI is visually distinct and polished — not generic SaaS templates; per `ui-brand.md` (committed palette, distinctive typography, intentional layout)
   6. Closing the browser tab / pressing Ctrl+C on the launcher exits the HTTP server cleanly
-**Plans**: TBD
+**Plans**: 4 plans
+Plans:
+- [ ] 05-01-PLAN.md — Server-side /earlscheibconcord/queue GET + DELETE on app.py + pytest coverage + dead-code cleanup
+- [ ] 05-02-PLAN.md — internal/admin Go package: local HTTP server, HMAC-signing proxy, cross-platform launcher, tests
+- [ ] 05-03-PLAN.md — Embedded UI assets: index.html + main.css + main.js (Concord Garage aesthetic)
+- [ ] 05-04-PLAN.md — Wire --admin into cmd/earlscheib/main.go + docs/admin-ui-guide.md + REQUIREMENTS.md ADMIN-01..11 block
 **UI hint**: yes (run /gsd:ui-phase 5 before /gsd:plan-phase 5)
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4
+Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -98,5 +103,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | 2. Core Scanner | 5/5 | Complete | 2026-04-20 |
 | 3. Installer + Native Config | 3/3 | Complete   | 2026-04-20 |
 | 4. Telemetry + Remote Config | 3/3 | Complete   | 2026-04-21 |
-| 5. Queue Admin UI | 0/TBD | Not started | - |
+| 5. Queue Admin UI | 0/4 | Not started | - |
 
