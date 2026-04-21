@@ -1375,6 +1375,44 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
         self._send_json(200, {"status": "ok", "doc_id": doc_id, "doc_status": doc_status})
 
+    # ------------------------------------------------------------------
+    def do_DELETE(self):
+        if self.path.split("?")[0] != "/earlscheibconcord/queue":
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        content_length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(content_length) if content_length > 0 else b""
+
+        sig = self.headers.get("X-EMS-Signature", "")
+        # DELETE signs the exact JSON body bytes received — matches telemetry precedent
+        if not _validate_hmac(raw, sig):
+            self._send_json(401, {"error": "invalid signature"})
+            return
+
+        try:
+            body = json.loads(raw.decode("utf-8"))
+            job_id = int(body["id"])
+        except (ValueError, KeyError, json.JSONDecodeError, UnicodeDecodeError):
+            self._send_json(400, {"error": "invalid JSON"})
+            return
+
+        con = get_db()
+        try:
+            cur = con.cursor()
+            cur.execute("DELETE FROM jobs WHERE id = ? AND sent = 0", (job_id,))
+            con.commit()
+            affected = cur.rowcount
+        finally:
+            con.close()
+
+        if affected == 1:
+            log.info("Job cancelled via admin UI: id=%s", job_id)
+            self._send_json(200, {"deleted": 1})
+        else:
+            self._send_json(404, {"error": "not found or already sent"})
+
 
 # ---------------------------------------------------------------------------
 # Main
