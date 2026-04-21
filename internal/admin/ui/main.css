@@ -1,0 +1,356 @@
+/* ==========================================================
+   Earl Scheib Concord — Queue Admin UI
+   "Concord Garage" — editorial / print-inspired.
+   ========================================================== */
+
+:root {
+  /* Brand palette — locked per CONTEXT.md */
+  --ink: #1B1B1B;        /* near-black body text */
+  --paper: #F4EDE0;      /* warm cream background */
+  --oxblood: #7A2E2A;    /* deep garage-door red accent */
+  --amber: #E8A33D;      /* caution / undo pill */
+  --steel: #8B8478;      /* muted gutter text */
+
+  /* Derived surfaces */
+  --paper-tint: #EEE5D5;  /* slightly darker than --paper for cards */
+  --rule: #D8CDB8;        /* horizontal rule, divider */
+  --shadow: 0 1px 0 rgba(0,0,0,0.04), 0 6px 20px -8px rgba(122,46,42,0.15);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+}
+
+body {
+  background-color: var(--paper);
+  color: var(--ink);
+  font-family: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 14px;
+  line-height: 1.5;
+  position: relative;
+}
+
+/* Paper-grain overlay — fractalNoise SVG at 3% opacity, fixed position */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='150' height='150' viewBox='0 0 150 150'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.1 0 0 0 0 0.1 0 0 0 0 0.1 0 0 0 0.03 0'/></filter><rect width='150' height='150' filter='url(%23n)'/></svg>");
+  background-size: 150px 150px;
+  opacity: 1; /* the SVG itself already alpha-bakes the 3% — keep as authored */
+}
+
+body > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ============== Topbar ============== */
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background-color: var(--paper);
+  padding: 20px 32px 16px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.topbar::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 4px;
+  background-color: var(--oxblood);
+}
+
+.wordmark {
+  font-family: "Fraunces", Georgia, serif;
+  font-weight: 500;
+  font-size: 28px;
+  color: var(--ink);
+  margin: 0;
+  line-height: 1.1;
+  letter-spacing: -0.005em;
+}
+
+.wordmark em {
+  font-style: italic;
+  color: var(--oxblood);
+  font-weight: 500;
+}
+
+.wordmark-sep {
+  color: var(--steel);
+  font-style: normal;
+  margin: 0 2px;
+}
+
+.topbar-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--steel);
+  font-size: 12px;
+}
+
+.refresh-caption {
+  font-variant-numeric: tabular-nums;
+}
+
+.refresh-btn {
+  background: transparent;
+  border: 1px solid var(--rule);
+  color: var(--steel);
+  width: 28px; height: 28px;
+  border-radius: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+.refresh-btn:hover,
+.refresh-btn:focus-visible {
+  color: var(--oxblood);
+  border-color: var(--oxblood);
+  outline: none;
+}
+.refresh-btn.spinning svg {
+  animation: spin 700ms linear;
+}
+@keyframes spin { to { transform: rotate(-360deg); } }
+
+/* ============== Queue container ============== */
+
+.queue {
+  max-width: 740px;
+  margin: 0 auto;
+  padding: 32px 32px 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ============== Customer card ============== */
+
+.customer {
+  background-color: var(--paper-tint);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  padding: 20px 24px 12px;
+  box-shadow: var(--shadow);
+
+  /* Entrance stagger: JS sets --i per card */
+  opacity: 0;
+  animation: fadeUp 420ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation-delay: calc(var(--i, 0) * 60ms);
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.customer-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px dashed var(--rule);
+}
+
+.customer-name {
+  font-family: "Fraunces", Georgia, serif;
+  font-weight: 600;
+  font-size: 22px;
+  color: var(--oxblood);
+  margin: 0;
+  line-height: 1.15;
+}
+
+.customer-phone {
+  color: var(--ink);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.messages {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* ============== Message row ============== */
+
+.message {
+  display: grid;
+  grid-template-columns: 120px 110px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--rule);
+  position: relative;
+}
+.message:last-child { border-bottom: none; }
+
+.send-time {
+  color: var(--ink);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.job-type {
+  display: inline-block;
+  justify-self: start;
+  padding: 3px 8px;
+  border-radius: 2px;
+  background-color: rgba(122, 46, 42, 0.08);
+  color: var(--oxblood);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.job-ref {
+  color: var(--steel);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cancel-btn {
+  background: transparent;
+  border: none;
+  color: var(--oxblood);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 4px 8px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+  transition: color 120ms ease;
+}
+.cancel-btn:hover,
+.cancel-btn:focus-visible {
+  color: #4A1C18;
+  outline: none;
+}
+
+.message.cancelling .send-time,
+.message.cancelling .job-type,
+.message.cancelling .job-ref {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+.message.cancelling .cancel-btn { display: none; }
+
+/* ============== Undo pill ============== */
+
+.undo-pill {
+  grid-column: 4;
+  justify-self: end;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background-color: var(--amber);
+  color: var(--ink);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  box-shadow: 0 2px 6px -2px rgba(0,0,0,0.25);
+  animation: undoSlideIn 220ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes undoSlideIn {
+  from { opacity: 0; transform: translateX(12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.undo-ring {
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background:
+    conic-gradient(var(--ink) var(--undo-deg, 0deg), rgba(27,27,27,0.2) 0);
+  animation: undoCountdown 5s linear forwards;
+}
+
+@keyframes undoCountdown {
+  from { --undo-deg: 360deg; }
+  to   { --undo-deg: 0deg; }
+}
+
+/* Safari/Firefox fallback — @property shim for --undo-deg */
+@property --undo-deg {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+/* ============== Empty state ============== */
+
+.empty {
+  padding: 80px 32px;
+  text-align: center;
+  color: var(--steel);
+}
+.empty-rule {
+  width: 64px;
+  border: none;
+  border-top: 1px solid var(--oxblood);
+  margin: 0 auto 24px;
+}
+.empty-msg {
+  font-family: "Fraunces", Georgia, serif;
+  font-weight: 500;
+  font-size: 26px;
+  font-style: italic;
+  margin: 0;
+  color: var(--ink);
+}
+
+/* ============== Error state ============== */
+
+.error {
+  max-width: 740px;
+  margin: 24px auto;
+  padding: 20px 24px;
+  border: 1px solid var(--oxblood);
+  background-color: rgba(122, 46, 42, 0.06);
+  color: var(--oxblood);
+  font-size: 14px;
+  border-radius: 2px;
+}
+
+/* ============== Responsive ============== */
+
+@media (max-width: 640px) {
+  .topbar { padding: 16px 20px 12px; }
+  .wordmark { font-size: 22px; }
+  .queue { padding: 20px 20px 60px; }
+  .customer { padding: 16px 16px 8px; }
+  .message {
+    grid-template-columns: 100px 1fr auto;
+    row-gap: 4px;
+  }
+  .job-ref { grid-column: 1 / -2; color: var(--steel); }
+}
