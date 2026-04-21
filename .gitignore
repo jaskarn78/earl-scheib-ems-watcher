@@ -19,6 +19,7 @@ installer/Output/
 /earlscheib
 /earlscheib.exe
 /EarlScheibWatcher-Setup.exe
+/EarlScheibWatcher-Setup.zip
 earl-scheib-ems-watcher.zip*
 
 # Runtime data / logs

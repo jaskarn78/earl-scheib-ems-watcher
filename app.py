@@ -1443,13 +1443,17 @@ INSTRUCTIONS_HTML = """\
 
     <section id="download">
       <h2><span class="num">1.</span>Download the installer</h2>
-      <p>Click the button below on the shop PC (the same one that runs CCC ONE). A file named <code>EarlScheibWatcher-Setup.exe</code> (about 10 MB) will save to your <strong>Downloads</strong> folder.</p>
+      <p>Click the button below on the shop PC (the same one that runs CCC ONE). A file named <code>EarlScheibWatcher-Setup.zip</code> (about 9 MB) will save to your <strong>Downloads</strong> folder.</p>
       <p>
         <a class="download-cta" href="/earlscheibconcord/download">
-          <span class="arrow">↓</span> Download EarlScheibWatcher-Setup.exe
+          <span class="arrow">↓</span> Download EarlScheibWatcher-Setup.zip
         </a>
       </p>
-      <p class="download-sub">Signed Inno Setup installer · Windows 10 / 11 · ~10 MB</p>
+      <p class="download-sub">ZIP bundle · Windows 10 / 11 · ~9 MB · <a href="/earlscheibconcord/download.exe" style="color: var(--oxblood); border-bottom: 1px dotted var(--oxblood);">direct .exe</a></p>
+
+      <div class="callout">
+        <strong>Why a ZIP?</strong> Chrome blocks direct <code>.exe</code> downloads from unrecognized sites for safety. The ZIP bundle downloads without the warning. <strong>After it downloads:</strong> right-click the ZIP in your <strong>Downloads</strong> folder → <strong>"Extract All..."</strong> → accept the default location → click <strong>Extract</strong>. That gives you the <code>EarlScheibWatcher-Setup.exe</code> file.
+      </div>
     </section>
 
     <section id="install">
@@ -1635,15 +1639,26 @@ class WebhookHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
 
-        if path == "/earlscheibconcord/download":
+        if path == "/earlscheibconcord/download" or path == "/earlscheibconcord/download.exe":
             import os
             app_dir = os.path.dirname(os.path.abspath(__file__))
-            # Preferred: signed Inno Setup installer (v1.0+ — native wizard, one-click install).
-            # Fallback: legacy watcher.zip (pre-v1.0 Python bundle).
-            installer_path = os.path.join(app_dir, "EarlScheibWatcher-Setup.exe")
+            # Preferred: zip wrapper (Chrome Safe Browsing flags unsigned .exe as
+            # "dangerous", forcing users to click through chrome://downloads. A
+            # .zip containing the same exe downloads without interruption).
+            # /download.exe explicit path → skip the zip (power users).
+            installer_zip = os.path.join(app_dir, "EarlScheibWatcher-Setup.zip")
+            installer_exe = os.path.join(app_dir, "EarlScheibWatcher-Setup.exe")
             legacy_zip = os.path.join(app_dir, "watcher.zip")
-            if os.path.exists(installer_path):
-                serve_path = installer_path
+            if path.endswith(".exe") and os.path.exists(installer_exe):
+                serve_path = installer_exe
+                content_type = "application/octet-stream"
+                filename = "EarlScheibWatcher-Setup.exe"
+            elif os.path.exists(installer_zip):
+                serve_path = installer_zip
+                content_type = "application/zip"
+                filename = "EarlScheibWatcher-Setup.zip"
+            elif os.path.exists(installer_exe):
+                serve_path = installer_exe
                 content_type = "application/octet-stream"
                 filename = "EarlScheibWatcher-Setup.exe"
             elif os.path.exists(legacy_zip):
