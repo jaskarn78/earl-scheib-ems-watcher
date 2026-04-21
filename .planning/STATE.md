@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 05-queue-admin-ui 05-03-PLAN.md
-last_updated: "2026-04-21T06:50:09.664Z"
+stopped_at: Completed 05-queue-admin-ui 05-02-PLAN.md
+last_updated: "2026-04-21T06:51:47.365Z"
 progress:
   total_phases: 5
   completed_phases: 4
   total_plans: 19
-  completed_plans: 17
+  completed_plans: 18
 ---
 
 # Project State
@@ -24,7 +24,7 @@ See: .planning/PROJECT.md (updated 2026-04-20)
 ## Current Position
 
 Phase: 05 (queue-admin-ui) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 
 ## Performance Metrics
 
@@ -63,6 +63,7 @@ Plan: 3 of 4
 | Phase 04-telemetry-remote-config P03 | 15 | 2 tasks | 3 files |
 | Phase 05-queue-admin-ui P01 | 3 | 3 tasks | 5 files |
 | Phase 05-queue-admin-ui P03 | 3 | 3 tasks | 3 files |
+| Phase 05-queue-admin-ui P02 | 249 | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -119,6 +120,9 @@ Recent decisions affecting current work:
 - [Phase 05-queue-admin-ui]: DELETE /queue response {"deleted": 1} integer count; 404 collapses missing-row and already-sent into same error message
 - [Phase 05-queue-admin-ui]: do_DELETE on WebhookHandler dispatched automatically by Python http.server — no route registration needed
 - [Phase 05-queue-admin-ui]: feTurbulence paper-grain SVG embedded in CSS data URI for single-HTTP-trip favicon + grain; cancel-with-undo fires DELETE only after 5s timer expires
+- [Phase 05-queue-admin-ui]: URLCh chan<- string in admin.Config is the sole test-startup mechanism — no stdout capture or port scanning
+- [Phase 05-queue-admin-ui]: admin proxy re-marshals incoming JSON to canonical compact form before HMAC signing (no whitespace; stable field order)
+- [Phase 05-queue-admin-ui]: signal.NotifyContext wraps parent ctx with SIGINT/SIGTERM for clean integration with the heartbeat watchdog context
 
 ### Roadmap Evolution
 
@@ -136,6 +140,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-21T06:50:09.659Z
-Stopped at: Completed 05-queue-admin-ui 05-03-PLAN.md
+Last session: 2026-04-21T06:51:47.362Z
+Stopped at: Completed 05-queue-admin-ui 05-02-PLAN.md
 Resume file: None
