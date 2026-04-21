@@ -1,6 +1,93 @@
 # Earl Scheib EMS Watcher
 
-A Windows desktop application for **Earl Scheib Auto Body Concord** that watches the CCC ONE EMS export folder, deduplicates and HMAC-signs BMS XML payloads, POSTs them to a follow-up webhook every 5 minutes via a Windows Scheduled Task, and ships with an on-demand local-browser queue admin UI for the shop owner.
+Sends CCC ONE estimate files to the Earl Scheib follow-up service automatically. Runs every 5 minutes in the background on your shop PC. No setup needed after the first install.
+
+---
+
+## 👋 Marco — start here
+
+### 1. Install (about 2 minutes, one time only)
+
+1. Open this link on your shop PC (the one that runs CCC ONE):
+
+   **https://support.jjagpal.me/earlscheibconcord/download**
+
+2. A file named **`EarlScheibWatcher-Setup.exe`** will download (about 10 MB). It goes to your `Downloads` folder by default.
+
+3. Double-click the file to start the installer.
+
+4. **If you see a blue "Windows protected your PC" screen:** this is normal for new business software. Click **"More info"** (below the main message), then click **"Run anyway"**. The installer will continue.
+
+5. The wizard has three steps:
+
+   | Step | What happens | What you do |
+   |---|---|---|
+   | **1. Folder** | The installer looks for your CCC ONE export folder. If it finds one, it shows the path. | Confirm the path, or click **Browse** to pick a different one. Click **Next**. |
+   | **2. Connection Test** | Checks that your PC can reach the follow-up service over the internet. | Should show a ✓ check. If it fails, check your Wi-Fi; you can also click **Continue anyway**. |
+   | **3. CCC ONE Settings** | Shows a reminder to set CCC ONE to save EMS files. | Open CCC ONE on the side, go to **Tools → Extract → EMS Extract Preferences**, check **Lock Estimate** and **Save Workfile**, save. Then check the **"I've done this"** box and click **Finish**. |
+
+6. Done. The watcher now runs every 5 minutes automatically. **You can close any windows.**
+
+### 2. What happens after install
+
+- Every 5 minutes, Windows runs the watcher silently in the background. There is no icon, no tray, no popup — it's meant to stay out of your way.
+- When CCC ONE exports a new estimate, the watcher picks it up within 5 minutes and sends it to the follow-up service.
+- The service schedules text messages to the customer automatically (24-hour follow-up, 3-day follow-up, review request).
+- You don't need to do anything else, ever.
+
+### 3. Seeing what's about to go out (optional)
+
+If you want to check which messages are queued, or cancel one before it sends:
+
+1. Open the **Start menu** and type `cmd`, then press Enter.
+2. In the black window, type (or paste):
+
+   ```
+   "C:\EarlScheibWatcher\earlscheib.exe" --admin
+   ```
+
+3. Press Enter. Your browser will open to a page titled **"Earl Scheib Concord — Queue"**.
+
+4. Each pending message shows the send time, the customer's name, and the repair job number.
+
+5. Click **cancel** on any row to stop that message. You get 5 seconds to click the amber **"click to undo"** pill if you change your mind.
+
+6. When you're done, close the browser tab. The black cmd window will close itself after about 30 seconds.
+
+Full details in [`docs/admin-ui-guide.md`](docs/admin-ui-guide.md).
+
+### 4. Something's wrong — what do I check?
+
+| Symptom | What to do |
+|---|---|
+| Customers aren't getting text messages | Open `C:\EarlScheibWatcher\ems_watcher.log` in Notepad. Look for recent errors. If you see "connection failed" repeating, check the shop's internet. |
+| Windows SmartScreen blocked the installer | Click **More info → Run anyway**. See step 1.4 above. |
+| CCC ONE isn't exporting EMS files | In CCC ONE: **Tools → Extract → EMS Extract Preferences** → make sure both **Lock Estimate** and **Save Workfile** are checked, and the **Output Folder** matches what you entered in the installer. |
+| Want to change the CCC ONE folder after install | Open **cmd** as Administrator and run: `C:\EarlScheibWatcher\earlscheib.exe --configure` |
+| Want to uninstall | **Settings → Apps**, find **Earl Scheib EMS Watcher**, click **Uninstall**. |
+| Something else | Contact **admin@jjagpal.me** |
+
+### 5. Where are things on my PC?
+
+```
+C:\EarlScheibWatcher\
+  earlscheib.exe        the watcher program
+  config.ini            saved folder path + settings
+  ems_watcher.log       activity log (safe to read)
+  ems_watcher.db        dedup database (don't touch)
+```
+
+Windows Task Scheduler (search "Task Scheduler" in the Start menu) shows the watcher listed as **`EarlScheibEMSWatcher`** in the Task Scheduler Library. "Last Run Time" and "Last Run Result" tell you when it last ran.
+
+---
+
+## 🛠 For developers
+
+Everything below is technical. Skip unless you're working on the code.
+
+### What this is
+
+A Windows desktop application for **Earl Scheib Auto Body Concord** that watches the CCC ONE EMS export folder, deduplicates and HMAC-signs BMS XML payloads, POSTs them to a follow-up webhook every 5 minutes via a Windows Scheduled Task, and ships with an on-demand local-browser queue admin UI.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -21,17 +108,9 @@ A Windows desktop application for **Earl Scheib Auto Body Concord** that watches
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## Status
+### Status
 
-**v1.0 shipped 2026-04-21** — 5 phases, 19 plans, 41/41 active requirements satisfied. See [`.planning/MILESTONES.md`](.planning/MILESTONES.md) for the ship notes and [`.planning/milestones/v1.0-MILESTONE-AUDIT.md`](.planning/milestones/v1.0-MILESTONE-AUDIT.md) for the audit.
-
-## For the end user (Marco)
-
-- **Install:** [`https://support.jjagpal.me/earlscheibconcord/download`](https://support.jjagpal.me/earlscheibconcord/download) → double-click `EarlScheibWatcher-Setup.exe` → 3-step wizard.
-- **See what's queued:** run `earlscheib.exe --admin` — your browser opens to a list of pending SMS messages, with a 5-second undo cancel on each.
-- **Guide:** [`docs/admin-ui-guide.md`](docs/admin-ui-guide.md)
-
-## For developers
+**v1.0 shipped 2026-04-21** — 5 phases, 19 plans, 41/41 active requirements satisfied. See [`.planning/MILESTONES.md`](.planning/MILESTONES.md) for ship notes and [`.planning/milestones/v1.0-MILESTONE-AUDIT.md`](.planning/milestones/v1.0-MILESTONE-AUDIT.md) for the audit.
 
 ### Layout
 
@@ -73,7 +152,7 @@ docs/                    End-user + ops docs
 | Scheduling | Windows Scheduled Task every 5 min | Proven model, survives Windows Update |
 | Signing | `osslsigncode` (Linux CI) + OV cert | Docker-based, no Windows runner needed |
 
-### Quick start — developer
+### Quick start
 
 ```bash
 # Prereqs on Linux
@@ -124,7 +203,7 @@ CI reads `GSD_HMAC_SECRET` from GitHub Actions secrets; local dev uses the dev f
 | `--uninstall` | Removes Scheduled Task + (optionally) data dir. |
 | `--configure` | Re-runs folder selection + connection test without reinstalling. |
 
-## Server side
+### Server side
 
 `app.py` is a single-file stdlib `http.server` on a Linux VM (this box). Routes:
 
@@ -142,7 +221,7 @@ CI reads `GSD_HMAC_SECRET` from GitHub Actions secrets; local dev uses the dev f
 
 Twilio sends WhatsApp (sandbox) today; switching to production SMS is documented as a one-line change in `app.py`.
 
-## Deploying this server
+### Deploying
 
 This repo is both the client source AND the running production server — `app.py` is served by the `earl-scheib.service` systemd unit on `support.jjagpal.me`. Pulling new changes:
 
@@ -157,7 +236,7 @@ make build-windows && \
 sudo systemctl restart earl-scheib.service
 ```
 
-## Planning history
+### Planning history
 
 This project was built using [GSD](https://github.com/jjagpal/get-shit-done) (structured planning with planning/research/execution/verification phases). The full artifact trail is in [`.planning/`](.planning/):
 
@@ -167,8 +246,10 @@ This project was built using [GSD](https://github.com/jjagpal/get-shit-done) (st
 - [`milestones/v1.0-MILESTONE-AUDIT.md`](.planning/milestones/v1.0-MILESTONE-AUDIT.md) — final audit (tech_debt, user-accepted)
 - `milestones/v1.0-phases/` — every `PLAN.md`, `SUMMARY.md`, `VERIFICATION.md` from execution
 
+---
+
 ## License & contact
 
-Private / single-customer deployment. No license; not open for external contribution.
+Private / single-customer deployment. Not open for external contribution.
 
-**Support:** [support.jjagpal.me](https://support.jjagpal.me) · **Dev:** `admin@jjagpal.me`
+**Support for Marco:** `admin@jjagpal.me` · **Shop support page:** [support.jjagpal.me](https://support.jjagpal.me)
