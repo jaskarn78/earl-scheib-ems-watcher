@@ -34,6 +34,19 @@
     <!-- Cards injected by main.js -->
   </main>
 
+  <section id="diagnostic" class="diagnostic" aria-label="Diagnostic">
+    <h2 class="diag-heading">Diagnostic</h2>
+    <dl class="diag-grid">
+      <dt>Watch folder</dt>             <dd id="diag-watch-folder">—</dd>
+      <dt>Folder exists</dt>            <dd id="diag-folder-exists">—</dd>
+      <dt>Files in folder</dt>          <dd id="diag-file-count">—</dd>
+      <dt>Last scan</dt>                <dd id="diag-last-scan">—</dd>
+      <dt>Last heartbeat (server)</dt>  <dd id="diag-last-heartbeat">—</dd>
+      <dt>HMAC secret baked in</dt>     <dd id="diag-hmac">—</dd>
+      <dt>Version</dt>                  <dd id="diag-version">—</dd>
+    </dl>
+  </section>
+
   <template id="customer-card-template">
     <article class="customer" data-phone="">
       <header class="customer-header">

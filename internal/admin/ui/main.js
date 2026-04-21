@@ -8,6 +8,7 @@
   const REFRESH_MS   = 15000;
   const HEARTBEAT_MS = 10000;
   const UNDO_MS      = 5000;
+  const DIAG_MS      = 5000;
 
   // Pacific-time formatter — e.g. "Tue 2:30 PM"
   const timeFmt = new Intl.DateTimeFormat('en-US', {
@@ -228,6 +229,57 @@
     refreshCaption.textContent = `updated ${ago}s ago`;
   }
 
+  // ---------- Diagnostic panel -----------------------------------------
+
+  async function fetchDiagnostic() {
+    try {
+      const resp = await fetch('/api/diagnostic', { cache: 'no-store' });
+      if (!resp.ok) return;
+      const d = await resp.json();
+
+      setDiagText('diag-watch-folder', d.watch_folder || '—');
+
+      const existsTxt = d.folder_exists
+        ? '✓ exists'
+        : '✗ missing' + (d.folder_error ? ' — ' + d.folder_error : '');
+      setDiagStatus('diag-folder-exists', d.folder_exists, existsTxt);
+
+      setDiagText('diag-file-count',
+        d.folder_exists
+          ? `${d.file_count} file${d.file_count === 1 ? '' : 's'}`
+          : (d.folder_error || '—')
+      );
+
+      setDiagText('diag-last-scan',
+        d.last_scan_at
+          ? `${d.last_scan_at} — ${d.last_scan_processed} processed, ${d.last_scan_errors} errors`
+          : (d.last_scan_note || 'no scans yet')
+      );
+
+      setDiagText('diag-last-heartbeat', d.last_heartbeat_at || '—');
+
+      setDiagStatus('diag-hmac', d.hmac_secret_present,
+        d.hmac_secret_present ? 'yes' : 'NO — dev build or GSD_HMAC_SECRET unset');
+
+      setDiagText('diag-version', d.app_version || 'dev');
+    } catch (_) {
+      // Transient errors are acceptable at 5s poll cadence — silent by design.
+    }
+  }
+
+  function setDiagText(id, txt) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = txt;
+  }
+
+  function setDiagStatus(id, ok, txt) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = txt;
+    el.classList.toggle('ok', !!ok);
+    el.classList.toggle('bad', !ok);
+  }
+
   // ---------- Heartbeat ------------------------------------------------
 
   function sendAlive() {
@@ -253,6 +305,8 @@
     fetchQueue();
     setInterval(fetchQueue, REFRESH_MS);
     setInterval(updateRefreshCaption, 1000);
+    fetchDiagnostic();
+    setInterval(fetchDiagnostic, DIAG_MS);
     sendAlive();
     setInterval(sendAlive, HEARTBEAT_MS);
 

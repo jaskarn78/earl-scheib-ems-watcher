@@ -89,6 +89,7 @@ func Run(ctx context.Context, cfg Config) error {
 	// API
 	mux.HandleFunc("/api/queue", s.handleQueue)
 	mux.HandleFunc("/api/cancel", s.handleCancel)
+	mux.HandleFunc("/api/diagnostic", s.handleDiagnostic)
 	mux.HandleFunc("/alive", s.handleAlive)
 
 	httpServer := &http.Server{

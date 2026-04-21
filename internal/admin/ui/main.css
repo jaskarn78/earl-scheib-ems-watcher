@@ -343,6 +343,57 @@ body > * {
   border-radius: 2px;
 }
 
+/* ============== Diagnostic ============== */
+
+.diagnostic {
+  max-width: 740px;
+  margin: 0 auto 80px;
+  padding: 24px 32px 28px;
+  background-color: var(--paper-tint);
+  border: 1px solid var(--rule);
+  border-top: 4px solid var(--oxblood);
+  border-radius: 2px;
+  box-shadow: var(--shadow);
+}
+
+.diag-heading {
+  font-family: "Fraunces", Georgia, serif;
+  font-weight: 600;
+  font-size: 20px;
+  color: var(--oxblood);
+  margin: 0 0 18px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding-bottom: 10px;
+  border-bottom: 1px dashed var(--rule);
+}
+
+.diag-grid {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 10px 24px;
+  margin: 0;
+}
+
+.diag-grid dt {
+  color: var(--steel);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  align-self: center;
+}
+
+.diag-grid dd {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  word-break: break-all;
+}
+
+.diag-grid dd.ok  { color: #2E6A3E; }
+.diag-grid dd.bad { color: var(--oxblood); font-weight: 600; }
+
 /* ============== Responsive ============== */
 
 @media (max-width: 640px) {
@@ -355,4 +406,7 @@ body > * {
     row-gap: 4px;
   }
   .job-ref { grid-column: 1 / -2; color: var(--steel); }
+  .diagnostic { margin: 0 20px 60px; padding: 20px 20px 24px; }
+  .diag-grid { grid-template-columns: 1fr; gap: 2px 0; }
+  .diag-grid dt { margin-top: 10px; }
 }
