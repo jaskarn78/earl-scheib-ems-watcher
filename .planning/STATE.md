@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Milestone complete
+status: v1.0 milestone complete
 stopped_at: Completed 05-queue-admin-ui 05-04-PLAN.md
-last_updated: "2026-04-21T07:04:18.836Z"
+last_updated: "2026-04-21T07:15:32.249Z"
 progress:
   total_phases: 5
   completed_phases: 5
@@ -16,10 +16,10 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-20)
+See: .planning/PROJECT.md (updated 2026-04-21 after v1.0 milestone)
 
-**Core value:** Marco downloads one file, clicks through a 3-step wizard, and the tray icon turns green — forever after, follow-up texts and review requests go out automatically with zero ongoing attention.
-**Current focus:** Phase 05 — queue-admin-ui
+**Core value:** Marco installs one file, steps through a native install wizard, and forever after follow-up texts and review requests go out automatically. When he wants to inspect or cancel a queued message, `earlscheib.exe --admin` opens a browser for that one task.
+**Current focus:** v1.0 complete — awaiting /gsd:new-milestone for v1.1+
 
 ## Current Position
 
