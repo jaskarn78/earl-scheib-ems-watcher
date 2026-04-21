@@ -20,7 +20,7 @@ ifneq ($(strip $(HMAC_SECRET)),)
 LDFLAGS += -X main.secretKey=$(HMAC_SECRET)
 endif
 
-.PHONY: build-windows build-linux test clean generate-resources install-tools dev-sign installer installer-syntax
+.PHONY: build-windows build-linux test clean generate-resources install-tools dev-sign installer installer-syntax portable
 
 ## install-tools: install required build tools (go-winres)
 install-tools:
@@ -51,7 +51,7 @@ test:
 
 ## clean: remove build artifacts
 clean:
-	rm -rf dist/ rsrc_windows_386.syso rsrc_windows_amd64.syso cmd/earlscheib/rsrc_windows_amd64.syso
+	rm -rf dist/ rsrc_windows_386.syso rsrc_windows_amd64.syso cmd/earlscheib/rsrc_windows_amd64.syso installer/Output/
 
 ## dev-sign: sign dist/earlscheib.exe with a self-signed cert (local testing only)
 ## Requires: openssl, osslsigncode  (sudo apt-get install openssl osslsigncode)
@@ -84,6 +84,26 @@ installer:
 ## installer-syntax: parse-check the .iss script without producing output (CI fast-fail)
 installer-syntax:
 	docker run --rm -v "$(CURDIR):/work" amake/innosetup:6.7.1 iscc /Dq /O- /work/installer/earlscheib.iss
+
+## portable: build the portable zip distribution (requires zip binary; ubuntu: apt-get install zip)
+## Produces dist/EarlScheibWatcher-Portable.zip containing:
+##   earlscheib.exe, setup.cmd, uninstall.cmd, README.txt,
+##   config.ini.template, tasks/*.xml
+portable: build-windows
+	@echo "Staging portable distribution..."
+	rm -rf dist/portable-staging
+	mkdir -p dist/portable-staging/tasks
+	cp dist/$(BINARY)                                    dist/portable-staging/earlscheib.exe
+	cp portable/setup.cmd                                dist/portable-staging/setup.cmd
+	cp portable/uninstall.cmd                            dist/portable-staging/uninstall.cmd
+	cp portable/README.txt                               dist/portable-staging/README.txt
+	cp portable/config.ini.template                      dist/portable-staging/config.ini.template
+	cp portable/tasks/EarlScheibEMSWatcher-SYSTEM.xml   dist/portable-staging/tasks/
+	cp portable/tasks/EarlScheibEMSWatcher-User.xml      dist/portable-staging/tasks/
+	@echo "Creating dist/EarlScheibWatcher-Portable.zip..."
+	cd dist/portable-staging && zip -r ../EarlScheibWatcher-Portable.zip .
+	rm -rf dist/portable-staging
+	@echo "Portable zip: dist/EarlScheibWatcher-Portable.zip"
 
 ## help: list targets
 help:
