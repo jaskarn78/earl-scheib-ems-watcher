@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Earl Scheib Concord — Queue</title>
+
+  <!-- Inline oxblood ES monogram favicon (no extra HTTP round-trip) -->
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%23F4EDE0'/><text x='16' y='22' text-anchor='middle' font-family='Georgia,serif' font-weight='700' font-size='18' fill='%237A2E2A'>ES</text></svg>">
+
+  <!-- Google Fonts: Fraunces (display) + JetBrains Mono (body/data) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,700;1,9..144,500&family=JetBrains+Mono:wght@400;600&display=swap">
+
+  <link rel="stylesheet" href="/main.css">
+</head>
+<body>
+  <header class="topbar" role="banner">
+    <h1 class="wordmark">Earl Scheib Concord <span class="wordmark-sep">—</span> <em>Queue</em></h1>
+    <div class="topbar-meta">
+      <span id="refresh-caption" class="refresh-caption">refreshing…</span>
+      <button id="refresh-btn" class="refresh-btn" type="button" aria-label="Refresh queue (R)" title="Press R to refresh">
+        <!-- Minimal stroke-only refresh glyph; 16x16 -->
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M13.5 8a5.5 5.5 0 1 1-1.61-3.89"></path>
+          <path d="M13.5 2.5v3h-3"></path>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <main id="queue" class="queue" aria-live="polite" aria-busy="true">
+    <!-- Cards injected by main.js -->
+  </main>
+
+  <template id="customer-card-template">
+    <article class="customer" data-phone="">
+      <header class="customer-header">
+        <h2 class="customer-name"></h2>
+        <span class="customer-phone"></span>
+      </header>
+      <ul class="messages"></ul>
+    </article>
+  </template>
+
+  <template id="message-row-template">
+    <li class="message">
+      <span class="send-time"></span>
+      <span class="job-type"></span>
+      <span class="job-ref"></span>
+      <button class="cancel-btn" type="button">cancel</button>
+      <div class="undo-pill" hidden>
+        <span class="undo-label">cancelled — click to undo</span>
+        <span class="undo-ring" aria-hidden="true"></span>
+      </div>
+    </li>
+  </template>
+
+  <template id="empty-state-template">
+    <section class="empty">
+      <hr class="empty-rule" aria-hidden="true">
+      <p class="empty-msg"><em>Nothing queued right now.</em></p>
+    </section>
+  </template>
+
+  <template id="error-state-template">
+    <section class="error">
+      <p class="error-msg"></p>
+    </section>
+  </template>
+
+  <script src="/main.js" defer></script>
+</body>
+</html>
