@@ -263,6 +263,8 @@ body > * {
 
 /* ============== Undo pill ============== */
 
+.undo-pill[hidden] { display: none; }
+
 .undo-pill {
   grid-column: 4;
   justify-self: end;
