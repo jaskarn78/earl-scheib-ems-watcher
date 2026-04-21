@@ -1,5 +1,7 @@
 dist/*.exe
 dist/earlscheib
+dist/earlscheib-*
+dist/*.zip
 signing.pfx
 *.pfx
 rsrc_windows_amd64.syso
@@ -8,3 +10,30 @@ cmd/earlscheib/rsrc_windows_amd64.syso
 winres/gen_icon.go
 winres/icon16.png
 telemetry.log
+
+# Secrets — NEVER commit
+.env
+
+# Build output
+installer/Output/
+/earlscheib
+/earlscheib.exe
+earl-scheib-ems-watcher.zip*
+
+# Runtime data / logs
+app.log
+webhook.log
+jobs.db
+__pycache__/
+tests/__pycache__/
+payloads/
+
+# Legacy artifacts (pre-v1.0 Python watcher)
+watcher.zip
+server.py
+
+# Ad-hoc assets
+.playwright-mcp/
+admin-ui-*.png
+CLAUDE_CODE_PROMPT.md
+claude-code-project/
