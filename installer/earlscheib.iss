@@ -158,12 +158,20 @@ var
   I: Integer;
 begin
   Result := '';
-  SetArrayLength(Candidates, 4);
-  Candidates[0] := 'C:\CCC\EMS_Export';
-  Candidates[1] := 'C:\CCC\APPS\CCCCONE\CCCCONE\DATA';
-  Candidates[2] := 'C:\Program Files\CCC';
-  Candidates[3] := 'C:\Program Files (x86)\CCC';
-  for I := 0 to 3 do begin
+  // Ordered most-specific to least-specific; first match wins.
+  // PartsTrader\Export is the actual path CCC ONE uses on Marco's shop PC
+  // (observed 2026-04-21 — CCC reports "EMS Extract File(s) successfully
+  // extracted to C:\CCC APPS\CCCONE\CCCONE\DATA\PartsTrader\Export").
+  SetArrayLength(Candidates, 8);
+  Candidates[0] := 'C:\CCC APPS\CCCONE\CCCONE\DATA\PartsTrader\Export';
+  Candidates[1] := 'C:\CCC\APPS\CCCONE\CCCONE\DATA\PartsTrader\Export';
+  Candidates[2] := 'C:\CCC APPS\CCCONE\CCCONE\DATA';
+  Candidates[3] := 'C:\CCC\APPS\CCCONE\CCCONE\DATA';
+  Candidates[4] := 'C:\CCC\APPS\CCCCONE\CCCCONE\DATA';
+  Candidates[5] := 'C:\CCC\EMS_Export';
+  Candidates[6] := 'C:\Program Files\CCC';
+  Candidates[7] := 'C:\Program Files (x86)\CCC';
+  for I := 0 to 7 do begin
     if DirExists(Candidates[I]) then begin
       Result := Candidates[I];
       Exit;
