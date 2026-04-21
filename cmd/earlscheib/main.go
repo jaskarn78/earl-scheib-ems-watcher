@@ -10,6 +10,7 @@ import (
 	"github.com/jjagpal/earl-scheib-watcher/internal/config"
 	"github.com/jjagpal/earl-scheib-watcher/internal/db"
 	"github.com/jjagpal/earl-scheib-watcher/internal/heartbeat"
+	"github.com/jjagpal/earl-scheib-watcher/internal/install"
 	"github.com/jjagpal/earl-scheib-watcher/internal/logging"
 	"github.com/jjagpal/earl-scheib-watcher/internal/remoteconfig"
 	"github.com/jjagpal/earl-scheib-watcher/internal/scanner"
@@ -58,7 +59,11 @@ func main() {
 	case "--status":
 		runStatus(tel)
 	case "--install":
-		runStub("install")
+		runInstall()
+	case "--uninstall":
+		runUninstall()
+	case "--configure":
+		runConfigure()
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n", os.Args[1])
 		printUsage()
@@ -213,11 +218,38 @@ func runStatus(tel *telemetry.Telemetry) {
 	})
 }
 
+// runInstall runs the console-based install wizard (portable-zip distribution).
+// Requires administrator privileges. Prints a clear error and exits 1 if not elevated.
+func runInstall() {
+	if err := install.Run(install.Options{}); err != nil {
+		fmt.Fprintf(os.Stderr, "install failed: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// runUninstall removes the Scheduled Task and optionally the data directory.
+// Requires administrator privileges.
+func runUninstall() {
+	if err := install.Uninstall(install.UninstallOptions{}); err != nil {
+		fmt.Fprintf(os.Stderr, "uninstall failed: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// runConfigure re-runs folder selection and connection test without reinstalling
+// the Scheduled Task. Useful after changing the CCC ONE export folder location.
+func runConfigure() {
+	if err := install.Configure(install.Options{}); err != nil {
+		fmt.Fprintf(os.Stderr, "configure failed: %v\n", err)
+		os.Exit(1)
+	}
+}
+
 func runStub(name string) {
 	fmt.Printf("earlscheib %s: not yet implemented\n", name)
 	os.Exit(0)
 }
 
 func printUsage() {
-	fmt.Println("usage: earlscheib [--tray|--scan|--wizard|--test|--status|--install]")
+	fmt.Println("usage: earlscheib [--tray|--scan|--wizard|--test|--status|--install|--uninstall|--configure]")
 }
