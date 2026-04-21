@@ -160,10 +160,12 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 }
 
-// remoteQueueURL returns the remote webhook base URL with
-// /earlscheibconcord/queue appended (no trailing slash).
+// remoteQueueURL returns the remote webhook base URL with /queue appended.
+// WebhookURL already ends in /earlscheibconcord (same convention as every other
+// package — telemetry appends /telemetry, remoteconfig appends /remote-config,
+// heartbeat appends /heartbeat).
 func (s *server) remoteQueueURL() string {
-	return strings.TrimRight(s.cfg.WebhookURL, "/") + "/earlscheibconcord/queue"
+	return strings.TrimRight(s.cfg.WebhookURL, "/") + "/queue"
 }
 
 // handleAlive is the browser heartbeat endpoint. Resets the last-alive timer.

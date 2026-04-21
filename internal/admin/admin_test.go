@@ -53,12 +53,15 @@ func newFakeRemote(t *testing.T, respStatus int, respBody []byte, captured *atom
 
 // startAdminWithURLCh is the single entrypoint for starting admin.Run in tests.
 // It uses admin.Config.URLCh to receive the bound URL deterministically.
+// Appends "/earlscheibconcord" to remoteURL so the WebhookURL matches production
+// shape ("https://host/earlscheibconcord") — ensures upstream path assertions
+// like "/earlscheibconcord/queue" exercise the real URL construction logic.
 func startAdminWithURLCh(t *testing.T, remoteURL, secret string, heartbeat time.Duration) (string, func()) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	urlCh := make(chan string, 1)
 	cfg := admin.Config{
-		WebhookURL:       remoteURL,
+		WebhookURL:       remoteURL + "/earlscheibconcord",
 		Secret:           secret,
 		AppVersion:       "test",
 		HeartbeatTimeout: heartbeat,
