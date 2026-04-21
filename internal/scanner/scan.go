@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -32,10 +33,14 @@ type RunConfig struct {
 	SettleOpts SettleOptions // zero value → DefaultSettleOptions used
 }
 
-// Candidates returns the full paths of .xml and .ems files in dir
-// (case-insensitive extension match). On any OS or permission error,
-// it logs a warning and returns an empty slice without panicking.
-// This matches _list_candidates() in ems_watcher.py.
+// Candidates returns the full paths of BMS XML candidates in dir. Picks up:
+//   - *.xml and *.ems (case-insensitive extension match)
+//   - extensionless files whose first bytes look like XML — CCC ONE's EMS 2.01
+//     bundle writes the main BMS file as just the doc GUID with no extension
+//     (accompanied by .ad1/.pfh/.veh/... supporting files we must ignore).
+//
+// On any OS or permission error, logs a warning and returns an empty slice.
+// This matches _list_candidates() in ems_watcher.py plus the no-extension rule.
 func Candidates(dir string, logger *slog.Logger) []string {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -52,12 +57,42 @@ func Candidates(dir string, logger *slog.Logger) []string {
 		if e.IsDir() {
 			continue
 		}
+		full := filepath.Join(dir, e.Name())
 		ext := strings.ToLower(filepath.Ext(e.Name()))
 		if ext == ".xml" || ext == ".ems" {
-			out = append(out, filepath.Join(dir, e.Name()))
+			out = append(out, full)
+			continue
+		}
+		if ext == "" && looksLikeXML(full) {
+			out = append(out, full)
 		}
 	}
 	return out
+}
+
+// looksLikeXML peeks the first bytes of path and returns true when they look
+// like an XML document. Used to pick out the BMS XML file from CCC ONE's
+// extensionless bundle without accidentally POSTing binary sidecars.
+//
+// Tolerates UTF-8 BOM and leading whitespace. Reads at most 512 bytes.
+func looksLikeXML(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	buf := make([]byte, 512)
+	n, _ := f.Read(buf)
+	if n == 0 {
+		return false
+	}
+	// Strip UTF-8 BOM.
+	head := buf[:n]
+	if len(head) >= 3 && head[0] == 0xEF && head[1] == 0xBB && head[2] == 0xBF {
+		head = head[3:]
+	}
+	head = bytes.TrimLeft(head, " \t\r\n")
+	return bytes.HasPrefix(head, []byte("<?xml")) || bytes.HasPrefix(head, []byte("<Estimate")) || bytes.HasPrefix(head, []byte("<BMS"))
 }
 
 // Run performs a single scan cycle: list candidates, dedup, settle, re-dedup,

@@ -236,6 +236,61 @@ func TestCandidatesMissingDir(t *testing.T) {
 	}
 }
 
+// TestCandidatesExtensionlessXML mirrors the CCC ONE EMS 2.01 bundle layout:
+// a folder containing one extensionless BMS XML file plus the proprietary
+// sidecars (.ad1 .pfh .veh .PICL ...). The BMS XML file must be picked up
+// while every sidecar is ignored.
+func TestCandidatesExtensionlessXML(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	// The main BMS XML — extensionless, GUID-named, XML content.
+	mainPath := filepath.Join(dir, "85d40ff3")
+	if err := os.WriteFile(mainPath, []byte(`<?xml version="1.0"?><Estimate/>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A BOM-prefixed extensionless XML (some CCC ONE installs) — must match.
+	bomPath := filepath.Join(dir, "afa71075")
+	if err := os.WriteFile(bomPath, append([]byte{0xEF, 0xBB, 0xBF}, []byte(`<Estimate/>`)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Proprietary sidecars — every one of these must be ignored.
+	for _, name := range []string{
+		"85d40ff3.ad1", "85d40ff3.ad2", "85d40ff3.dbt", "85d40ff3.env",
+		"85d40ff3.lin", "85d40ff3.pfh", "85d40ff3.pfl", "85d40ff3.pfo",
+		"85d40ff3.pfp", "85d40ff3.pft", "85d40ff3.stl", "85d40ff3.ttl",
+		"85d40ff3.veh", "85d40ff3.ven", "85d40ff3.PICL",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte{0x00, 0x01, 0x02}, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Extensionless but binary — must NOT be picked up (wards against accidental
+	// POSTs of non-XML files that happen to have no extension).
+	binPath := filepath.Join(dir, "binarything")
+	if err := os.WriteFile(binPath, []byte{0x7F, 'E', 'L', 'F', 0x02, 0x01}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := Candidates(dir, testLogger(t))
+	if len(got) != 2 {
+		t.Fatalf("expected 2 candidates (the two extensionless XML files), got %d: %v", len(got), got)
+	}
+	gotSet := map[string]bool{}
+	for _, p := range got {
+		gotSet[filepath.Base(p)] = true
+	}
+	if !gotSet["85d40ff3"] {
+		t.Errorf("expected extensionless XML 85d40ff3 in candidates, got %v", got)
+	}
+	if !gotSet["afa71075"] {
+		t.Errorf("expected BOM-prefixed XML afa71075 in candidates, got %v", got)
+	}
+	if gotSet["binarything"] {
+		t.Errorf("binary extensionless file must not be a candidate, got %v", got)
+	}
+}
+
 // ---- Run tests -------------------------------------------------------------
 
 func openTestDB(t *testing.T) *sql.DB {
