@@ -1187,6 +1187,428 @@ SUPPORT_HTML = """\
 """
 
 
+# ---------------------------------------------------------------------------
+# Marco's install + usage guide. Served at /earlscheibconcord/instructions.
+# Concord Garage aesthetic — matches the admin UI: Fraunces display,
+# JetBrains Mono body/data, oxblood/cream/graphite palette.
+# ---------------------------------------------------------------------------
+INSTRUCTIONS_HTML = """\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Earl Scheib EMS Watcher — Install & Usage Guide</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,500&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {{
+      --ink: #1B1B1B;
+      --paper: #F4EDE0;
+      --oxblood: #7A2E2A;
+      --oxblood-dark: #5A1F1C;
+      --amber: #E8A33D;
+      --steel: #8B8478;
+      --rule: rgba(27, 27, 27, 0.12);
+    }}
+    *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    html {{ scroll-behavior: smooth; }}
+    body {{
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-size: 15px;
+      line-height: 1.7;
+      color: var(--ink);
+      background: var(--paper);
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.11 0 0 0 0 0.11 0 0 0 0 0.11 0 0 0 0.03 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+      -webkit-font-smoothing: antialiased;
+    }}
+    header {{
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 64px 28px 32px;
+      border-bottom: 4px solid var(--oxblood);
+    }}
+    h1 {{
+      font-family: "Fraunces", serif;
+      font-weight: 700;
+      font-size: clamp(2rem, 5vw, 3rem);
+      line-height: 1.05;
+      letter-spacing: -0.015em;
+      color: var(--ink);
+    }}
+    h1 em {{
+      font-style: italic;
+      color: var(--oxblood);
+      font-weight: 500;
+    }}
+    .subtitle {{
+      margin-top: 14px;
+      font-size: 14px;
+      color: var(--steel);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }}
+    main {{
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 48px 28px 120px;
+    }}
+    section {{ margin-bottom: 56px; }}
+    h2 {{
+      font-family: "Fraunces", serif;
+      font-weight: 700;
+      font-size: 1.7rem;
+      color: var(--oxblood);
+      margin-bottom: 8px;
+      letter-spacing: -0.01em;
+    }}
+    h2 .num {{
+      display: inline-block;
+      font-family: "JetBrains Mono", monospace;
+      font-weight: 600;
+      font-size: 0.9rem;
+      color: var(--steel);
+      margin-right: 10px;
+      vertical-align: 4px;
+    }}
+    h3 {{
+      font-family: "Fraunces", serif;
+      font-weight: 600;
+      font-size: 1.15rem;
+      color: var(--ink);
+      margin-top: 28px;
+      margin-bottom: 6px;
+    }}
+    p {{ margin-bottom: 14px; max-width: 68ch; }}
+    ol, ul {{ padding-left: 22px; margin-bottom: 14px; }}
+    ol li, ul li {{ margin-bottom: 8px; max-width: 68ch; }}
+    strong {{ color: var(--oxblood); font-weight: 600; }}
+    code {{
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.93em;
+      background: rgba(122, 46, 42, 0.08);
+      color: var(--oxblood-dark);
+      padding: 2px 6px;
+      border-radius: 3px;
+      word-break: break-all;
+    }}
+    pre {{
+      font-family: "JetBrains Mono", monospace;
+      background: var(--ink);
+      color: var(--paper);
+      padding: 16px 20px;
+      border-radius: 4px;
+      margin: 16px 0;
+      overflow-x: auto;
+      font-size: 0.9em;
+      line-height: 1.55;
+    }}
+    .download-cta {{
+      display: inline-flex;
+      align-items: center;
+      gap: 14px;
+      margin: 16px 0 8px;
+      padding: 18px 28px;
+      background: var(--oxblood);
+      color: var(--paper);
+      font-family: "Fraunces", serif;
+      font-weight: 600;
+      font-size: 1.25rem;
+      text-decoration: none;
+      border-radius: 3px;
+      box-shadow: 0 3px 0 var(--oxblood-dark), 0 6px 20px rgba(0,0,0,0.15);
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }}
+    .download-cta:hover {{
+      transform: translateY(-1px);
+      box-shadow: 0 4px 0 var(--oxblood-dark), 0 8px 24px rgba(0,0,0,0.18);
+    }}
+    .download-cta:active {{ transform: translateY(1px); box-shadow: 0 1px 0 var(--oxblood-dark), 0 2px 8px rgba(0,0,0,0.15); }}
+    .download-cta .arrow {{ font-size: 1.4em; }}
+    .download-sub {{
+      display: block;
+      font-size: 13px;
+      color: var(--steel);
+      margin-top: 6px;
+    }}
+    .callout {{
+      margin: 20px 0;
+      padding: 16px 20px;
+      border-left: 3px solid var(--amber);
+      background: rgba(232, 163, 61, 0.08);
+      font-size: 14.5px;
+    }}
+    .callout strong {{ color: var(--ink); }}
+    table {{
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0;
+      font-size: 14px;
+    }}
+    th, td {{
+      text-align: left;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--rule);
+      vertical-align: top;
+    }}
+    th {{
+      font-family: "Fraunces", serif;
+      font-weight: 600;
+      color: var(--oxblood);
+      letter-spacing: 0.01em;
+      border-bottom: 2px solid var(--oxblood);
+    }}
+    figure {{
+      margin: 24px 0 28px;
+      padding: 14px;
+      background: rgba(27, 27, 27, 0.03);
+      border: 1px solid var(--rule);
+      border-radius: 4px;
+    }}
+    figure img {{
+      width: 100%;
+      height: auto;
+      display: block;
+      border-radius: 2px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+    }}
+    figcaption {{
+      font-size: 13px;
+      color: var(--steel);
+      margin-top: 10px;
+      font-style: italic;
+      font-family: "Fraunces", serif;
+    }}
+    kbd {{
+      display: inline-block;
+      padding: 2px 7px;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.85em;
+      background: var(--paper);
+      border: 1px solid var(--steel);
+      border-bottom-width: 2px;
+      border-radius: 3px;
+      color: var(--ink);
+    }}
+    hr {{
+      border: none;
+      border-top: 1px solid var(--rule);
+      margin: 56px 0;
+    }}
+    footer {{
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 24px 28px 64px;
+      border-top: 1px solid var(--rule);
+      color: var(--steel);
+      font-size: 13px;
+      letter-spacing: 0.02em;
+    }}
+    footer a {{ color: var(--oxblood); text-decoration: none; border-bottom: 1px dotted var(--oxblood); }}
+    .toc {{
+      padding: 20px 24px;
+      background: rgba(122, 46, 42, 0.05);
+      border-left: 3px solid var(--oxblood);
+      margin-bottom: 48px;
+    }}
+    .toc h3 {{ margin-top: 0; font-size: 0.95rem; color: var(--oxblood); letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 10px; }}
+    .toc ol {{ padding-left: 20px; margin: 0; }}
+    .toc li {{ margin-bottom: 4px; }}
+    .toc a {{ color: var(--ink); text-decoration: none; border-bottom: 1px dotted var(--steel); }}
+    .toc a:hover {{ color: var(--oxblood); border-bottom-color: var(--oxblood); }}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Earl Scheib EMS Watcher<br /><em>Install & Usage Guide</em></h1>
+    <div class="subtitle">For Marco — Earl Scheib Auto Body Concord · v1.0</div>
+  </header>
+
+  <main>
+    <p>This guide walks you through installing the EMS Watcher on your shop PC and using the built-in queue viewer. The whole setup takes about two minutes, and after that the system runs by itself every five minutes in the background. You do not need to do anything on a day-to-day basis — this page is here for the first-time setup and the occasional check.</p>
+
+    <div class="toc">
+      <h3>Contents</h3>
+      <ol>
+        <li><a href="#download">Download the installer</a></li>
+        <li><a href="#install">Run the installer (3 steps)</a></li>
+        <li><a href="#after">What happens after install</a></li>
+        <li><a href="#queue">The Queue Viewer — see and cancel pending texts</a></li>
+        <li><a href="#troubleshoot">Troubleshooting</a></li>
+        <li><a href="#where">Where things live on your PC</a></li>
+        <li><a href="#support">Support</a></li>
+      </ol>
+    </div>
+
+    <section id="download">
+      <h2><span class="num">1.</span>Download the installer</h2>
+      <p>Click the button below on the shop PC (the same one that runs CCC ONE). A file named <code>EarlScheibWatcher-Setup.exe</code> (about 10 MB) will save to your <strong>Downloads</strong> folder.</p>
+      <p>
+        <a class="download-cta" href="/earlscheibconcord/download">
+          <span class="arrow">↓</span> Download EarlScheibWatcher-Setup.exe
+        </a>
+      </p>
+      <p class="download-sub">Signed Inno Setup installer · Windows 10 / 11 · ~10 MB</p>
+    </section>
+
+    <section id="install">
+      <h2><span class="num">2.</span>Run the installer</h2>
+      <p>Double-click the downloaded file. Approve the Windows administrator prompt if one appears.</p>
+
+      <div class="callout">
+        <strong>"Windows protected your PC" blue screen?</strong> This is normal for new business software. Click <strong>More info</strong> (below the main text), then click <strong>Run anyway</strong>. Windows SmartScreen shows this warning for programs it hasn't seen downloaded many times yet.
+      </div>
+
+      <p>The wizard has three pages:</p>
+
+      <table>
+        <tr><th>Page</th><th>What it asks</th><th>What to do</th></tr>
+        <tr>
+          <td><strong>1. Folder</strong></td>
+          <td>Where CCC ONE saves EMS files.</td>
+          <td>The installer suggests the most likely folder. Click <strong>Browse</strong> only if you use a non-standard path. Click <strong>Next</strong>.</td>
+        </tr>
+        <tr>
+          <td><strong>2. Connection</strong></td>
+          <td>Tests the link to the follow-up service.</td>
+          <td>Should show a <strong>✓ check</strong>. If it fails, check your Wi-Fi. You can also click <strong>Continue anyway</strong> — the watcher will retry automatically.</td>
+        </tr>
+        <tr>
+          <td><strong>3. CCC ONE</strong></td>
+          <td>Reminds you to turn on EMS export in CCC ONE.</td>
+          <td>Open CCC ONE separately, go to <strong>Tools → Extract → EMS Extract Preferences</strong>, check both <strong>Lock Estimate</strong> and <strong>Save Workfile</strong>, save. Back in the installer, check the <strong>"I've done this"</strong> box and click <strong>Finish</strong>.</td>
+        </tr>
+      </table>
+
+      <p>On the last page there is a checkbox <strong>"Launch Queue Viewer now"</strong> — leave it checked and click <strong>Finish</strong>. Your browser will open to the queue page so you can confirm the system is running.</p>
+
+      <p>The installer also adds an <strong>Earl Scheib Queue</strong> shortcut to your <strong>Desktop</strong> and your <strong>Start Menu</strong>. Use it any time you want to open the queue later.</p>
+    </section>
+
+    <section id="after">
+      <h2><span class="num">3.</span>What happens after install</h2>
+      <ul>
+        <li>Every 5 minutes, Windows runs the watcher silently. There is no icon, no tray, no popup. It's meant to stay out of your way.</li>
+        <li>When CCC ONE exports a new estimate, the watcher picks it up within ~5 minutes and sends it to the follow-up service.</li>
+        <li>The service schedules three texts automatically: a 24-hour follow-up, a 3-day follow-up, and a post-repair review request.</li>
+        <li>Nothing else to do on a normal day. The guide below is for when you want to peek at the queue or something seems off.</li>
+      </ul>
+    </section>
+
+    <section id="queue">
+      <h2><span class="num">4.</span>The Queue Viewer — see and cancel pending texts</h2>
+      <p>Double-click the <strong>Earl Scheib Queue</strong> shortcut on your Desktop (or from the Start Menu). A small black window opens briefly, and your browser auto-opens to the queue page.</p>
+
+      <figure>
+        <img src="/earlscheibconcord/static/admin-ui-default.png" alt="Queue default view showing three customer cards" loading="lazy">
+        <figcaption>The queue viewer. Each card is one customer; nested rows are each pending message, grouped so you can see all of a customer's queued texts at a glance.</figcaption>
+      </figure>
+
+      <p>Each row shows:</p>
+      <ul>
+        <li><strong>Send time</strong> (Pacific): when the text is scheduled to go out, shortened like "Tue 2:30 PM"</li>
+        <li><strong>Job type</strong>: <code>24-HOUR</code> (estimate follow-up), <code>3-DAY</code> (second follow-up), or <code>REVIEW</code> (post-repair review request)</li>
+        <li><strong>Estimate/job reference</strong>: e.g. <code>EST-A4829</code></li>
+        <li><strong>cancel</strong> link on the right</li>
+      </ul>
+
+      <h3>Cancelling a message</h3>
+      <p>Click the <strong>cancel</strong> link on any row. The row strikes through and an amber <strong>"click to undo"</strong> pill appears with a 5-second countdown ring:</p>
+
+      <figure>
+        <img src="/earlscheibconcord/static/admin-ui-cancel-undo.png" alt="Cancel with 5-second undo countdown" loading="lazy">
+        <figcaption>You have 5 seconds to click the amber pill to abort. The countdown ring on the right drains as the window closes.</figcaption>
+      </figure>
+
+      <p>If you change your mind within those 5 seconds, click the pill and the cancel is aborted — nothing is deleted. If you do nothing, the row is permanently removed:</p>
+
+      <figure>
+        <img src="/earlscheibconcord/static/admin-ui-after-settled.png" alt="Queue after a row was cancelled" loading="lazy">
+        <figcaption>After the 5-second window expires, the row is gone from the queue. The next auto-refresh picks up the change.</figcaption>
+      </figure>
+
+      <h3>When nothing is queued</h3>
+      <p>Overnight, on weekends, or before the first estimate of the day, the queue is empty:</p>
+
+      <figure>
+        <img src="/earlscheibconcord/static/admin-ui-empty.png" alt="Empty queue with italic 'Nothing queued right now'" loading="lazy">
+        <figcaption>Empty state. Nothing to do — this is normal, not an error.</figcaption>
+      </figure>
+
+      <h3>Refreshing the page</h3>
+      <ul>
+        <li>The queue refreshes itself <strong>every 15 seconds</strong>. Leave the page open and it stays current.</li>
+        <li>Press <kbd>R</kbd> (with no text field selected) to refresh immediately, or click the small refresh arrow in the top-right.</li>
+        <li>Close the browser tab when you're done. The small black window behind the scenes closes itself about 30 seconds later.</li>
+      </ul>
+    </section>
+
+    <section id="troubleshoot">
+      <h2><span class="num">5.</span>Troubleshooting</h2>
+      <table>
+        <tr><th>If you see…</th><th>What to do</th></tr>
+        <tr>
+          <td>Windows SmartScreen blocked the installer</td>
+          <td>Click <strong>More info</strong> → <strong>Run anyway</strong>. See callout in step 2.</td>
+        </tr>
+        <tr>
+          <td>Customers aren't getting text messages</td>
+          <td>Open <code>C:\\EarlScheibWatcher\\ems_watcher.log</code> in Notepad. Look for recent errors. If you see "connection failed" repeating, check the shop's Wi-Fi.</td>
+        </tr>
+        <tr>
+          <td>CCC ONE isn't exporting EMS files</td>
+          <td>In CCC ONE: <strong>Tools → Extract → EMS Extract Preferences</strong>. Make sure both <strong>Lock Estimate</strong> and <strong>Save Workfile</strong> are checked, and the <strong>Output Folder</strong> matches what you entered in the installer.</td>
+        </tr>
+        <tr>
+          <td>You moved the CCC ONE folder and need to re-point the watcher</td>
+          <td>Open Command Prompt as Administrator and run: <code>C:\\EarlScheibWatcher\\earlscheib.exe --configure</code></td>
+        </tr>
+        <tr>
+          <td>Want to uninstall</td>
+          <td><strong>Settings → Apps</strong>, find <strong>Earl Scheib EMS Watcher</strong>, click <strong>Uninstall</strong>.</td>
+        </tr>
+        <tr>
+          <td>Queue viewer says <code>cannot reach local admin</code></td>
+          <td>The background window closed. Double-click the <strong>Earl Scheib Queue</strong> shortcut again.</td>
+        </tr>
+        <tr>
+          <td>Queue viewer says <code>queue fetch failed (401)</code></td>
+          <td>Contact App Support — the signing key got out of sync.</td>
+        </tr>
+        <tr>
+          <td>Anything else</td>
+          <td>Contact <a href="mailto:admin@jjagpal.me"><code>admin@jjagpal.me</code></a></td>
+        </tr>
+      </table>
+    </section>
+
+    <section id="where">
+      <h2><span class="num">6.</span>Where things live on your PC</h2>
+      <pre>C:\\EarlScheibWatcher\\
+  earlscheib.exe        the watcher program
+  config.ini            your saved folder path + settings
+  ems_watcher.log       activity log (safe to read)
+  ems_watcher.db        dedup database (don't touch)</pre>
+      <p>Windows Task Scheduler (search <em>"Task Scheduler"</em> in the Start Menu) lists the watcher as <code>EarlScheibEMSWatcher</code> under <strong>Task Scheduler Library</strong>. The <strong>Last Run Time</strong> column shows when it last ran; <strong>Last Run Result</strong> should say <em>"The operation completed successfully (0x0)"</em>.</p>
+    </section>
+
+    <section id="support">
+      <h2><span class="num">7.</span>Support</h2>
+      <p>Reach out to the app developer for any technical issue — installer won't run, messages aren't sending, queue viewer won't open, etc.</p>
+      <p>Email <a href="mailto:admin@jjagpal.me" style="color: var(--oxblood); font-weight: 600;">admin@jjagpal.me</a> with a short description of what's happening. If possible, attach or paste the last 50 lines of <code>C:\\EarlScheibWatcher\\ems_watcher.log</code> — it dramatically speeds up diagnosis.</p>
+    </section>
+  </main>
+
+  <footer>
+    Earl Scheib Auto Body Concord · EMS Watcher v1.0 · © {year}<br />
+    Source: <a href="https://github.com/jaskarn78/earl-scheib-ems-watcher">github.com/jaskarn78/earl-scheib-ems-watcher</a>
+  </footer>
+</body>
+</html>
+"""
+
+
 class WebhookHandler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):  # suppress default access log spam
@@ -1250,6 +1672,41 @@ class WebhookHandler(BaseHTTPRequestHandler):
             html = SUPPORT_HTML.format(year=year)
             self._send_html(200, html)
             return
+
+        # Marco's install + usage guide — Concord Garage aesthetic, screenshots inline.
+        if path == "/earlscheibconcord/instructions":
+            year = datetime.now().year
+            html = INSTRUCTIONS_HTML.format(year=year)
+            self._send_html(200, html)
+            return
+
+        # Static screenshot assets referenced by /instructions.
+        # Safelist: only specific PNG filenames; no path traversal.
+        if path.startswith("/earlscheibconcord/static/"):
+            import os
+            fname = path[len("/earlscheibconcord/static/"):]
+            safe_assets = {
+                "admin-ui-default.png", "admin-ui-cancel-undo.png",
+                "admin-ui-after-settled.png", "admin-ui-empty.png",
+            }
+            if fname in safe_assets:
+                app_dir = os.path.dirname(os.path.abspath(__file__))
+                asset_path = os.path.join(app_dir, "docs", "screenshots", fname)
+                if os.path.exists(asset_path):
+                    size = os.path.getsize(asset_path)
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/png")
+                    self.send_header("Content-Length", str(size))
+                    self.send_header("Cache-Control", "public, max-age=3600")
+                    self.end_headers()
+                    with open(asset_path, "rb") as f:
+                        while True:
+                            chunk = f.read(65536)
+                            if not chunk:
+                                break
+                            self.wfile.write(chunk)
+                    return
+            self.send_response(404); self.end_headers(); return
 
         if path == "/earlscheibconcord/status":
             import json as _json
