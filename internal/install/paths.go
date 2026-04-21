@@ -8,10 +8,15 @@ import (
 )
 
 // cccOneCandidates are the standard CCC ONE export folder locations, in priority
-// order. Matches the four paths from the Inno Setup DetectCCCOnePath() Pascal function.
+// order. Matches the candidate list in the Inno Setup DetectCCCOnePath() Pascal function.
+// PartsTrader\Export is the actual path CCC ONE uses on Marco's shop PC (observed 2026-04-21).
 var cccOneCandidates = []string{
-	`C:\CCC\EMS_Export`,
+	`C:\CCC APPS\CCCONE\CCCONE\DATA\PartsTrader\Export`,
+	`C:\CCC\APPS\CCCONE\CCCONE\DATA\PartsTrader\Export`,
+	`C:\CCC APPS\CCCONE\CCCONE\DATA`,
+	`C:\CCC\APPS\CCCONE\CCCONE\DATA`,
 	`C:\CCC\APPS\CCCCONE\CCCCONE\DATA`,
+	`C:\CCC\EMS_Export`,
 	`C:\Program Files\CCC`,
 	`C:\Program Files (x86)\CCC`,
 }

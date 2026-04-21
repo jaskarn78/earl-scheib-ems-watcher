@@ -298,7 +298,7 @@ begin
   if DetectedPath <> '' then
     FolderPage.Values[0] := DetectedPath
   else
-    FolderPage.Values[0] := 'C:\CCC\EMS_Export';
+    FolderPage.Values[0] := 'C:\CCC APPS\CCCONE\CCCONE\DATA\PartsTrader\Export';
 
   // -- Page 2: Connection Test (UI-07) --
   ConnPage := CreateOutputMsgPage(FolderPage.ID,

@@ -79,7 +79,7 @@ func Run(opts Options) error {
 	// Step 3 — folder selection
 	detected, _ := DetectCCCOnePath()
 	if detected == "" {
-		detected = `C:\CCC\EMS_Export`
+		detected = `C:\CCC APPS\CCCONE\CCCONE\DATA\PartsTrader\Export`
 	}
 
 	folder, err := wz.promptFolder(
@@ -331,7 +331,7 @@ func Configure(opts Options) error {
 	wz.println()
 
 	// Load current folder from config to use as default
-	currentFolder := `C:\CCC\EMS_Export`
+	currentFolder := `C:\CCC APPS\CCCONE\CCCONE\DATA\PartsTrader\Export`
 	if detected, ok := DetectCCCOnePath(); ok {
 		currentFolder = detected
 	}
