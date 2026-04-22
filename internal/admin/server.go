@@ -53,11 +53,13 @@ type server struct {
 // non-http.ErrServerClosed serve errors.
 func Run(ctx context.Context, cfg Config) error {
 	if cfg.HeartbeatTimeout == 0 {
-		// OH4 override: extended from 5m -> 30m so Marco can keep the queue
-		// viewer open across a shift without it silently shutting down. The
-		// UI's sleep panel (main.js) is the user-visible fallback when it
-		// does eventually time out.
-		cfg.HeartbeatTimeout = 30 * time.Minute
+		// QAJ-03 TESTING BUMP: extended to 24h so the Queue Viewer stays
+		// alive overnight during the multi-day field test. The existing
+		// sleep-panel UI still triggers when the timer elapses; users
+		// just reach it far less often.
+		// TODO(qaj): revert to 30*time.Minute before prod re-release so
+		// the watchdog auto-shutdown returns to its original cadence.
+		cfg.HeartbeatTimeout = 24 * time.Hour
 	}
 	if cfg.ShutdownGrace == 0 {
 		cfg.ShutdownGrace = 5 * time.Second
