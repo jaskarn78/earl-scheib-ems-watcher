@@ -125,8 +125,8 @@ func makeTestDBF(t *testing.T, dir, filename string, cols []columnSpec, row map[
 func Test_ParseBundle_AD1_Only_Errors(t *testing.T) {
 	dir := t.TempDir()
 	ad1 := makeTestDBF(t, dir, "G-123.AD1",
-		[]columnSpec{{"V_OWNER_F", 20}, {"V_OWNER_L", 20}, {"V_OWNER_PH", 20}},
-		map[string]string{"V_OWNER_F": "Marco", "V_OWNER_L": "Rossi", "V_OWNER_PH": "555"},
+		[]columnSpec{{"OWNR_FN", 20}, {"OWNR_LN", 20}, {"OWNR_PH1", 20}},
+		map[string]string{"OWNR_FN": "Marco", "OWNR_LN": "Rossi", "OWNR_PH1": "555"},
 	)
 	files := map[string]string{"ad1": ad1}
 	_, err := ParseBundle("G-123", files)
@@ -141,12 +141,12 @@ func Test_ParseBundle_AD1_Only_Errors(t *testing.T) {
 func Test_ParseBundle_AD1_Plus_VEH_OK(t *testing.T) {
 	dir := t.TempDir()
 	ad1 := makeTestDBF(t, dir, "G-123.AD1",
-		[]columnSpec{{"V_OWNER_F", 20}, {"V_OWNER_L", 20}, {"V_OWNER_PH", 20}},
-		map[string]string{"V_OWNER_F": "Marco", "V_OWNER_L": "Rossi", "V_OWNER_PH": "(925) 555-0199"},
+		[]columnSpec{{"OWNR_FN", 20}, {"OWNR_LN", 20}, {"OWNR_PH1", 20}},
+		map[string]string{"OWNR_FN": "Marco", "OWNR_LN": "Rossi", "OWNR_PH1": "(925) 555-0199"},
 	)
 	veh := makeTestDBF(t, dir, "G-123.VEH",
-		[]columnSpec{{"V_VIN", 20}, {"V_YR", 4}, {"V_MAKE", 20}, {"V_MODEL", 20}},
-		map[string]string{"V_VIN": "1HGCM82633A123456", "V_YR": "2020", "V_MAKE": "HONDA", "V_MODEL": "ACCORD"},
+		[]columnSpec{{"V_VIN", 20}, {"V_MODEL_YR", 4}, {"V_MAKEDESC", 20}, {"V_MODEL", 20}},
+		map[string]string{"V_VIN": "1HGCM82633A123456", "V_MODEL_YR": "2020", "V_MAKEDESC": "HONDA", "V_MODEL": "ACCORD"},
 	)
 
 	b, err := ParseBundle("G-123", map[string]string{"ad1": ad1, "veh": veh})
@@ -156,14 +156,14 @@ func Test_ParseBundle_AD1_Plus_VEH_OK(t *testing.T) {
 	if b.Basename != "G-123" {
 		t.Errorf("Basename=%q want %q", b.Basename, "G-123")
 	}
-	if b.AD1["V_OWNER_F"] != "Marco" {
-		t.Errorf("AD1[V_OWNER_F]=%q want %q", b.AD1["V_OWNER_F"], "Marco")
+	if b.AD1["OWNR_FN"] != "Marco" {
+		t.Errorf("AD1[OWNR_FN]=%q want %q", b.AD1["OWNR_FN"], "Marco")
 	}
-	if b.AD1["V_OWNER_L"] != "Rossi" {
-		t.Errorf("AD1[V_OWNER_L]=%q want %q", b.AD1["V_OWNER_L"], "Rossi")
+	if b.AD1["OWNR_LN"] != "Rossi" {
+		t.Errorf("AD1[OWNR_LN]=%q want %q", b.AD1["OWNR_LN"], "Rossi")
 	}
-	if b.AD1["V_OWNER_PH"] != "(925) 555-0199" {
-		t.Errorf("AD1[V_OWNER_PH]=%q want %q", b.AD1["V_OWNER_PH"], "(925) 555-0199")
+	if b.AD1["OWNR_PH1"] != "(925) 555-0199" {
+		t.Errorf("AD1[OWNR_PH1]=%q want %q", b.AD1["OWNR_PH1"], "(925) 555-0199")
 	}
 	if b.VEH["V_VIN"] != "1HGCM82633A123456" {
 		t.Errorf("VEH[V_VIN]=%q want %q", b.VEH["V_VIN"], "1HGCM82633A123456")
@@ -175,8 +175,8 @@ func Test_ParseBundle_TrailingSpaces_Stripped(t *testing.T) {
 	// Write value "Marco" (5 chars) into a 20-char field — dBase pads to 20 with spaces.
 	// With TrimSpaces=true in the parser's OpenTable config, we should get "Marco".
 	ad1 := makeTestDBF(t, dir, "G-1.AD1",
-		[]columnSpec{{"V_OWNER_F", 20}, {"V_OWNER_L", 20}, {"V_OWNER_PH", 20}},
-		map[string]string{"V_OWNER_F": "Marco", "V_OWNER_L": "", "V_OWNER_PH": ""},
+		[]columnSpec{{"OWNR_FN", 20}, {"OWNR_LN", 20}, {"OWNR_PH1", 20}},
+		map[string]string{"OWNR_FN": "Marco", "OWNR_LN": "", "OWNR_PH1": ""},
 	)
 	veh := makeTestDBF(t, dir, "G-1.VEH",
 		[]columnSpec{{"V_VIN", 20}},
@@ -186,18 +186,18 @@ func Test_ParseBundle_TrailingSpaces_Stripped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseBundle: %v", err)
 	}
-	if b.AD1["V_OWNER_F"] != "Marco" {
-		t.Errorf("trimmed V_OWNER_F=%q want %q (trailing spaces should be stripped)",
-			b.AD1["V_OWNER_F"], "Marco")
+	if b.AD1["OWNR_FN"] != "Marco" {
+		t.Errorf("trimmed OWNR_FN=%q want %q (trailing spaces should be stripped)",
+			b.AD1["OWNR_FN"], "Marco")
 	}
 }
 
 func Test_ParseBundle_MissingOptionalField_EmptyString(t *testing.T) {
 	dir := t.TempDir()
-	// AD1 intentionally does NOT include V_OWNER_E — lookup must return "" without error.
+	// AD1 intentionally does NOT include OWNR_EA — lookup must return "" without error.
 	ad1 := makeTestDBF(t, dir, "G-2.AD1",
-		[]columnSpec{{"V_OWNER_F", 20}},
-		map[string]string{"V_OWNER_F": "Solo"},
+		[]columnSpec{{"OWNR_FN", 20}},
+		map[string]string{"OWNR_FN": "Solo"},
 	)
 	veh := makeTestDBF(t, dir, "G-2.VEH",
 		[]columnSpec{{"V_VIN", 20}},
@@ -207,42 +207,42 @@ func Test_ParseBundle_MissingOptionalField_EmptyString(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseBundle: %v", err)
 	}
-	if b.AD1["V_OWNER_E"] != "" {
-		t.Errorf("missing field V_OWNER_E=%q want empty string", b.AD1["V_OWNER_E"])
+	if b.AD1["OWNR_EA"] != "" {
+		t.Errorf("missing field OWNR_EA=%q want empty string", b.AD1["OWNR_EA"])
 	}
-	if b.AD1["V_OWNER_L"] != "" {
-		t.Errorf("missing field V_OWNER_L=%q want empty string", b.AD1["V_OWNER_L"])
+	if b.AD1["OWNR_LN"] != "" {
+		t.Errorf("missing field OWNR_LN=%q want empty string", b.AD1["OWNR_LN"])
 	}
 }
 
 func Test_ParseBundle_WithENV_DocNumExtracted(t *testing.T) {
 	dir := t.TempDir()
 	ad1 := makeTestDBF(t, dir, "G-3.AD1",
-		[]columnSpec{{"V_OWNER_F", 20}, {"V_OWNER_L", 20}},
-		map[string]string{"V_OWNER_F": "Al", "V_OWNER_L": "Pha"},
+		[]columnSpec{{"OWNR_FN", 20}, {"OWNR_LN", 20}},
+		map[string]string{"OWNR_FN": "Al", "OWNR_LN": "Pha"},
 	)
 	veh := makeTestDBF(t, dir, "G-3.VEH",
 		[]columnSpec{{"V_VIN", 20}},
 		map[string]string{"V_VIN": "VIN-003"},
 	)
 	env := makeTestDBF(t, dir, "G-3.ENV",
-		[]columnSpec{{"E_DOC_NUM", 20}},
-		map[string]string{"E_DOC_NUM": "EST-00042"},
+		[]columnSpec{{"UNQFILE_ID", 20}},
+		map[string]string{"UNQFILE_ID": "EST-00042"},
 	)
 	b, err := ParseBundle("G-3", map[string]string{"ad1": ad1, "veh": veh, "env": env})
 	if err != nil {
 		t.Fatalf("ParseBundle: %v", err)
 	}
-	if b.ENV["E_DOC_NUM"] != "EST-00042" {
-		t.Errorf("ENV[E_DOC_NUM]=%q want %q", b.ENV["E_DOC_NUM"], "EST-00042")
+	if b.ENV["UNQFILE_ID"] != "EST-00042" {
+		t.Errorf("ENV[UNQFILE_ID]=%q want %q", b.ENV["UNQFILE_ID"], "EST-00042")
 	}
 }
 
 func Test_ParseBundle_SourceFilesSorted(t *testing.T) {
 	dir := t.TempDir()
 	ad1 := makeTestDBF(t, dir, "g-9.AD1",
-		[]columnSpec{{"V_OWNER_F", 20}},
-		map[string]string{"V_OWNER_F": "z"},
+		[]columnSpec{{"OWNR_FN", 20}},
+		map[string]string{"OWNR_FN": "z"},
 	)
 	veh := makeTestDBF(t, dir, "G-9.VEH",
 		[]columnSpec{{"V_VIN", 20}},

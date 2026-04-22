@@ -189,7 +189,7 @@ func scannerTestDBF(t *testing.T, dir, filename string, colName string, length u
 
 func TestRun_BundleTrack_POSTsOnce(t *testing.T) {
 	dir := t.TempDir()
-	scannerTestDBF(t, dir, "G-777.AD1", "V_OWNER_F", 20, "Runner")
+	scannerTestDBF(t, dir, "G-777.AD1", "OWNR_FN", 20, "Runner")
 	scannerTestDBF(t, dir, "G-777.VEH", "V_VIN", 20, "VIN-777")
 
 	d := openTestDB(t)
@@ -255,7 +255,7 @@ func TestRun_BothTracks_Coexist(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Bundle track files.
-	scannerTestDBF(t, dir, "G-8.AD1", "V_OWNER_F", 20, "Two")
+	scannerTestDBF(t, dir, "G-8.AD1", "OWNR_FN", 20, "Two")
 	scannerTestDBF(t, dir, "G-8.VEH", "V_VIN", 20, "V")
 
 	d := openTestDB(t)
@@ -310,7 +310,7 @@ func TestRun_BothTracks_Coexist(t *testing.T) {
 // TestRun_BundleSendFailure_NoDedupRow — failed send does NOT mark as processed.
 func TestRun_BundleSendFailure_NoDedupRow(t *testing.T) {
 	dir := t.TempDir()
-	scannerTestDBF(t, dir, "G-F.AD1", "V_OWNER_F", 20, "F")
+	scannerTestDBF(t, dir, "G-F.AD1", "OWNR_FN", 20, "F")
 	scannerTestDBF(t, dir, "G-F.VEH", "V_VIN", 20, "V")
 
 	d := openTestDB(t)

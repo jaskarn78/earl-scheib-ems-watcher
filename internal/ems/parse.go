@@ -9,12 +9,22 @@ import (
 	"github.com/Valentin-Kaiser/go-dbase/dbase"
 )
 
-// Fields we extract per CCC ONE EMS 2.01 file kind. Missing fields are stored
-// as "" without error — only missing files trigger a ParseBundle error.
+// Fields we extract per CCC ONE EMS 2.01 file kind. Confirmed empirically
+// from a live Earl Scheib bundle (AD1=117 cols, VEH=28 cols, ENV=25 cols).
+// OWNR_* is the vehicle owner (our SMS target); INSD_* is the insured party
+// and serves as a fallback when OWNR is blank (some shops duplicate, some
+// populate only INSD). Missing fields are stored as "" without error —
+// only missing files trigger a ParseBundle error.
 var (
-	ad1Fields = []string{"V_OWNER_F", "V_OWNER_L", "V_OWNER_PH", "V_OWNER_AD", "V_OWNER_E"}
-	vehFields = []string{"V_VIN", "V_YR", "V_MAKE", "V_MODEL"}
-	envFields = []string{"E_DOC_NUM", "E_RO", "E_EST_NUM", "E_DOC_ID", "E_REF"}
+	ad1Fields = []string{
+		// Owner (primary target for follow-up SMS)
+		"OWNR_FN", "OWNR_LN", "OWNR_PH1", "OWNR_PH2", "OWNR_EA",
+		"OWNR_ADDR1", "OWNR_ADDR2", "OWNR_CITY", "OWNR_ST", "OWNR_ZIP",
+		// Insured (fallback when OWNR is blank)
+		"INSD_FN", "INSD_LN", "INSD_PH1", "INSD_PH2", "INSD_EA",
+	}
+	vehFields = []string{"V_VIN", "V_MODEL_YR", "V_MAKEDESC", "V_MAKECODE", "V_MODEL", "V_COLOR"}
+	envFields = []string{"UNQFILE_ID", "ESTFILE_ID", "RO_ID", "SUPP_NO", "TRANS_TYPE"}
 )
 
 // ParseBundle reads the dBase files in the bundle and returns a populated

@@ -10,11 +10,13 @@ import (
 // results from parse_bms (server 400 "invalid BMS payload").
 const bmsNamespace = "http://www.cieca.com/BMS"
 
-// Document status literal. CCC ONE EMS 2.01 bundles we synthesize represent
-// an estimate transmission; app.py reads DocumentStatus into data but does
-// not branch on the value. "EST" is the conventional CIECA code. If a future
-// workflow needs to differentiate statuses, plumb ENV["E_STATUS"] into here.
-const documentStatusEstimate = "EST"
+// Default document status when the ENV.TRANS_TYPE field is missing or empty.
+// app.py branches on this: ESTIMATE_STATUSES={E,EM,EL,EP} triggers 24h+3day
+// jobs, CLOSED_STATUSES={I,C,F,FI,FC,WC} triggers review. "E" is the CIECA
+// code for a plain estimate transmission — the default for any non-empty
+// EMS bundle. When ENV.TRANS_TYPE carries a different code we forward it
+// verbatim (e.g. "EM" supplement, "I" invoiced) so jobs route correctly.
+const documentStatusEstimateDefault = "E"
 
 // bmsDoc is the tree we marshal. Element names are chosen to match the XPath
 // queries in app.py parse_bms() — specifically the `.//bms:TAG` lookups which
@@ -71,14 +73,13 @@ type bmsOwner struct {
 // semantically required.
 //
 // Field mapping (b → BMS):
-//   - DocumentVerCode: first non-empty of ENV[E_DOC_NUM, E_RO, E_EST_NUM,
-//     E_DOC_ID, E_REF], falling back to b.Basename. Guaranteed non-empty —
-//     this ensures app.py never needs its DocumentID fallback branch.
-//   - DocumentStatus: literal "EST".
-//   - Owner.GivenName: AD1[V_OWNER_F]
-//   - Owner.OtherOrSurName: AD1[V_OWNER_L]
-//   - Owner.CommPhone: AD1[V_OWNER_PH]  (raw; clean_phone normalizes server-side)
-//   - Owner.CommAddr: AD1[V_OWNER_AD]   (informational; app.py ignores today)
+//   - DocumentVerCode: first non-empty of ENV[UNQFILE_ID, ESTFILE_ID, RO_ID],
+//     falling back to b.Basename. Guaranteed non-empty so app.py never needs
+//     its DocumentID fallback branch.
+//   - DocumentStatus: ENV.TRANS_TYPE verbatim (E, EM, EL, EP, I, C, ...) —
+//     defaults to "E" when blank so plain estimate POSTs schedule jobs.
+//   - Owner.GivenName / OtherOrSurName / CommPhone / CommAddr: AD1 OWNR_*
+//     fields, with INSD_* fallback (some shops populate only the insured).
 //   - ActualPickupDateTime: ""  (no pickup yet at estimate time)
 //   - CloseDateTime: ""         (no close yet at estimate time)
 func RenderBMS(b *Bundle) []byte {
@@ -88,17 +89,17 @@ func RenderBMS(b *Bundle) []byte {
 			Trans: bmsTrans{
 				DocumentInfo: bmsDocumentInfo{
 					DocumentVerCode: pickDocumentVerCode(b),
-					DocumentStatus:  documentStatusEstimate,
+					DocumentStatus:  pickDocumentStatus(b),
 				},
 				EventInfo: bmsEventInfo{
 					RepairEvent: bmsRepairEvent{CloseDateTime: ""},
 				},
 				EstimateAddRq: bmsEstimateAddRq{
 					Owner: bmsOwner{
-						GivenName:      lookup(b.AD1, "V_OWNER_F"),
-						OtherOrSurName: lookup(b.AD1, "V_OWNER_L"),
-						CommPhone:      lookup(b.AD1, "V_OWNER_PH"),
-						CommAddr:       lookup(b.AD1, "V_OWNER_AD"),
+						GivenName:      pickOwnerField(b, "FN"),
+						OtherOrSurName: pickOwnerField(b, "LN"),
+						CommPhone:      pickOwnerField(b, "PH1"),
+						CommAddr:       lookup(b.AD1, "OWNR_ADDR1"),
 					},
 					ActualPickupDateTime: "",
 				},
@@ -127,13 +128,35 @@ func RenderBMS(b *Bundle) []byte {
 // falling back to b.Basename. Guaranteed non-empty when called with a valid
 // Bundle (Basename is always set by ParseBundle).
 func pickDocumentVerCode(b *Bundle) string {
-	priority := []string{"E_DOC_NUM", "E_RO", "E_EST_NUM", "E_DOC_ID", "E_REF"}
+	priority := []string{"UNQFILE_ID", "ESTFILE_ID", "RO_ID"}
 	for _, key := range priority {
 		if v := lookup(b.ENV, key); v != "" {
 			return v
 		}
 	}
 	return b.Basename
+}
+
+// pickDocumentStatus returns ENV.TRANS_TYPE verbatim if present, else the
+// default estimate status "E". ENV.TRANS_TYPE ∈ {E, EM, EL, EP, I, C, ...}
+// per CIECA spec and is consumed by app.py's ESTIMATE_STATUSES /
+// CLOSED_STATUSES sets to schedule the right follow-up jobs.
+func pickDocumentStatus(b *Bundle) string {
+	if v := lookup(b.ENV, "TRANS_TYPE"); v != "" {
+		return v
+	}
+	return documentStatusEstimateDefault
+}
+
+// pickOwnerField returns the OWNR_<suffix> value from AD1 if non-empty,
+// otherwise falls back to INSD_<suffix>. Some bodyshops populate only the
+// insured block and leave owner blank (or vice-versa); trying both means
+// a populated estimate never renders an empty customer record.
+func pickOwnerField(b *Bundle, suffix string) string {
+	if v := lookup(b.AD1, "OWNR_"+suffix); v != "" {
+		return v
+	}
+	return lookup(b.AD1, "INSD_"+suffix)
 }
 
 // lookup returns m[key] if m is non-nil and the key is present, else "".

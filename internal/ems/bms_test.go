@@ -24,12 +24,12 @@ func Test_RenderBMS_ParsesCleanly(t *testing.T) {
 	b := &Bundle{
 		Basename: "G-1",
 		AD1: map[string]string{
-			"V_OWNER_F":  "Marco",
-			"V_OWNER_L":  "Rossi",
-			"V_OWNER_PH": "5555550100",
+			"OWNR_FN":  "Marco",
+			"OWNR_LN":  "Rossi",
+			"OWNR_PH1": "5555550100",
 		},
 		VEH: map[string]string{"V_VIN": "VIN-001"},
-		ENV: map[string]string{"E_DOC_NUM": "EST-001"},
+		ENV: map[string]string{"UNQFILE_ID": "EST-001"},
 	}
 	out := RenderBMS(b)
 	if !bytes.HasPrefix(out, []byte(`<?xml version="1.0" encoding="utf-8"?>`)) {
@@ -45,7 +45,7 @@ func Test_RenderBMS_ParsesCleanly(t *testing.T) {
 
 func Test_RenderBMS_HasCCCNamespace(t *testing.T) {
 	t.Parallel()
-	b := &Bundle{Basename: "ns-1", AD1: map[string]string{"V_OWNER_F": "n"}, VEH: map[string]string{"V_VIN": "v"}}
+	b := &Bundle{Basename: "ns-1", AD1: map[string]string{"OWNR_FN": "n"}, VEH: map[string]string{"V_VIN": "v"}}
 	out := RenderBMS(b)
 	if !bytes.Contains(out, []byte(`xmlns="http://www.cieca.com/BMS"`)) {
 		t.Fatalf(`expected xmlns="http://www.cieca.com/BMS" in output; got:\n%s`, out)
@@ -57,13 +57,13 @@ func Test_RenderBMS_ElementsMatchPython(t *testing.T) {
 	b := &Bundle{
 		Basename: "match-1",
 		AD1: map[string]string{
-			"V_OWNER_F":  "A",
-			"V_OWNER_L":  "B",
-			"V_OWNER_PH": "1234567890",
-			"V_OWNER_AD": "123 Main St",
+			"OWNR_FN":  "A",
+			"OWNR_LN":  "B",
+			"OWNR_PH1": "1234567890",
+			"OWNR_ADDR1": "123 Main St",
 		},
 		VEH: map[string]string{"V_VIN": "V"},
-		ENV: map[string]string{"E_DOC_NUM": "DOC"},
+		ENV: map[string]string{"UNQFILE_ID": "DOC"},
 	}
 	out := RenderBMS(b)
 	mustContain := []string{
@@ -84,12 +84,12 @@ func Test_RenderBMS_ValuesRoundtrip(t *testing.T) {
 	b := &Bundle{
 		Basename: "rt-1",
 		AD1: map[string]string{
-			"V_OWNER_F":  "Marco",
-			"V_OWNER_L":  "Rossi",
-			"V_OWNER_PH": "(925) 555-0199",
+			"OWNR_FN":  "Marco",
+			"OWNR_LN":  "Rossi",
+			"OWNR_PH1": "(925) 555-0199",
 		},
 		VEH: map[string]string{"V_VIN": "VIN"},
-		ENV: map[string]string{"E_DOC_NUM": "EST-00042"},
+		ENV: map[string]string{"UNQFILE_ID": "EST-00042"},
 	}
 	out := RenderBMS(b)
 
@@ -115,7 +115,7 @@ func Test_RenderBMS_FallbackToBasename(t *testing.T) {
 	t.Parallel()
 	b := &Bundle{
 		Basename: "FALLBACK-BASENAME",
-		AD1:      map[string]string{"V_OWNER_F": "x"},
+		AD1:      map[string]string{"OWNR_FN": "x"},
 		VEH:      map[string]string{"V_VIN": "y"},
 		// ENV intentionally nil — DocumentVerCode MUST fall back to Basename.
 	}
@@ -127,22 +127,21 @@ func Test_RenderBMS_FallbackToBasename(t *testing.T) {
 
 func Test_RenderBMS_ENVPriorityOrder(t *testing.T) {
 	t.Parallel()
-	// Priority: E_DOC_NUM > E_RO > E_EST_NUM > E_DOC_ID > E_REF.
-	// When E_DOC_NUM is empty but E_RO has value, E_RO wins.
+	// Priority: UNQFILE_ID > ESTFILE_ID > RO_ID, then fallback to Basename.
+	// When UNQFILE_ID is empty but ESTFILE_ID has value, ESTFILE_ID wins.
 	b := &Bundle{
 		Basename: "prio",
-		AD1:      map[string]string{"V_OWNER_F": "x"},
+		AD1:      map[string]string{"OWNR_FN": "x"},
 		VEH:      map[string]string{"V_VIN": "y"},
 		ENV: map[string]string{
-			"E_DOC_NUM":  "",
-			"E_RO":       "RO-7",
-			"E_EST_NUM":  "EST-99",
-			"E_DOC_ID":   "D-1",
+			"UNQFILE_ID": "",
+			"ESTFILE_ID": "EST-99",
+			"RO_ID":      "RO-7",
 		},
 	}
 	out := RenderBMS(b)
-	if !strings.Contains(string(out), "<DocumentVerCode>RO-7</DocumentVerCode>") {
-		t.Fatalf("expected RO-7 (E_RO) to win priority; got:\n%s", out)
+	if !strings.Contains(string(out), "<DocumentVerCode>EST-99</DocumentVerCode>") {
+		t.Fatalf("expected EST-99 (ESTFILE_ID) to win priority over RO_ID; got:\n%s", out)
 	}
 }
 
