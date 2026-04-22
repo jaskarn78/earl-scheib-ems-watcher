@@ -3,14 +3,15 @@ module github.com/jjagpal/earl-scheib-watcher
 go 1.25.0
 
 require (
+	github.com/Valentin-Kaiser/go-dbase v1.12.10
 	golang.org/x/sys v0.42.0
+	golang.org/x/text v0.27.0
 	gopkg.in/ini.v1 v1.67.1
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	modernc.org/sqlite v1.49.1
 )
 
 require (
-	github.com/Valentin-Kaiser/go-dbase v1.12.10 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
