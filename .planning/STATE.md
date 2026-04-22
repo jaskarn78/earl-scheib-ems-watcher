@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: v1.0 milestone complete
-stopped_at: Completed quick task 260422-k38 — EMS dBase bundle parser
-last_updated: "2026-04-22T14:52:57Z"
+stopped_at: Completed quick task 260422-nk1 — self-update mechanism shipped and live
+last_updated: "2026-04-22T17:15:11.424Z"
 progress:
-  total_phases: 5
-  completed_phases: 5
-  total_plans: 19
-  completed_plans: 19
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
 ---
 
 # Project State
@@ -132,6 +132,7 @@ Recent decisions affecting current work:
 - [Quick 260422-k38]: DocumentVerCode priority E_DOC_NUM > E_RO > E_EST_NUM > E_DOC_ID > E_REF > basename; guaranteed non-empty so app.py DocumentID fallback never fires
 - [Quick 260422-k38]: sendFn URL wrapping (strings.HasSuffix ".bundle" → append ?trigger=ems_bundle) keeps RunConfig stable; no new BundleSender field
 - [Quick 260422-k38]: Tests chdir into uppercase-safe workdir to work around go-dbase v1.12.10 NewTable full-path ToUpper behaviour; tests drop t.Parallel (conflict with t.Chdir in Go 1.25)
+- [Phase quick-260422-nk1]: Self-update mechanism shipped: client polls /version HMAC-signed each scan, SHA256-verifies installer, launches /VERYSILENT reinstall; kill-switch via update_paused sentinel file or AUTO_UPDATE_PAUSED env; cooldown 3600s + 3-strike fail limit
 
 ### Roadmap Evolution
 
@@ -153,9 +154,10 @@ None yet.
 |---|-------------|------|--------|-----------|
 | 260421-shq | Debuggability improvements — scanner error detail, admin Diagnostic panel, server /diagnostic endpoint | 2026-04-21 | b54eb96 | [260421-shq-debuggability-improvements-scanner-admin](./quick/260421-shq-debuggability-improvements-scanner-admin/) |
 | 260422-k38 | EMS dBase bundle parser — CCC ONE AD1/VEH/ENV → BMS XML, scanner bundle track, ?trigger=ems_bundle routing | 2026-04-22 | 967770b | [260422-k38-ems-bundle-parser-dbase-cccone](./quick/260422-k38-ems-bundle-parser-dbase-cccone/) |
+| 260422-nk1 | Self-update mechanism — client polls /version each scan, SHA256-verifies installer, silently reinstalls via /VERYSILENT; kill-switch via update_paused sentinel | 2026-04-22 | c8a7544 | [260422-nk1-self-update-autoupdate-mechanism](./quick/260422-nk1-self-update-autoupdate-mechanism/) |
 
 ## Session Continuity
 
-Last session: 2026-04-22T14:52:57Z
-Stopped at: Completed quick task 260422-k38 — EMS dBase bundle parser shipped (MD5 parity verified)
+Last session: 2026-04-22T17:15:08.607Z
+Stopped at: Completed quick task 260422-nk1 — self-update mechanism shipped and live
 Resume file: None
