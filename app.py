@@ -2145,6 +2145,11 @@ class WebhookHandler(BaseHTTPRequestHandler):
         # live in ui_public/. See `make sync-ui`.
         # ------------------------------------------------------------------
         if path == "/earlscheib" or path.startswith("/earlscheib/"):
+            # NOTE: `import os` is re-bound locally elsewhere in do_GET, which
+            # turns `os` into a function-local name for the whole method and
+            # causes UnboundLocalError on first reference here. Alias to a
+            # local name loaded via import to dodge the scoping trap.
+            import os as _os_ui
             if not ADMIN_UI_ENABLED:
                 self.send_response(404); self.end_headers(); return
             auth = self.headers.get("Authorization", "")
@@ -2158,14 +2163,14 @@ class WebhookHandler(BaseHTTPRequestHandler):
             log.info("basic-auth: user=%s ip=%s path=%s",
                      ADMIN_UI_USER, self.client_address[0], path)
 
-            app_dir = os.path.dirname(os.path.abspath(__file__))
-            ui_dir = os.path.join(app_dir, "ui_public")
+            app_dir = _os_ui.path.dirname(_os_ui.path.abspath(__file__))
+            ui_dir = _os_ui.path.join(app_dir, "ui_public")
 
             # Root → serve index.html with API_BASE_PATH injection so the
             # shared main.js knows to hit /earlscheibconcord/* instead of
             # its default /api/* base.
             if path == "/earlscheib":
-                index_path = os.path.join(ui_dir, "index.html")
+                index_path = _os_ui.path.join(ui_dir, "index.html")
                 try:
                     with open(index_path, "r", encoding="utf-8") as f:
                         html = f.read()
@@ -2194,10 +2199,10 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
             # CSS + JS: simple safelist — no traversal.
             if path == "/earlscheib/main.css":
-                asset_path = os.path.join(ui_dir, "main.css")
+                asset_path = _os_ui.path.join(ui_dir, "main.css")
                 content_type = "text/css; charset=utf-8"
             elif path == "/earlscheib/main.js":
-                asset_path = os.path.join(ui_dir, "main.js")
+                asset_path = _os_ui.path.join(ui_dir, "main.js")
                 content_type = "application/javascript; charset=utf-8"
             else:
                 self.send_response(404); self.end_headers(); return
