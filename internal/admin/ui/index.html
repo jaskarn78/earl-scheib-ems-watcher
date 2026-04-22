@@ -24,6 +24,12 @@
       <span class="brand-mode">Queue</span>
     </div>
 
+    <!-- WMH-04: view switcher. Queue (default) + Templates editor. -->
+    <nav class="topnav" role="tablist" aria-label="Views">
+      <a class="topnav-link is-active" data-view="queue"     href="#queue"     role="tab" aria-selected="true">Queue</a>
+      <a class="topnav-link"           data-view="templates" href="#templates" role="tab" aria-selected="false">Templates</a>
+    </nav>
+
     <div class="stats" aria-label="Queue statistics">
       <span class="stat"><b id="stat-pending">0</b><span class="stat-label">Pending</span></span>
       <span class="stat-sep" aria-hidden="true">·</span>
@@ -44,41 +50,59 @@
     </div>
   </header>
 
-  <!-- QAJ-02: filter chips + live search. Keep the light Fraunces aesthetic;
-       Work Sans uppercase with letter-spacing for the chips; oxblood selected
-       state. Search uses canvas bg + oxblood focus accent. -->
-  <section class="controls" aria-label="Queue filters">
-    <nav class="filters" role="tablist" aria-label="Filter jobs">
-      <button class="filter" type="button" data-filter="all" role="tab" aria-selected="true">All</button>
-      <button class="filter" type="button" data-filter="estimates" role="tab" aria-selected="false">Estimates</button>
-      <button class="filter" type="button" data-filter="completed" role="tab" aria-selected="false">Work Completed</button>
-      <button class="filter" type="button" data-filter="sent" role="tab" aria-selected="false">Sent</button>
-    </nav>
-    <div class="search-wrap">
-      <svg class="search-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <circle cx="7" cy="7" r="5"></circle>
-        <path d="M14 14l-3.5-3.5"></path>
-      </svg>
-      <input id="search" class="search" type="search" placeholder="Search by name, phone, VIN, RO…" aria-label="Search">
-    </div>
-  </section>
+  <!-- WMH-04: view wrappers. Queue view (default) contains filter chips,
+       queue grid, diagnostic panel. Templates view (hidden by default)
+       lists editable SMS templates, one card per job_type. JS toggles the
+       `hidden` attribute on these elements when the topnav is clicked. -->
+  <div id="view-queue" data-view="queue">
+    <!-- QAJ-02: filter chips + live search. Keep the light Fraunces aesthetic;
+         Work Sans uppercase with letter-spacing for the chips; oxblood selected
+         state. Search uses canvas bg + oxblood focus accent. -->
+    <section class="controls" aria-label="Queue filters">
+      <nav class="filters" role="tablist" aria-label="Filter jobs">
+        <button class="filter" type="button" data-filter="all" role="tab" aria-selected="true">All</button>
+        <button class="filter" type="button" data-filter="estimates" role="tab" aria-selected="false">Estimates</button>
+        <button class="filter" type="button" data-filter="completed" role="tab" aria-selected="false">Work Completed</button>
+        <button class="filter" type="button" data-filter="sent" role="tab" aria-selected="false">Sent</button>
+      </nav>
+      <div class="search-wrap">
+        <svg class="search-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="7" cy="7" r="5"></circle>
+          <path d="M14 14l-3.5-3.5"></path>
+        </svg>
+        <input id="search" class="search" type="search" placeholder="Search by name, phone, VIN, RO…" aria-label="Search">
+      </div>
+    </section>
 
-  <main id="queue" class="queue" aria-live="polite" aria-busy="true">
-    <!-- Estimate cards (with nested timelines) injected by main.js -->
-  </main>
+    <main id="queue" class="queue" aria-live="polite" aria-busy="true">
+      <!-- Estimate cards (with nested timelines) injected by main.js -->
+    </main>
 
-  <section id="diagnostic" class="diagnostic" aria-label="Diagnostic">
-    <h2 class="diag-heading">Diagnostic</h2>
-    <dl class="diag-grid">
-      <dt>Watch folder</dt>             <dd id="diag-watch-folder">—</dd>
-      <dt>Folder exists</dt>            <dd id="diag-folder-exists">—</dd>
-      <dt>Files in folder</dt>          <dd id="diag-file-count">—</dd>
-      <dt>Last scan</dt>                <dd id="diag-last-scan">—</dd>
-      <dt>Last heartbeat (server)</dt>  <dd id="diag-last-heartbeat">—</dd>
-      <dt>HMAC secret baked in</dt>     <dd id="diag-hmac">—</dd>
-      <dt>Version</dt>                  <dd id="diag-version">—</dd>
-    </dl>
-  </section>
+    <section id="diagnostic" class="diagnostic" aria-label="Diagnostic">
+      <h2 class="diag-heading">Diagnostic</h2>
+      <dl class="diag-grid">
+        <dt>Watch folder</dt>             <dd id="diag-watch-folder">—</dd>
+        <dt>Folder exists</dt>            <dd id="diag-folder-exists">—</dd>
+        <dt>Files in folder</dt>          <dd id="diag-file-count">—</dd>
+        <dt>Last scan</dt>                <dd id="diag-last-scan">—</dd>
+        <dt>Last heartbeat (server)</dt>  <dd id="diag-last-heartbeat">—</dd>
+        <dt>HMAC secret baked in</dt>     <dd id="diag-hmac">—</dd>
+        <dt>Version</dt>                  <dd id="diag-version">—</dd>
+      </dl>
+    </section>
+  </div>
+
+  <div id="view-templates" data-view="templates" hidden>
+    <section class="templates" aria-label="SMS templates">
+      <header class="templates-header">
+        <h1 class="templates-title">Message templates</h1>
+        <p class="templates-sub">Edit the SMS copy that goes out for each follow-up. Clearing a template restores the default.</p>
+      </header>
+      <div id="templates-list" class="templates-list" aria-live="polite">
+        <!-- One .tpl-card per job_type, injected by main.js. -->
+      </div>
+    </section>
+  </div>
 
   <!-- Estimate card = one customer + one vehicle with ALL their pending/sent
        follow-ups rendered as a vertical timeline. Preserves the OH4 aesthetic
@@ -149,6 +173,33 @@
     <section class="error">
       <p class="error-msg"></p>
     </section>
+  </template>
+
+  <!-- WMH-04: one editable template per job_type. Work Sans chips, cream
+       card, oxblood CTA. Reuses .sms-bubble for the preview. -->
+  <template id="template-card-template">
+    <article class="tpl-card" data-job-type="">
+      <header class="tpl-card__head">
+        <h2 class="tpl-card__title"></h2>
+        <span class="tpl-card__when"></span>
+        <span class="tpl-card__badge" hidden>Custom</span>
+        <span class="tpl-card__dirty-dot" hidden aria-label="Unsaved changes"></span>
+      </header>
+      <p class="tpl-card__hint">Click a variable to insert it at the cursor.</p>
+      <div class="tpl-card__chips" role="group" aria-label="Available variables"></div>
+      <label class="tpl-card__label"></label>
+      <textarea class="tpl-card__body" maxlength="2000" rows="4" spellcheck="true"></textarea>
+      <div class="tpl-card__counter mono"><span class="tpl-card__count">0</span> / 2000</div>
+      <figure class="tpl-card__preview">
+        <figcaption>Preview — rendered against a real pending job when one exists</figcaption>
+        <div class="sms-bubble tpl-card__preview-body"></div>
+      </figure>
+      <footer class="tpl-card__actions">
+        <button type="button" class="btn btn-primary tpl-save" disabled>Save</button>
+        <button type="button" class="btn btn-ghost   tpl-reset" disabled>Reset to default</button>
+        <span class="tpl-card__status" role="status" aria-live="polite"></span>
+      </footer>
+    </article>
   </template>
 
   <!-- Sleep panel: shown when the local admin server has stopped responding

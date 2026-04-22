@@ -37,24 +37,57 @@
   // QAJ-02: debounce for search input.
   const SEARCH_DEBOUNCE_MS = 150;
 
-  // SMS templates — MUST stay byte-for-byte identical to app.py MSG_*.
-  // If you change the app.py templates, update the three strings below.
-  // app.py location: constants MSG_24H / MSG_3DAY / MSG_REVIEW near line 96.
+  // SMS template fallbacks — used by the queue SMS preview bubble when the
+  // /templates endpoint hasn't yet been loaded, or as the ultimate fallback
+  // on a stale render. Must stay in lock-step with app.py DEFAULT_TEMPLATES.
+  // Marco-customised copy flows through GET /templates (WMH-02) and is cached
+  // in `effectiveTemplates` below; previewSMS prefers that cache.
   const SMS_TEMPLATES = {
     '24h':
-      'Hi {name}, this is Earl Scheib Auto Body in Concord. Just following up on your recent estimate. ' +
-      'Have questions or ready to schedule? Call us at (925) 609-7780.',
+      'Hi {first_name}, this is {shop_name}. Just following up on your recent estimate. ' +
+      'Have questions or ready to schedule? Call us at {shop_phone}.',
     '3day':
-      'Hi {name}, Earl Scheib Auto Body Concord checking in about your estimate from a few days ago. ' +
-      "We'd love to help get your car looking great! Call (925) 609-7780.",
+      'Hi {first_name}, {shop_name} checking in about your estimate from a few days ago. ' +
+      "We'd love to help get your car looking great! Call {shop_phone}.",
     'review':
-      'Hi {name}, thank you for choosing Earl Scheib Auto Body Concord! Hope you\'re happy with your repair. ' +
-      'Would you mind leaving us a Google review? It means a lot: https://g.page/r/review',
+      'Hi {first_name}, thank you for choosing {shop_name}! Hope you\'re happy with your repair. ' +
+      'Would you mind leaving us a Google review? It means a lot: {review_url}',
+  };
+  const SHOP_CONSTANTS = {
+    shop_name:  'Earl Scheib Auto Body Concord',
+    shop_phone: '(925) 609-7780',
+    review_url: 'https://g.page/r/review',
   };
 
-  function previewSMS(jobType, name) {
-    const tpl = SMS_TEMPLATES[jobType] || '';
-    return tpl.replace('{name}', name || 'there');
+  // Renders a template body against a per-row context (job fields + shop
+  // constants). Missing placeholders render as empty string, matching the
+  // server's defaultdict-based render_template.
+  function renderTemplate(tpl, ctx) {
+    if (!tpl) return '';
+    const bag = Object.assign({}, SHOP_CONSTANTS, ctx || {});
+    if (!bag.first_name && bag.name) {
+      bag.first_name = String(bag.name).split(/\s+/)[0];
+    }
+    if (!bag.first_name) bag.first_name = 'there';
+    return tpl.replace(/\{(\w+)\}/g, (_, key) => {
+      const v = bag[key];
+      return (v === undefined || v === null) ? '' : String(v);
+    });
+  }
+
+  // WMH-04: cache of effective bodies per job_type — hydrated from
+  // GET /templates on first Templates-tab visit and refreshed after every
+  // Save/Reset. Used by the queue-page SMS preview bubble so the preview
+  // matches Marco's edits without a second round-trip.
+  const effectiveTemplates = {};
+
+  function previewSMS(jobType, job) {
+    // Legacy call-sites pass a bare name string. Normalise to an object.
+    const ctx = (typeof job === 'string')
+      ? { name: job }
+      : (job || {});
+    const tpl = effectiveTemplates[jobType] || SMS_TEMPLATES[jobType] || '';
+    return renderTemplate(tpl, ctx);
   }
 
   const JOB_TYPE_LABELS = {
@@ -316,7 +349,7 @@
       frag.querySelector('.job-send').hidden = true;
     }
 
-    frag.querySelector('.sms-bubble').textContent = previewSMS(job.job_type, job.name);
+    frag.querySelector('.sms-bubble').textContent = previewSMS(job.job_type, job);
 
     const sendBtn   = frag.querySelector('.send-now-btn');
     const cancelBtn = frag.querySelector('.cancel-btn');
@@ -716,17 +749,353 @@
     });
   }
 
+  // ---------- Templates page (WMH-04) ---------------------------------
+  //
+  // URL paths (respect API_BASE_PATH):
+  //   Go admin  : GET /api/templates            PUT /api/templates/{jt}
+  //   Public UI : GET /earlscheibconcord/templates PUT /earlscheibconcord/templates/{jt}
+  //
+  // The tab is loaded lazily on first click; subsequent clicks reuse the
+  // already-mounted DOM. Refresh happens after each Save/Reset.
+
+  const tplListURL   = IS_LOCAL_ADMIN
+    ? '/api/templates'
+    : `${API_BASE}/templates`;
+  const tplUpsertURL = (jt) => IS_LOCAL_ADMIN
+    ? `/api/templates/${encodeURIComponent(jt)}`
+    : `${API_BASE}/templates/${encodeURIComponent(jt)}`;
+
+  const templateState = {
+    // Map of job_type -> { body: <saved body>, is_override: bool, label, when }
+    cards:         {},
+    sample:        {},
+    placeholders:  { per_row: [], shop: [] },
+    loaded:        false,
+  };
+
+  function getTemplatesListEl() {
+    return document.getElementById('templates-list');
+  }
+
+  async function loadTemplates(force) {
+    const listEl = getTemplatesListEl();
+    if (!listEl) return;
+    if (templateState.loaded && !force) return;
+
+    listEl.innerHTML = '';
+    const loading = document.createElement('p');
+    loading.className = 'templates-loading';
+    loading.textContent = 'Loading templates…';
+    listEl.appendChild(loading);
+
+    try {
+      const resp = await fetch(tplListURL, { cache: 'no-store' });
+      if (!resp.ok) {
+        listEl.innerHTML = '';
+        const err = document.createElement('p');
+        err.className = 'templates-error';
+        err.textContent = `Couldn't load templates (${resp.status}).`;
+        listEl.appendChild(err);
+        return;
+      }
+      const data = await resp.json();
+      templateState.sample       = data.sample_row || {};
+      templateState.placeholders = data.placeholders || { per_row: [], shop: [] };
+      templateState.cards        = {};
+      listEl.innerHTML = '';
+      (data.job_types || []).forEach((jt) => {
+        templateState.cards[jt.job_type] = {
+          body:        jt.body,
+          is_override: !!jt.is_override,
+          label:       jt.label,
+          when:        jt.when,
+        };
+        // Refresh queue-page preview cache with the effective body.
+        effectiveTemplates[jt.job_type] = jt.body;
+        listEl.appendChild(buildTemplateCard(jt));
+      });
+      templateState.loaded = true;
+    } catch (_) {
+      listEl.innerHTML = '';
+      const err = document.createElement('p');
+      err.className = 'templates-error';
+      err.textContent = "Couldn't reach the server. Please retry.";
+      listEl.appendChild(err);
+    }
+  }
+
+  function buildTemplateCard(jt) {
+    const tpl = document.getElementById('template-card-template');
+    const frag = tpl.content.cloneNode(true);
+    const article = frag.querySelector('.tpl-card');
+    article.dataset.jobType = jt.job_type;
+
+    frag.querySelector('.tpl-card__title').textContent = jt.label;
+    frag.querySelector('.tpl-card__when').textContent  = jt.when;
+
+    const badge = frag.querySelector('.tpl-card__badge');
+    badge.hidden = !jt.is_override;
+
+    // Variable chips — per-row first, then shop constants.
+    const chipsEl = frag.querySelector('.tpl-card__chips');
+    const allPlaceholders = (templateState.placeholders.per_row || [])
+      .concat(templateState.placeholders.shop || []);
+    allPlaceholders.forEach((name) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'tpl-chip';
+      chip.textContent = `{${name}}`;
+      chip.setAttribute('data-var', name);
+      chipsEl.appendChild(chip);
+    });
+
+    // Textarea + preview + counter.
+    const taId = `tpl-body-${jt.job_type}`;
+    const textarea = frag.querySelector('.tpl-card__body');
+    const label    = frag.querySelector('.tpl-card__label');
+    textarea.id    = taId;
+    textarea.value = jt.body || '';
+    label.setAttribute('for', taId);
+    label.textContent = 'Message body';
+
+    const counter   = frag.querySelector('.tpl-card__count');
+    const previewEl = frag.querySelector('.tpl-card__preview-body');
+    const saveBtn   = frag.querySelector('.tpl-save');
+    const resetBtn  = frag.querySelector('.tpl-reset');
+    const dirtyDot  = frag.querySelector('.tpl-card__dirty-dot');
+    const statusEl  = frag.querySelector('.tpl-card__status');
+
+    // Initial render.
+    counter.textContent = String(textarea.value.length);
+    previewEl.textContent = renderTemplate(textarea.value, templateState.sample);
+    resetBtn.disabled = !jt.is_override;
+
+    // Chip click -> insert at cursor.
+    chipsEl.addEventListener('click', (ev) => {
+      const btn = ev.target.closest('.tpl-chip');
+      if (!btn) return;
+      ev.preventDefault();
+      const v = btn.getAttribute('data-var');
+      insertAtCursor(textarea, `{${v}}`);
+      // Trigger input handler for preview + dirty-state refresh.
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    // Debounced preview + dirty tracking.
+    let previewTimer = null;
+    textarea.addEventListener('input', () => {
+      counter.textContent = String(textarea.value.length);
+      if (previewTimer) clearTimeout(previewTimer);
+      previewTimer = setTimeout(() => {
+        previewEl.textContent = renderTemplate(textarea.value, templateState.sample);
+      }, SEARCH_DEBOUNCE_MS);
+
+      const saved = templateState.cards[jt.job_type] || { body: '' };
+      const isDirty = textarea.value !== saved.body;
+      dirtyDot.hidden = !isDirty;
+      saveBtn.disabled = !isDirty;
+      // Reset enabled when an override exists (regardless of dirty) so Marco
+      // can revert to default after saving without needing to clear the box.
+      resetBtn.disabled = !saved.is_override;
+      // Clear inline error state once the user edits again.
+      statusEl.textContent = '';
+      statusEl.removeAttribute('data-state');
+    });
+
+    // Save.
+    saveBtn.addEventListener('click', async () => {
+      const val = textarea.value;
+      // Instant client-side validation: balanced braces. Server validates
+      // authoritatively; this just gives instant UX feedback.
+      if (!bracesBalanced(val)) {
+        showStatus(statusEl, 'Unclosed { or mismatched braces', 'error');
+        return;
+      }
+      saveBtn.disabled = true;
+      resetBtn.disabled = true;
+      try {
+        const resp = await fetch(tplUpsertURL(jt.job_type), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ body: val }),
+        });
+        const parsed = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          const msg = parsed.detail || parsed.error || `Save failed (${resp.status})`;
+          showStatus(statusEl, msg, 'error');
+          // Re-enable so user can retry.
+          saveBtn.disabled = false;
+          resetBtn.disabled = !(templateState.cards[jt.job_type] || {}).is_override;
+          return;
+        }
+        applySavedTemplate(jt.job_type, parsed, textarea, badge, dirtyDot,
+                           saveBtn, resetBtn, statusEl, previewEl);
+      } catch (_) {
+        showStatus(statusEl, 'Network error — please retry', 'error');
+        saveBtn.disabled = false;
+        resetBtn.disabled = !(templateState.cards[jt.job_type] || {}).is_override;
+      }
+    });
+
+    // Reset to default — PUT with empty body (server DELETEs the row).
+    resetBtn.addEventListener('click', async () => {
+      if (!window.confirm('Restore the default copy for this follow-up?')) return;
+      saveBtn.disabled = true;
+      resetBtn.disabled = true;
+      try {
+        const resp = await fetch(tplUpsertURL(jt.job_type), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ body: '' }),
+        });
+        const parsed = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          showStatus(statusEl, parsed.error || `Reset failed (${resp.status})`, 'error');
+          saveBtn.disabled = false;
+          resetBtn.disabled = false;
+          return;
+        }
+        applySavedTemplate(jt.job_type, parsed, textarea, badge, dirtyDot,
+                           saveBtn, resetBtn, statusEl, previewEl);
+      } catch (_) {
+        showStatus(statusEl, 'Network error — please retry', 'error');
+        saveBtn.disabled = false;
+        resetBtn.disabled = false;
+      }
+    });
+
+    return frag;
+  }
+
+  function applySavedTemplate(jobType, parsed, textarea, badge, dirtyDot,
+                              saveBtn, resetBtn, statusEl, previewEl) {
+    const newBody = typeof parsed.body === 'string' ? parsed.body : '';
+    textarea.value = newBody;
+    const tCount = textarea.parentElement
+      ? textarea.parentElement.querySelector('.tpl-card__count')
+      : null;
+    if (tCount) tCount.textContent = String(newBody.length);
+    previewEl.textContent = renderTemplate(newBody, templateState.sample);
+
+    templateState.cards[jobType] = {
+      body:        newBody,
+      is_override: !!parsed.is_override,
+      label:       (templateState.cards[jobType] || {}).label,
+      when:        (templateState.cards[jobType] || {}).when,
+    };
+    effectiveTemplates[jobType] = newBody;
+
+    badge.hidden = !parsed.is_override;
+    dirtyDot.hidden = true;
+    saveBtn.disabled = true;
+    resetBtn.disabled = !parsed.is_override;
+
+    const msg = parsed.is_override ? 'Saved · just now' : 'Reverted to default';
+    showStatus(statusEl, msg, 'ok');
+  }
+
+  function showStatus(el, msg, kind) {
+    el.textContent = msg;
+    if (kind) el.setAttribute('data-state', kind);
+    else el.removeAttribute('data-state');
+    if (kind === 'ok') {
+      setTimeout(() => {
+        // Only clear if still showing the same message.
+        if (el.textContent === msg) {
+          el.textContent = '';
+          el.removeAttribute('data-state');
+        }
+      }, 3000);
+    }
+  }
+
+  function insertAtCursor(textarea, snippet) {
+    const start = textarea.selectionStart;
+    const end   = textarea.selectionEnd;
+    const before = textarea.value.slice(0, start);
+    const after  = textarea.value.slice(end);
+    textarea.value = before + snippet + after;
+    const caret = start + snippet.length;
+    textarea.focus();
+    textarea.setSelectionRange(caret, caret);
+  }
+
+  // Cheap brace-balance check — counts { and }, rejects when they don't match
+  // or when a } appears before any {. Matches str.format_map's coarse
+  // validator closely enough for instant UX feedback.
+  function bracesBalanced(s) {
+    let depth = 0;
+    for (let i = 0; i < s.length; i += 1) {
+      const c = s.charAt(i);
+      if (c === '{') depth += 1;
+      else if (c === '}') {
+        depth -= 1;
+        if (depth < 0) return false;
+      }
+    }
+    return depth === 0;
+  }
+
+  function wireTopnav() {
+    const links = document.querySelectorAll('.topnav-link');
+    const viewQueue = document.getElementById('view-queue');
+    const viewTpl   = document.getElementById('view-templates');
+    if (!links.length || !viewQueue || !viewTpl) return;
+
+    const activate = (target) => {
+      links.forEach((a) => {
+        const on = a.getAttribute('data-view') === target;
+        a.classList.toggle('is-active', on);
+        a.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      viewQueue.hidden = target !== 'queue';
+      viewTpl.hidden   = target !== 'templates';
+      if (target === 'templates') loadTemplates(false);
+    };
+
+    links.forEach((a) => {
+      a.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        const target = a.getAttribute('data-view') || 'queue';
+        activate(target);
+      });
+    });
+
+    // Allow direct-link via hash (e.g. refreshes on /earlscheib#templates).
+    if (window.location.hash === '#templates') activate('templates');
+  }
+
   // ---------- Wire up --------------------------------------------------
 
   document.addEventListener('DOMContentLoaded', () => {
     wireFilters();
     wireSearch();
+    wireTopnav();
 
     // Public-mode diagnostic labels: the same <dd> elements carry different
     // data when talking to app.py (server-centric) vs the Go admin
     // (client-centric). Rename the <dt> captions so operators don't see
     // "WATCH FOLDER" pointing at a host name.
     if (!IS_LOCAL_ADMIN) relabelDiagnosticForServer();
+
+    // WMH-04: prime the effective-templates cache once so the queue-page
+    // SMS preview reflects Marco's saved copy even if he never visits the
+    // Templates tab this session. Fires and forgets — failures are silent
+    // because the queue bubbles fall back to SMS_TEMPLATES[*] defaults.
+    fetch(tplListURL, { cache: 'no-store' })
+      .then((r) => (r && r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data || !Array.isArray(data.job_types)) return;
+        data.job_types.forEach((jt) => { effectiveTemplates[jt.job_type] = jt.body; });
+        // If any queue cards are already mounted, refresh their preview bubbles.
+        document.querySelectorAll('.timeline__entry').forEach((li) => {
+          // jobId is set when an entry is built; its parent card has the job
+          // object encoded in its chip + bubble. Simplest refresh: re-run
+          // fetchQueue so the whole thing rebuilds against lastJobs.
+        });
+        if (lastJobs && lastJobs.length) renderQueue(lastJobs);
+      })
+      .catch(() => { /* silent — defaults handle it */ });
 
     fetchQueue();
     setInterval(fetchQueue, REFRESH_MS);

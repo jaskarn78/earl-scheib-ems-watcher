@@ -72,10 +72,52 @@ body {
   min-height: 64px;
   padding: 14px 32px;
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  /* WMH-04: 4 columns — brand, topnav, stats, sync. */
+  grid-template-columns: auto auto 1fr auto;
   align-items: center;
-  gap: 32px;
+  gap: 24px;
   border-bottom: 1px solid var(--hairline);
+}
+
+/* ============== Topnav (WMH-04) ============== */
+
+.topnav {
+  display: inline-flex;
+  align-items: center;
+  gap: 18px;
+}
+.topnav-link {
+  position: relative;
+  font-family: "Work Sans", ui-sans-serif, sans-serif;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  text-decoration: none;
+  padding: 6px 2px;
+  transition: color 120ms ease;
+}
+.topnav-link:hover {
+  color: var(--oxblood);
+}
+.topnav-link.is-active {
+  color: var(--oxblood);
+}
+.topnav-link.is-active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -4px;
+  height: 2px;
+  background-color: var(--oxblood);
+  border-radius: 2px;
+}
+.topnav-link:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 4px;
+  border-radius: 2px;
 }
 
 .brand {
@@ -900,6 +942,207 @@ body {
 .diag-grid dd.ok  { color: #4e6a3b; }
 .diag-grid dd.bad { color: var(--oxblood); font-weight: 600; }
 
+/* ============== Templates page (WMH-04) ============== */
+
+.templates {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 36px 32px 80px;
+}
+.templates-header {
+  margin-bottom: 28px;
+}
+.templates-title {
+  font-family: "Fraunces", Georgia, serif;
+  font-weight: 600;
+  font-size: 34px;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  margin: 0 0 8px;
+}
+.templates-sub {
+  color: var(--ink-soft);
+  font-size: 15px;
+  margin: 0;
+  line-height: 1.55;
+  max-width: 620px;
+}
+.templates-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 24px;
+}
+.templates-loading,
+.templates-error {
+  color: var(--ink-soft);
+  font-size: 14px;
+  padding: 32px;
+  text-align: center;
+  background-color: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-card);
+}
+.templates-error { color: var(--oxblood); }
+
+.tpl-card {
+  background-color: var(--surface-alt);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-card);
+  padding: 24px 28px;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.tpl-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 12px;
+}
+.tpl-card__title {
+  font-family: "Fraunces", Georgia, serif;
+  font-weight: 600;
+  font-size: 22px;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  margin: 0;
+}
+.tpl-card__when {
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  letter-spacing: 0.02em;
+}
+.tpl-card__badge {
+  background-color: var(--oxblood);
+  color: #fff;
+  font-family: "Work Sans", ui-sans-serif, sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: var(--r-chip);
+}
+.tpl-card__dirty-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--amber);
+  box-shadow: 0 0 0 3px rgba(200, 149, 63, 0.25);
+  margin-left: auto;
+  align-self: center;
+}
+
+.tpl-card__hint {
+  color: var(--ink-soft);
+  font-size: 12px;
+  margin: -2px 0 -4px;
+  letter-spacing: 0.005em;
+}
+
+.tpl-card__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.tpl-chip {
+  background-color: var(--surface);
+  border: 1px solid var(--hairline);
+  color: var(--ink-soft);
+  font-family: "Work Sans", ui-sans-serif, sans-serif;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 5px 10px;
+  border-radius: var(--r-chip);
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease, transform 120ms ease;
+}
+.tpl-chip:hover {
+  color: var(--oxblood);
+  border-color: var(--oxblood);
+}
+.tpl-chip:active {
+  transform: scale(0.96);
+  background-color: var(--surface-alt);
+}
+.tpl-chip:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+
+.tpl-card__label {
+  font-family: "Work Sans", ui-sans-serif, sans-serif;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  margin-top: 2px;
+}
+
+.tpl-card__body {
+  width: 100%;
+  min-height: 110px;
+  resize: vertical;
+  background-color: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-panel);
+  padding: 12px 14px;
+  font-family: "Work Sans", ui-sans-serif, sans-serif;
+  font-size: 14.5px;
+  line-height: 1.5;
+  color: var(--ink);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.tpl-card__body:focus {
+  outline: none;
+  border-color: var(--oxblood);
+  box-shadow: 0 0 0 3px rgba(139, 42, 42, 0.10);
+}
+
+.tpl-card__counter {
+  color: var(--ink-soft);
+  font-size: 11.5px;
+  text-align: right;
+  margin-top: -6px;
+  letter-spacing: 0.02em;
+}
+
+.tpl-card__preview {
+  margin: 4px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tpl-card__preview figcaption {
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+
+.tpl-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+}
+.tpl-card__status {
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  letter-spacing: 0.02em;
+}
+.tpl-card__status[data-state="ok"]    { color: #4e6a3b; }
+.tpl-card__status[data-state="error"] { color: var(--terra); font-weight: 500; }
+
 /* ============== Responsive ============== */
 
 @media (max-width: 720px) {
@@ -909,6 +1152,10 @@ body {
     gap: 14px;
   }
   .stats { display: none; } /* keep topbar clean on mobile; stats visible in diag below */
+  .topnav { grid-column: 1 / -1; order: 2; gap: 16px; }
+  .templates { padding: 24px 18px 60px; }
+  .tpl-card { padding: 20px 18px; }
+  .templates-title { font-size: 26px; }
   .controls {
     padding: 20px 18px 4px;
     flex-direction: column;
