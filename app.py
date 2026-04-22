@@ -1889,9 +1889,12 @@ class WebhookHandler(BaseHTTPRequestHandler):
                     h.update(chunk)
             version = h.hexdigest()[:16]
 
+            # download_url is joined to webhookURL on the client
+            # (webhookURL already ends in /earlscheibconcord); keep this
+            # path relative to that so we don't double the prefix.
             self._send_json(200, {
                 "version": version,
-                "download_url": "/earlscheibconcord/download.exe",
+                "download_url": "/download.exe",
                 "paused": paused,
             })
             return
