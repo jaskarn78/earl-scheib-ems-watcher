@@ -551,39 +551,109 @@
       if (!resp.ok) return;
       const d = await resp.json();
 
-      setDiagText('diag-watch-folder', d.watch_folder || '—');
-
-      const existsTxt = d.folder_exists
-        ? 'exists'
-        : 'missing' + (d.folder_error ? ' — ' + d.folder_error : '');
-      setDiagStatus('diag-folder-exists', d.folder_exists, existsTxt);
-
-      setDiagText('diag-file-count',
-        d.folder_exists
-          ? `${d.file_count} file${d.file_count === 1 ? '' : 's'}`
-          : (d.folder_error || '—')
-      );
-
-      setDiagText('diag-last-scan',
-        d.last_scan_at
-          ? `${d.last_scan_at} — ${d.last_scan_processed} processed, ${d.last_scan_errors} errors`
-          : (d.last_scan_note || 'no scans yet')
-      );
-
-      setDiagText('diag-last-heartbeat', d.last_heartbeat_at || '—');
-
-      setDiagStatus('diag-hmac', d.hmac_secret_present,
-        d.hmac_secret_present ? 'yes' : 'NO — dev build or GSD_HMAC_SECRET unset');
-
-      setDiagText('diag-version', d.app_version || 'dev');
+      if (IS_LOCAL_ADMIN) {
+        renderLocalDiagnostic(d);
+      } else {
+        renderServerDiagnostic(d);
+      }
     } catch (_) {
       // Transient errors at 5s poll cadence — silent by design.
     }
   }
 
+  // Go admin (Marco's local binary) returns client-side fields —
+  // watch_folder on disk, file count, last scan result, baked-in HMAC secret.
+  function renderLocalDiagnostic(d) {
+    setDiagText('diag-watch-folder', d.watch_folder || '—');
+
+    const existsTxt = d.folder_exists
+      ? 'exists'
+      : 'missing' + (d.folder_error ? ' — ' + d.folder_error : '');
+    setDiagStatus('diag-folder-exists', d.folder_exists, existsTxt);
+
+    setDiagText('diag-file-count',
+      d.folder_exists
+        ? `${d.file_count} file${d.file_count === 1 ? '' : 's'}`
+        : (d.folder_error || '—')
+    );
+
+    setDiagText('diag-last-scan',
+      d.last_scan_at
+        ? `${d.last_scan_at} — ${d.last_scan_processed} processed, ${d.last_scan_errors} errors`
+        : (d.last_scan_note || 'no scans yet')
+    );
+
+    setDiagText('diag-last-heartbeat', d.last_heartbeat_at || '—');
+
+    setDiagStatus('diag-hmac', d.hmac_secret_present,
+      d.hmac_secret_present ? 'yes' : 'NO — dev build or GSD_HMAC_SECRET unset');
+
+    setDiagText('diag-version', d.app_version || 'dev');
+  }
+
+  // Server-side /earlscheibconcord/diagnostic returns a different shape —
+  // it can't see Marco's local filesystem, so we surface the operator-useful
+  // fields it does know: whether Marco's watcher is currently checking in,
+  // how long ago the last heartbeat arrived, active operator commands,
+  // and the tail of the most recent uploaded log.
+  function renderServerDiagnostic(d) {
+    const hb = d.last_heartbeat || {};
+    const hbSecs = typeof hb.seconds_ago === 'number' ? hb.seconds_ago : null;
+    const clientOnline = !!d.client_online;
+
+    setDiagText('diag-watch-folder', hb.host ? `${hb.host} (shop PC)` : '—');
+    setDiagStatus('diag-folder-exists', clientOnline,
+      clientOnline ? 'online' : 'offline');
+    setDiagText('diag-file-count',
+      typeof d.received_logs_count === 'number'
+        ? `${d.received_logs_count} log upload${d.received_logs_count === 1 ? '' : 's'}`
+        : '—'
+    );
+
+    let cmdsText = 'idle';
+    if (d.commands_state && typeof d.commands_state === 'object') {
+      const active = Object.entries(d.commands_state)
+        .filter(([, v]) => v === true || (v && v !== 0 && v !== '0'))
+        .map(([k]) => k);
+      if (active.length) cmdsText = active.join(', ');
+    }
+    setDiagText('diag-last-scan', cmdsText);
+
+    if (hbSecs === null) {
+      setDiagText('diag-last-heartbeat', hb.ts ? 'recent' : '—');
+    } else if (hbSecs < 60) {
+      setDiagText('diag-last-heartbeat', `${hbSecs}s ago`);
+    } else if (hbSecs < 3600) {
+      setDiagText('diag-last-heartbeat', `${Math.floor(hbSecs / 60)}m ago`);
+    } else {
+      setDiagText('diag-last-heartbeat', `${Math.floor(hbSecs / 3600)}h ago`);
+    }
+
+    setDiagStatus('diag-hmac', true, 'server-authed');
+    setDiagText('diag-version', 'server');
+  }
+
   function setDiagText(id, txt) {
     const el = document.getElementById(id);
     if (el) el.textContent = txt;
+  }
+
+  function relabelDiagnosticForServer() {
+    const relabels = {
+      'diag-watch-folder':  'Shop PC',
+      'diag-folder-exists': 'Client status',
+      'diag-file-count':    'Logs received',
+      'diag-last-scan':     'Active commands',
+      'diag-last-heartbeat':'Last heartbeat',
+      'diag-hmac':          'Auth',
+      'diag-version':       'Source',
+    };
+    for (const [id, label] of Object.entries(relabels)) {
+      const dd = document.getElementById(id);
+      if (!dd) continue;
+      const dt = dd.previousElementSibling;
+      if (dt && dt.tagName === 'DT') dt.textContent = label;
+    }
   }
 
   function setDiagStatus(id, ok, txt) {
@@ -651,6 +721,12 @@
   document.addEventListener('DOMContentLoaded', () => {
     wireFilters();
     wireSearch();
+
+    // Public-mode diagnostic labels: the same <dd> elements carry different
+    // data when talking to app.py (server-centric) vs the Go admin
+    // (client-centric). Rename the <dt> captions so operators don't see
+    // "WATCH FOLDER" pointing at a host name.
+    if (!IS_LOCAL_ADMIN) relabelDiagnosticForServer();
 
     fetchQueue();
     setInterval(fetchQueue, REFRESH_MS);
