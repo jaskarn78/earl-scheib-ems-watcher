@@ -283,16 +283,42 @@ func runConfigure() {
 
 // runAdmin launches the local browser-based queue admin UI.
 //
-// Starts an HTTP server on 127.0.0.1:EPHEMERAL, opens Marco's default
-// browser to it, and proxies /api/queue + /api/cancel to the remote
-// webhook server with HMAC-signed requests. Blocks until the browser tab
-// is closed (30 s heartbeat timeout) or Ctrl+C is pressed.
+// By default: HTTP server on 127.0.0.1:EPHEMERAL, browser auto-opens, proxies
+// /api/queue + /api/cancel + /api/send-now to the remote webhook with HMAC.
+//
+// Flags (after "--admin"):
+//
+//	--bind HOST:PORT    override the listener (e.g. 0.0.0.0:8080 for Tailscale)
+//	--webhook URL       override config.ini webhook_url (useful when running
+//	                    this binary on a non-Marco machine without a full
+//	                    watcher install). Implicitly disables browser auto-open.
 //
 // Wrapped in tel.Wrap so any panic in the admin server is captured and
 // POSTed to {webhookURL}/telemetry before exit.
 func runAdmin(tel *telemetry.Telemetry) {
+	// Parse post-"--admin" flags. Simple manual parse keeps the binary free of
+	// flag-package ordering quirks with the dispatcher above.
+	var bindOverride, webhookOverride string
+	for i := 2; i < len(os.Args); i++ {
+		switch os.Args[i] {
+		case "--bind":
+			if i+1 < len(os.Args) {
+				bindOverride = os.Args[i+1]
+				i++
+			}
+		case "--webhook":
+			if i+1 < len(os.Args) {
+				webhookOverride = os.Args[i+1]
+				i++
+			}
+		}
+	}
+
 	dataDir := config.DataDir()
 	cfg, _ := config.LoadConfig(filepath.Join(dataDir, "config.ini"))
+	if webhookOverride != "" {
+		cfg.WebhookURL = webhookOverride
+	}
 	logger := logging.SetupLogging(dataDir, cfg.LogLevel)
 
 	// Re-init telemetry with the real logger now that logging is up.
@@ -305,16 +331,25 @@ func runAdmin(tel *telemetry.Telemetry) {
 			os.Exit(1)
 		}
 
-		logger.Info("admin: starting", "webhook_url", cfg.WebhookURL)
+		// Remote-bind runs (e.g. Tailscale dev viewer) skip the auto-open —
+		// the browser on this machine should not swallow a URL pointing at
+		// an unspecified-interface host. User opens the Tailscale URL by hand.
+		openBrowser := admin.Open
+		if bindOverride != "" {
+			openBrowser = nil
+		}
+
+		logger.Info("admin: starting", "webhook_url", cfg.WebhookURL, "bind", bindOverride)
 
 		err := admin.Run(context.Background(), admin.Config{
 			WebhookURL:       cfg.WebhookURL,
 			Secret:           secretKey,
 			AppVersion:       appVersion,
 			Logger:           logger,
-			HeartbeatTimeout: 30 * time.Second,
+			HeartbeatTimeout: 24 * time.Hour,
 			ShutdownGrace:    5 * time.Second,
-			OpenBrowser:      admin.Open,
+			OpenBrowser:      openBrowser,
+			BindAddr:         bindOverride,
 		})
 		if err != nil {
 			logger.Error("admin: server exited with error", "err", err)

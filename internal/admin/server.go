@@ -35,6 +35,12 @@ type Config struct {
 	ShutdownGrace    time.Duration
 	OpenBrowser      func(url string) error
 	URLCh            chan<- string
+	// BindAddr optionally overrides the default "127.0.0.1:0" listener address.
+	// Pass e.g. "0.0.0.0:8080" to expose the admin UI over a LAN / Tailscale so
+	// operators can view Marco's queue remotely without installing a separate
+	// binary. When unset, localhost-ephemeral binding is preserved (the default
+	// Marco experience).
+	BindAddr string
 }
 
 // server bundles the state the proxy handlers need at request time.
@@ -69,12 +75,23 @@ func Run(ctx context.Context, cfg Config) error {
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	bindAddr := cfg.BindAddr
+	if bindAddr == "" {
+		bindAddr = "127.0.0.1:0"
+	}
+	listener, err := net.Listen("tcp", bindAddr)
 	if err != nil {
 		return fmt.Errorf("admin.Run listen: %w", err)
 	}
-	port := listener.Addr().(*net.TCPAddr).Port
-	url := fmt.Sprintf("http://127.0.0.1:%d", port)
+	tcpAddr := listener.Addr().(*net.TCPAddr)
+	port := tcpAddr.Port
+	// URL host: if bound to 0.0.0.0 / :: / unspecified, advertise 127.0.0.1 for
+	// the local browser-open hook. Remote viewers substitute their own host.
+	host := tcpAddr.IP.String()
+	if tcpAddr.IP == nil || tcpAddr.IP.IsUnspecified() {
+		host = "127.0.0.1"
+	}
+	url := fmt.Sprintf("http://%s:%d", host, port)
 
 	// Test hook: emit the bound URL to the caller non-blockingly.
 	if cfg.URLCh != nil {
