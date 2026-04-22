@@ -133,6 +133,62 @@ def _validate_hmac(body: bytes, sig_header: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Basic auth (RJL-02) — browser access to operator endpoints
+# ---------------------------------------------------------------------------
+#
+# The watcher client POSTs with HMAC signatures; browsers cannot sign (no
+# shared secret in JS). For the public /earlscheib admin UI the operator
+# authenticates with HTTP Basic, and the same endpoints (GET /queue, DELETE
+# /queue, POST /queue/send-now, GET /diagnostic) accept either HMAC OR
+# basic-auth via _validate_auth. Machine-to-machine endpoints stay
+# HMAC-only (see _validate_auth call-sites below).
+#
+# When ADMIN_UI_USER or ADMIN_UI_PASSWORD is unset the feature is disabled —
+# /earlscheib returns 404 and basic-auth always fails, so the operational
+# surface is identical to pre-RJL behaviour.
+
+ADMIN_UI_USER = os.getenv("ADMIN_UI_USER", "")
+ADMIN_UI_PASSWORD = os.getenv("ADMIN_UI_PASSWORD", "")
+ADMIN_UI_ENABLED = bool(ADMIN_UI_USER and ADMIN_UI_PASSWORD)
+
+
+def _validate_basic_auth(header: str) -> bool:
+    """Return True if Authorization header is valid basic auth matching the
+    configured ADMIN_UI_USER / ADMIN_UI_PASSWORD env vars. Uses
+    hmac.compare_digest for constant-time comparison on both user AND
+    password to avoid leaking the username via timing. Returns False if
+    the feature is disabled (either env var empty).
+    """
+    if not ADMIN_UI_ENABLED or not header or not header.startswith("Basic "):
+        return False
+    try:
+        decoded = base64.b64decode(header[6:]).decode("utf-8", errors="replace")
+    except (ValueError, UnicodeDecodeError):
+        return False
+    user, _, pw = decoded.partition(":")
+    return (
+        hmac.compare_digest(user.encode("utf-8"), ADMIN_UI_USER.encode("utf-8"))
+        and hmac.compare_digest(pw.encode("utf-8"), ADMIN_UI_PASSWORD.encode("utf-8"))
+    )
+
+
+def _validate_auth(handler, raw: bytes) -> bool:
+    """Accept either a valid HMAC signature (watcher client) or valid
+    basic auth (operator browser at /earlscheib). Both schemes are
+    constant-time compared internally. Returns True on first success.
+    """
+    sig = handler.headers.get("X-EMS-Signature", "")
+    if _validate_hmac(raw, sig):
+        return True
+    auth = handler.headers.get("Authorization", "")
+    if _validate_basic_auth(auth):
+        log.info("basic-auth: user=%s ip=%s path=%s",
+                 ADMIN_UI_USER, handler.client_address[0], handler.path)
+        return True
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Database
 # ---------------------------------------------------------------------------
 
@@ -2064,6 +2120,91 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 "download_url": "/download.exe",
                 "paused": paused,
             })
+            return
+
+        # ------------------------------------------------------------------
+        # RJL-01: public admin UI at /earlscheib (basic-auth'd).
+        # Only active when ADMIN_UI_USER and ADMIN_UI_PASSWORD are both set
+        # in the environment. Otherwise returns 404 so the endpoint is
+        # effectively invisible.
+        #
+        # Layout:
+        #   GET /earlscheib         → index.html with API_BASE_PATH injected
+        #   GET /earlscheib/main.css
+        #   GET /earlscheib/main.js
+        #
+        # Source of truth for these assets is internal/admin/ui/*. Copies
+        # live in ui_public/. See `make sync-ui`.
+        # ------------------------------------------------------------------
+        if path == "/earlscheib" or path.startswith("/earlscheib/"):
+            if not ADMIN_UI_ENABLED:
+                self.send_response(404); self.end_headers(); return
+            auth = self.headers.get("Authorization", "")
+            if not _validate_basic_auth(auth):
+                self.send_response(401)
+                self.send_header("WWW-Authenticate", 'Basic realm="Earl Scheib Queue"')
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+
+            log.info("basic-auth: user=%s ip=%s path=%s",
+                     ADMIN_UI_USER, self.client_address[0], path)
+
+            app_dir = os.path.dirname(os.path.abspath(__file__))
+            ui_dir = os.path.join(app_dir, "ui_public")
+
+            # Root → serve index.html with API_BASE_PATH injection so the
+            # shared main.js knows to hit /earlscheibconcord/* instead of
+            # its default /api/* base.
+            if path == "/earlscheib":
+                index_path = os.path.join(ui_dir, "index.html")
+                try:
+                    with open(index_path, "r", encoding="utf-8") as f:
+                        html = f.read()
+                except OSError as exc:
+                    log.error("ui_public/index.html read failed: %s", exc)
+                    self._send_json(500, {"error": "ui unavailable"})
+                    return
+                # Rewrite /main.css and /main.js to namespaced paths so they
+                # load from /earlscheib/* instead of the Go admin's root.
+                # Then inject API_BASE_PATH before main.js loads.
+                html = html.replace(
+                    'href="/main.css"', 'href="/earlscheib/main.css"'
+                ).replace(
+                    'src="/main.js"', 'src="/earlscheib/main.js"'
+                )
+                injection = (
+                    '<script>window.API_BASE_PATH = "/earlscheibconcord";'
+                    '</script>\n  '
+                )
+                html = html.replace(
+                    '<script src="/earlscheib/main.js"',
+                    injection + '<script src="/earlscheib/main.js"',
+                )
+                self._send_html(200, html)
+                return
+
+            # CSS + JS: simple safelist — no traversal.
+            if path == "/earlscheib/main.css":
+                asset_path = os.path.join(ui_dir, "main.css")
+                content_type = "text/css; charset=utf-8"
+            elif path == "/earlscheib/main.js":
+                asset_path = os.path.join(ui_dir, "main.js")
+                content_type = "application/javascript; charset=utf-8"
+            else:
+                self.send_response(404); self.end_headers(); return
+
+            try:
+                with open(asset_path, "rb") as f:
+                    body = f.read()
+            except OSError:
+                self.send_response(404); self.end_headers(); return
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            self.wfile.write(body)
             return
 
         # Default: 404

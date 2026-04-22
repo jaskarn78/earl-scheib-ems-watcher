@@ -27,7 +27,10 @@ func TestEmbeddedUI_ServesAllThreeFiles(t *testing.T) {
 		{"/", 200, "Earl Scheib Concord", "text/html"},
 		{"/index.html", 200, "Earl Scheib Concord", "text/html"},
 		{"/main.css", 200, "--oxblood", "text/css"},
-		{"/main.js", 200, "fetch('/api/queue'", ""}, // CT is js/js; don't pin
+		// After RJL refactor, main.js builds the queue URL from API_BASE
+		// (`${API_BASE}/queue`). API_BASE defaults to '/api' when
+		// window.API_BASE_PATH is unset — i.e. for this Go admin path.
+		{"/main.js", 200, "`${API_BASE}/queue`", ""}, // CT is js/js; don't pin
 	}
 
 	for _, tc := range cases {

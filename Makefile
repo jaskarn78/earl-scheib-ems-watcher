@@ -26,7 +26,7 @@ ifneq ($(strip $(HMAC_SECRET)),)
 LDFLAGS += -X main.secretKey=$(HMAC_SECRET)
 endif
 
-.PHONY: build-windows build-linux test clean generate-resources install-tools dev-sign installer installer-syntax portable
+.PHONY: build-windows build-linux test clean generate-resources install-tools dev-sign installer installer-syntax portable sync-ui
 
 ## install-tools: install required build tools (go-winres)
 install-tools:
@@ -114,6 +114,15 @@ portable: build-windows
 	cd dist/portable-staging && zip -r ../EarlScheibWatcher-Portable.zip .
 	rm -rf dist/portable-staging
 	@echo "Portable zip: dist/EarlScheibWatcher-Portable.zip"
+
+## sync-ui: copy admin UI source files to ui_public/ for Python server
+## Source of truth is internal/admin/ui/ (embedded by the Go admin binary).
+## Run this after any change to internal/admin/ui/* to keep ui_public/
+## byte-identical.
+sync-ui:
+	cp internal/admin/ui/index.html ui_public/index.html
+	cp internal/admin/ui/main.css   ui_public/main.css
+	cp internal/admin/ui/main.js    ui_public/main.js
 
 ## help: list targets
 help:
