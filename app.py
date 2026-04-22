@@ -7,6 +7,7 @@ import re
 import hmac
 import hashlib
 import xml.etree.ElementTree as ET
+from collections import defaultdict
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse
@@ -103,19 +104,57 @@ NS = {"bms": BMS_NS}
 ESTIMATE_STATUSES = {"E", "EM", "EL", "EP"}
 CLOSED_STATUSES = {"I", "C", "F", "FI", "FC", "WC"}
 
-# SMS templates
-MSG_24H = (
-    "Hi {name}, this is Earl Scheib Auto Body in Concord. Just following up on your recent estimate. "
-    "Have questions or ready to schedule? Call us at (925) 609-7780."
-)
-MSG_3DAY = (
-    "Hi {name}, Earl Scheib Auto Body Concord checking in about your estimate from a few days ago. "
-    "We'd love to help get your car looking great! Call (925) 609-7780."
-)
-MSG_REVIEW = (
-    "Hi {name}, thank you for choosing Earl Scheib Auto Body Concord! Hope you're happy with your repair. "
-    "Would you mind leaving us a Google review? It means a lot: https://g.page/r/review"
-)
+# SMS templates — WMH-01: Marco-editable via /templates endpoint.
+#
+# DEFAULT_TEMPLATES is the fall-back copy when the `templates` DB row for a
+# given job_type is missing / empty / whitespace-only. Placeholders:
+#   Per-row   : {first_name} {name} {phone} {vin} {vehicle_desc} {ro_id}
+#               {doc_id} {email}
+#   Shop-wide : {shop_name} {shop_phone} {review_url}
+#
+# The defaults parameterise shop name / phone / review URL so the literal
+# brand values only live in SHOP_CONSTANTS below (single source of truth).
+#
+# Unknown placeholders render as empty string (see render_template with
+# collections.defaultdict) — never as `{literal}`, never KeyError.
+DEFAULT_TEMPLATES = {
+    "24h":
+        "Hi {first_name}, this is {shop_name}. Just following up on your recent estimate. "
+        "Have questions or ready to schedule? Call us at {shop_phone}.",
+    "3day":
+        "Hi {first_name}, {shop_name} checking in about your estimate from a few days ago. "
+        "We'd love to help get your car looking great! Call {shop_phone}.",
+    "review":
+        "Hi {first_name}, thank you for choosing {shop_name}! Hope you're happy with your repair. "
+        "Would you mind leaving us a Google review? It means a lot: {review_url}",
+}
+
+SHOP_CONSTANTS = {
+    "shop_name":  "Earl Scheib Auto Body Concord",
+    "shop_phone": "(925) 609-7780",
+    "review_url": "https://g.page/r/review",
+}
+
+# Canonical order + metadata for the Templates admin UI. Drives the card
+# order on the Templates page, the display labels, and the schedule hints.
+JOB_TYPE_META = [
+    {"job_type": "24h",    "label": "24-hour follow-up", "when": "~24 hours after estimate"},
+    {"job_type": "3day",   "label": "3-day check-in",    "when": "~3 days after estimate"},
+    {"job_type": "review", "label": "Review request",    "when": "~24 hours after job completion"},
+]
+
+# Placeholder catalog — rendered as clickable chips on the Templates page.
+PLACEHOLDERS_PER_ROW = [
+    "first_name", "name", "phone", "vin", "vehicle_desc", "ro_id", "doc_id", "email",
+]
+PLACEHOLDERS_SHOP = ["shop_name", "shop_phone", "review_url"]
+
+# Legacy aliases — any import-time reference to MSG_24H / MSG_3DAY / MSG_REVIEW
+# still resolves to the new default string. Kept intentionally to avoid breaking
+# unknown importers; remove once a grep confirms no callers remain.
+MSG_24H    = DEFAULT_TEMPLATES["24h"]
+MSG_3DAY   = DEFAULT_TEMPLATES["3day"]
+MSG_REVIEW = DEFAULT_TEMPLATES["review"]
 
 logging.basicConfig(
     level=logging.INFO,
@@ -263,8 +302,122 @@ def init_db():
         # Should not happen after the ALTER above; log and continue.
         log.warning("QAJ-01 backfill skipped: %s", exc)
 
+    # WMH-01: Marco-editable message templates. One row per job_type; absence
+    # of a row means "use DEFAULT_TEMPLATES[job_type]". No seed INSERT — the
+    # override-vs-default distinction is what makes "clear to revert" work.
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS templates (
+            job_type   TEXT PRIMARY KEY,
+            body       TEXT NOT NULL,
+            updated_at INTEGER NOT NULL
+        )
+        """
+    )
+    con.commit()
+
     con.close()
     log.info("DB initialised at %s", DB_PATH)
+
+
+# ---------------------------------------------------------------------------
+# Template rendering (WMH-01)
+# ---------------------------------------------------------------------------
+
+def _get_template_override(job_type: str) -> str:
+    """Return the stored override body for a job_type, or '' if none exists.
+
+    Empty / whitespace-only stored bodies are treated as "no override" — the
+    caller will fall back to DEFAULT_TEMPLATES. This matches the PUT-empty-body
+    semantics (which deletes the row); both produce default behaviour without
+    the caller needing to distinguish the two cases.
+    """
+    try:
+        con = get_db()
+        try:
+            cur = con.cursor()
+            cur.execute(
+                "SELECT body FROM templates WHERE job_type = ?", (job_type,)
+            )
+            row = cur.fetchone()
+        finally:
+            con.close()
+    except sqlite3.OperationalError as exc:
+        # templates table missing (e.g. tests that bypass init_db) — fall back.
+        log.warning("_get_template_override: %s", exc)
+        return ""
+    if not row:
+        return ""
+    body = row["body"] if hasattr(row, "keys") else row[0]
+    return body if (body and body.strip()) else ""
+
+
+def render_template(job_type: str, row) -> str:
+    """Render the SMS body for a job_type using the row's per-customer data.
+
+    Lookup order:
+      1. templates table row for this job_type (override, if non-empty)
+      2. DEFAULT_TEMPLATES[job_type]
+      3. "" for unknown job_types (caller should log.warning + skip)
+
+    Interpolation is str.format_map with a collections.defaultdict(str) so
+    unknown placeholders render as empty string — never KeyError, never
+    the literal "{key}" leaking to a customer's phone.
+
+    Supported placeholders:
+      Per-row  : first_name, name, phone, vin, vehicle_desc, ro_id, doc_id,
+                 email  (pulled from `row`)
+      Shop     : shop_name, shop_phone, review_url  (SHOP_CONSTANTS)
+
+    first_name is derived from name.split()[0] when the row has no explicit
+    first_name column; falls back to "there" so the message never reads
+    "Hi , this is ..." — preserves the existing UX of the pre-WMH templates.
+    """
+    tpl = _get_template_override(job_type) or DEFAULT_TEMPLATES.get(job_type, "")
+    if not tpl:
+        # Unknown job_type.
+        return ""
+
+    ctx = defaultdict(str)
+    ctx.update(SHOP_CONSTANTS)
+
+    # Sniff row shape once — sqlite3.Row exposes keys() like a dict but is not
+    # a dict itself. For plain dicts `key in dict` is membership; sqlite3.Row
+    # needs `key in row.keys()`. Normalise to a small dict.
+    if row is not None:
+        try:
+            keys = set(row.keys()) if hasattr(row, "keys") else set()
+        except (AttributeError, TypeError):
+            keys = set()
+        for k in PLACEHOLDERS_PER_ROW:
+            if k in keys:
+                try:
+                    v = row[k]
+                except (KeyError, IndexError):
+                    v = ""
+                if v:
+                    ctx[k] = v
+
+    # Derive first_name if not explicitly present on the row.
+    if not ctx["first_name"] and ctx["name"]:
+        ctx["first_name"] = str(ctx["name"]).split()[0]
+    if not ctx["first_name"]:
+        ctx["first_name"] = "there"  # preserves current fallback UX
+
+    try:
+        return tpl.format_map(ctx)
+    except (KeyError, IndexError, ValueError) as exc:
+        # format_map with defaultdict swallows missing keys, so the only way
+        # to get here is a malformed template (unclosed brace, bad spec).
+        # Log and return the default rather than crash the sender — a bad
+        # template was already saved (the PUT validator should have caught
+        # this) but we don't want to block every subsequent send.
+        log.error("render_template: malformed template for %s: %s", job_type, exc)
+        fallback = DEFAULT_TEMPLATES.get(job_type, "")
+        try:
+            return fallback.format_map(ctx)
+        except Exception:
+            return ""
 
 
 def get_db():
@@ -496,15 +649,13 @@ def _fire_due_jobs():
             job_id = row["id"]
             job_type = row["job_type"]
             phone = row["phone"]
-            name = row["name"]
 
-            if job_type == "24h":
-                body = MSG_24H.format(name=name)
-            elif job_type == "3day":
-                body = MSG_3DAY.format(name=name)
-            elif job_type == "review":
-                body = MSG_REVIEW.format(name=name)
-            else:
+            # WMH-01: body composition is now delegated to render_template,
+            # which reads any per-job_type override from the templates table
+            # (falling back to DEFAULT_TEMPLATES) and fills placeholders from
+            # the full row (name, vin, vehicle_desc, ro_id, email, …).
+            body = render_template(job_type, row)
+            if not body:
                 log.warning("Unknown job_type %s for job %s", job_type, job_id)
                 continue
 
@@ -2379,23 +2530,20 @@ class WebhookHandler(BaseHTTPRequestHandler):
                     self._send_json(404, {"error": "not_found_or_already_sent"})
                     return
                 cur.execute(
-                    "SELECT job_type, phone, name FROM jobs WHERE id = ?",
+                    "SELECT job_type, phone, name, vin, vehicle_desc, "
+                    "       ro_id, email, doc_id "
+                    "FROM jobs WHERE id = ?",
                     (job_id,),
                 )
                 row = cur.fetchone()
             finally:
                 con.close()
 
-            # Compose SMS body using the existing templates — MUST match
-            # the UI preview (internal/admin/ui/main.js previewSMS).
-            if row["job_type"] == "24h":
-                sms_body = MSG_24H.format(name=row["name"])
-            elif row["job_type"] == "3day":
-                sms_body = MSG_3DAY.format(name=row["name"])
-            elif row["job_type"] == "review":
-                sms_body = MSG_REVIEW.format(name=row["name"])
-            else:
-                sms_body = ""
+            # WMH-01: Compose SMS body via render_template so Marco's edits
+            # from the Templates admin page flow through. Falls back to
+            # DEFAULT_TEMPLATES[job_type] when no override exists. Must stay
+            # in lock-step with the UI preview (main.js previewSMS).
+            sms_body = render_template(row["job_type"], row)
 
             phone = row["phone"]
             # Recipient redirection (TEST_PHONE_OVERRIDE / TEST_PHONE_RECIPIENTS)
