@@ -5,24 +5,38 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Earl Scheib Concord — Queue</title>
 
-  <!-- Inline oxblood ES monogram favicon (no extra HTTP round-trip) -->
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%23F4EDE0'/><text x='16' y='22' text-anchor='middle' font-family='Georgia,serif' font-weight='700' font-size='18' fill='%237A2E2A'>ES</text></svg>">
+  <!-- Warm cream ES monogram favicon; matches the light admin palette. -->
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%23faf7f2'/><text x='16' y='22' text-anchor='middle' font-family='Georgia,serif' font-weight='700' font-size='18' fill='%238b2a2a'>ES</text></svg>">
 
-  <!-- Google Fonts: Fraunces (display) + JetBrains Mono (body/data) -->
+  <!-- Google Fonts: Fraunces (display serif) + Work Sans (body) + IBM Plex Mono (data). -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,700;1,9..144,500&family=JetBrains+Mono:wght@400;600&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Work+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
 
   <link rel="stylesheet" href="/main.css">
 </head>
 <body>
   <header class="topbar" role="banner">
-    <h1 class="wordmark">Earl Scheib Concord <span class="wordmark-sep">—</span> <em>Queue</em></h1>
-    <div class="topbar-meta">
-      <span id="refresh-caption" class="refresh-caption">refreshing…</span>
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">ES</span>
+      <span class="brand-name">Earl Scheib</span>
+      <span class="brand-sep" aria-hidden="true">·</span>
+      <span class="brand-mode">Queue</span>
+    </div>
+
+    <div class="stats" aria-label="Queue statistics">
+      <span class="stat"><b id="stat-pending">0</b><span class="stat-label">Pending</span></span>
+      <span class="stat-sep" aria-hidden="true">·</span>
+      <span class="stat"><b id="stat-sent">0</b><span class="stat-label">Sent today</span></span>
+      <span class="stat-sep" aria-hidden="true">·</span>
+      <span class="stat"><b id="stat-failed">0</b><span class="stat-label">Failed</span></span>
+    </div>
+
+    <div class="sync" role="status" aria-live="polite">
+      <span id="sync-dot" class="sync-dot" aria-hidden="true"></span>
+      <span id="sync-caption" class="sync-caption">Last synced —</span>
       <button id="refresh-btn" class="refresh-btn" type="button" aria-label="Refresh queue (R)" title="Press R to refresh">
-        <!-- Minimal stroke-only refresh glyph; 16x16 -->
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M13.5 8a5.5 5.5 0 1 1-1.61-3.89"></path>
           <path d="M13.5 2.5v3h-3"></path>
         </svg>
@@ -47,39 +61,83 @@
     </dl>
   </section>
 
-  <template id="customer-card-template">
-    <article class="customer" data-phone="">
-      <header class="customer-header">
-        <h2 class="customer-name"></h2>
-        <span class="customer-phone"></span>
+  <!-- Per-job card. Matches the OH4 plan_override spec exactly:
+       name + phone/email + chip + scheduled send + vehicle + SMS preview + actions. -->
+  <template id="job-card-template">
+    <article class="job-card" data-state="pending">
+      <header class="job-head">
+        <div class="job-identity">
+          <h2 class="job-name"></h2>
+          <div class="job-contact">
+            <span class="job-phone mono"></span>
+            <span class="job-email"></span>
+          </div>
+        </div>
+        <div class="job-meta">
+          <span class="job-chip"></span>
+          <span class="job-send">
+            <span class="job-send-relative"></span>
+            <span class="job-send-absolute mono"></span>
+          </span>
+        </div>
       </header>
-      <ul class="messages"></ul>
+
+      <div class="job-vehicle">
+        <span class="vehicle-desc"></span>
+        <span class="vehicle-vin mono" title=""></span>
+        <span class="vehicle-ro"></span>
+      </div>
+
+      <figure class="sms-preview">
+        <figcaption class="sms-label">Customer receives</figcaption>
+        <div class="sms-bubble"></div>
+      </figure>
+
+      <footer class="job-actions">
+        <button class="btn btn-primary send-now-btn" type="button">
+          <span>Send now</span>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 8h10"></path>
+            <path d="M9 4l4 4-4 4"></path>
+          </svg>
+        </button>
+        <button class="btn btn-ghost cancel-btn" type="button">Cancel</button>
+        <span class="job-error" hidden></span>
+      </footer>
     </article>
   </template>
 
-  <template id="message-row-template">
-    <li class="message">
-      <span class="send-time"></span>
-      <span class="job-type"></span>
-      <span class="job-ref"></span>
-      <button class="cancel-btn" type="button">cancel</button>
-      <div class="undo-pill" hidden>
-        <span class="undo-label">cancelled — click to undo</span>
-        <span class="undo-ring" aria-hidden="true"></span>
-      </div>
-    </li>
-  </template>
-
+  <!-- Empty state: warm, friendly. Not "NO PENDING JOBS" in caps. -->
   <template id="empty-state-template">
     <section class="empty">
-      <hr class="empty-rule" aria-hidden="true">
-      <p class="empty-msg"><em>Nothing queued right now.</em></p>
+      <div class="empty-card">
+        <span class="empty-dot" aria-hidden="true"></span>
+        <h1 class="empty-title">All caught up</h1>
+        <p class="empty-sub">Nothing queued right now — new estimates will appear here automatically.</p>
+      </div>
     </section>
   </template>
 
   <template id="error-state-template">
     <section class="error">
       <p class="error-msg"></p>
+    </section>
+  </template>
+
+  <!-- Sleep panel: shown when the local admin server has stopped responding
+       after the JS retry window (60s). Friendly, not scary. Same warm palette. -->
+  <template id="sleep-state-template">
+    <section class="sleep">
+      <div class="sleep-card">
+        <span class="sleep-badge" aria-hidden="true"></span>
+        <h1 class="sleep-title">Queue Viewer is resting</h1>
+        <p class="sleep-sub">
+          It goes to sleep after 30&nbsp;minutes to save resources.
+        </p>
+        <p class="sleep-instruction">
+          Double-click the <strong>Earl&nbsp;Scheib&nbsp;Queue</strong> shortcut on your desktop to wake it up.
+        </p>
+      </div>
     </section>
   </template>
 

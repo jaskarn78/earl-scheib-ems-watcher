@@ -17,10 +17,12 @@ import (
 )
 
 // Config bundles the values admin.Run needs. Logger may be nil.
-// HeartbeatTimeout / ShutdownGrace default to 5m and 5s when zero.
-// 5 minutes forgives Chrome's background-tab throttling of the periodic
-// /alive POST from the browser; short enough that an actually-closed tab
-// still releases the port in a reasonable window.
+// HeartbeatTimeout / ShutdownGrace default to 30m and 5s when zero.
+// 30 minutes gives Marco enough runway to leave the queue viewer open on a
+// second monitor between jobs without it silently shutting down; the
+// front-end also shows a friendly "Queue Viewer is resting" sleep panel
+// (internal/admin/ui/main.js) after a failed poll so the reason is clear
+// when it eventually times out.
 // OpenBrowser is nil in tests; nil means "do not attempt to open a browser".
 // URLCh, when non-nil, receives the bound URL exactly once immediately
 // after net.Listen succeeds. Used by tests; production callers leave it nil.
@@ -51,7 +53,11 @@ type server struct {
 // non-http.ErrServerClosed serve errors.
 func Run(ctx context.Context, cfg Config) error {
 	if cfg.HeartbeatTimeout == 0 {
-		cfg.HeartbeatTimeout = 5 * time.Minute
+		// OH4 override: extended from 5m -> 30m so Marco can keep the queue
+		// viewer open across a shift without it silently shutting down. The
+		// UI's sleep panel (main.js) is the user-visible fallback when it
+		// does eventually time out.
+		cfg.HeartbeatTimeout = 30 * time.Minute
 	}
 	if cfg.ShutdownGrace == 0 {
 		cfg.ShutdownGrace = 5 * time.Second
