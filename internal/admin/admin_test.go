@@ -407,3 +407,211 @@ func TestProxyQueue_PropagatesUpstream401(t *testing.T) {
 		t.Errorf("body: got %s", body)
 	}
 }
+
+// ---- WMH-03: Template proxy tests ----
+
+// putJSON is a small helper — the standard library's http.DefaultClient can
+// do PUT requests, but we want the same "read body + return (resp, bytes)"
+// ergonomics as postJSON / getJSON for test symmetry.
+func putJSON(t *testing.T, urlStr, body string) (*http.Response, []byte) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPut, urlStr, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("build PUT %s: %v", urlStr, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PUT %s: %v", urlStr, err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp, b
+}
+
+func TestAdminProxy_TemplatesList_Forwards(t *testing.T) {
+	secret := "test-secret-WMH-templates-list"
+	captured := &atomic.Pointer[capturedRequest]{}
+	canned := []byte(`{"job_types":[{"job_type":"24h","body":"Hi","is_override":false,"updated_at":0}],"placeholders":{"per_row":["first_name"],"shop":["shop_name"]},"sample_row":{"first_name":"Alex"}}`)
+	remote := newFakeRemote(t, 200, canned, captured)
+	defer remote.Close()
+
+	adminURL, stop := startAdminWithURLCh(t, remote.URL, secret, 5*time.Second)
+	defer stop()
+
+	resp, body := getJSON(t, adminURL+"/api/templates")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: got %d, want 200", resp.StatusCode)
+	}
+	if !bytes.Equal(body, canned) {
+		t.Errorf("body not forwarded verbatim:\n got: %s\nwant: %s", body, canned)
+	}
+
+	cr := captured.Load()
+	if cr == nil {
+		t.Fatal("fake remote never captured a request")
+	}
+	if cr.method != http.MethodGet {
+		t.Errorf("upstream method: got %s, want GET", cr.method)
+	}
+	wantSig := webhook.Sign(secret, []byte(""))
+	if cr.sig != wantSig {
+		t.Errorf("upstream X-EMS-Signature: got %q, want %q", cr.sig, wantSig)
+	}
+	if !strings.HasSuffix(cr.path, "/earlscheibconcord/templates") {
+		t.Errorf("upstream path: got %q, want suffix /earlscheibconcord/templates", cr.path)
+	}
+}
+
+func TestAdminProxy_TemplatePut_Forwards(t *testing.T) {
+	secret := "test-secret-WMH-template-put"
+	captured := &atomic.Pointer[capturedRequest]{}
+	remote := newFakeRemote(t, 200, []byte(`{"is_override":true,"body":"Custom","updated_at":12345}`), captured)
+	defer remote.Close()
+
+	adminURL, stop := startAdminWithURLCh(t, remote.URL, secret, 5*time.Second)
+	defer stop()
+
+	resp, body := putJSON(t, adminURL+"/api/templates/24h", `{"body": "Custom"}`)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: got %d, want 200; body=%s", resp.StatusCode, body)
+	}
+
+	cr := captured.Load()
+	if cr == nil {
+		t.Fatal("fake remote never captured a request")
+	}
+	if cr.method != http.MethodPut {
+		t.Errorf("upstream method: got %s, want PUT", cr.method)
+	}
+	if !strings.HasSuffix(cr.path, "/earlscheibconcord/templates/24h") {
+		t.Errorf("upstream path: got %q, want suffix /earlscheibconcord/templates/24h", cr.path)
+	}
+	// Canonical JSON: compact, no whitespace.
+	wantBody := `{"body":"Custom"}`
+	if string(cr.body) != wantBody {
+		t.Errorf("upstream body: got %q, want %q", cr.body, wantBody)
+	}
+	wantSig := webhook.Sign(secret, []byte(wantBody))
+	if cr.sig != wantSig {
+		t.Errorf("upstream X-EMS-Signature: got %q, want %q", cr.sig, wantSig)
+	}
+}
+
+func TestAdminProxy_TemplatePut_EmptyBodyForwardsVerbatim(t *testing.T) {
+	secret := "test-secret-WMH-template-clear"
+	captured := &atomic.Pointer[capturedRequest]{}
+	remote := newFakeRemote(t, 200, []byte(`{"is_override":false,"body":"Hi {first_name}","updated_at":0}`), captured)
+	defer remote.Close()
+
+	adminURL, stop := startAdminWithURLCh(t, remote.URL, secret, 5*time.Second)
+	defer stop()
+
+	resp, _ := putJSON(t, adminURL+"/api/templates/review", `{"body": ""}`)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: got %d, want 200", resp.StatusCode)
+	}
+
+	cr := captured.Load()
+	if cr == nil {
+		t.Fatal("fake remote never captured a request")
+	}
+	// Empty string in canonical JSON is {"body":""}.
+	wantBody := `{"body":""}`
+	if string(cr.body) != wantBody {
+		t.Errorf("upstream body: got %q, want %q", cr.body, wantBody)
+	}
+	if !strings.HasSuffix(cr.path, "/earlscheibconcord/templates/review") {
+		t.Errorf("upstream path: got %q", cr.path)
+	}
+}
+
+func TestAdminProxy_TemplatePut_UnknownJobType(t *testing.T) {
+	captured := &atomic.Pointer[capturedRequest]{}
+	remote := newFakeRemote(t, 200, []byte(`{}`), captured)
+	defer remote.Close()
+
+	adminURL, stop := startAdminWithURLCh(t, remote.URL, "secret", 5*time.Second)
+	defer stop()
+
+	resp, body := putJSON(t, adminURL+"/api/templates/bogus", `{"body":"whatever"}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want 400; body=%s", resp.StatusCode, body)
+	}
+	if captured.Load() != nil {
+		t.Error("upstream must not be called on unknown job_type")
+	}
+}
+
+func TestAdminProxy_TemplatePut_EmptyJobType(t *testing.T) {
+	captured := &atomic.Pointer[capturedRequest]{}
+	remote := newFakeRemote(t, 200, []byte(`{}`), captured)
+	defer remote.Close()
+
+	adminURL, stop := startAdminWithURLCh(t, remote.URL, "secret", 5*time.Second)
+	defer stop()
+
+	// trailing slash → empty job_type segment
+	resp, _ := putJSON(t, adminURL+"/api/templates/", `{"body":"x"}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want 400", resp.StatusCode)
+	}
+	if captured.Load() != nil {
+		t.Error("upstream must not be called on empty job_type")
+	}
+}
+
+func TestAdminProxy_TemplatePut_BadMethod(t *testing.T) {
+	captured := &atomic.Pointer[capturedRequest]{}
+	remote := newFakeRemote(t, 200, []byte(`{}`), captured)
+	defer remote.Close()
+
+	adminURL, stop := startAdminWithURLCh(t, remote.URL, "secret", 5*time.Second)
+	defer stop()
+
+	// POST not allowed on /api/templates/{job_type} — only PUT.
+	resp, _ := postJSON(t, adminURL+"/api/templates/24h", `{"body":"x"}`)
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("status: got %d, want 405", resp.StatusCode)
+	}
+	if captured.Load() != nil {
+		t.Error("upstream must not be called on wrong method")
+	}
+}
+
+func TestAdminProxy_TemplatesList_BadMethod(t *testing.T) {
+	captured := &atomic.Pointer[capturedRequest]{}
+	remote := newFakeRemote(t, 200, []byte(`{}`), captured)
+	defer remote.Close()
+
+	adminURL, stop := startAdminWithURLCh(t, remote.URL, "secret", 5*time.Second)
+	defer stop()
+
+	req, _ := http.NewRequest(http.MethodPut, adminURL+"/api/templates", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("status: got %d, want 405", resp.StatusCode)
+	}
+}
+
+func TestAdminProxy_TemplatePut_PropagatesUpstream400(t *testing.T) {
+	captured := &atomic.Pointer[capturedRequest]{}
+	syntaxErr := []byte(`{"error":"template syntax error","detail":"expected '}'"}`)
+	remote := newFakeRemote(t, 400, syntaxErr, captured)
+	defer remote.Close()
+
+	adminURL, stop := startAdminWithURLCh(t, remote.URL, "secret", 5*time.Second)
+	defer stop()
+
+	resp, body := putJSON(t, adminURL+"/api/templates/24h", `{"body":"Hi {unclosed"}`)
+	if resp.StatusCode != 400 {
+		t.Errorf("status: got %d, want 400", resp.StatusCode)
+	}
+	if !bytes.Equal(body, syntaxErr) {
+		t.Errorf("body: got %s, want %s", body, syntaxErr)
+	}
+}

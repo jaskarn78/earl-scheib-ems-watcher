@@ -116,6 +116,12 @@ func Run(ctx context.Context, cfg Config) error {
 	mux.HandleFunc("/api/cancel", s.handleCancel)
 	mux.HandleFunc("/api/send-now", s.handleSendNow)
 	mux.HandleFunc("/api/diagnostic", s.handleDiagnostic)
+	// WMH-03: Marco-editable SMS templates. List (GET) at /api/templates;
+	// upsert/revert (PUT) at /api/templates/{job_type}. Trailing slash on
+	// the second route makes it a subtree so ServeMux routes the path parts
+	// to the single handler.
+	mux.HandleFunc("/api/templates", s.handleTemplatesList)
+	mux.HandleFunc("/api/templates/", s.handleTemplateUpsert)
 	mux.HandleFunc("/alive", s.handleAlive)
 
 	httpServer := &http.Server{
@@ -202,6 +208,17 @@ func (s *server) remoteQueueURL() string {
 // Shares the same /earlscheibconcord prefix convention as remoteQueueURL.
 func (s *server) remoteSendNowURL() string {
 	return strings.TrimRight(s.cfg.WebhookURL, "/") + "/queue/send-now"
+}
+
+// remoteTemplatesURL returns the remote /templates endpoint (GET listing).
+// WMH-03: Same prefix convention as remoteQueueURL / remoteSendNowURL.
+func (s *server) remoteTemplatesURL() string {
+	return strings.TrimRight(s.cfg.WebhookURL, "/") + "/templates"
+}
+
+// remoteTemplateURL returns the remote /templates/{job_type} endpoint (PUT).
+func (s *server) remoteTemplateURL(jobType string) string {
+	return s.remoteTemplatesURL() + "/" + jobType
 }
 
 // handleAlive is the browser heartbeat endpoint. Resets the last-alive timer.
