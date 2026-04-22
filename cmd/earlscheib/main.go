@@ -19,6 +19,7 @@ import (
 	"github.com/jjagpal/earl-scheib-watcher/internal/scanner"
 	"github.com/jjagpal/earl-scheib-watcher/internal/status"
 	"github.com/jjagpal/earl-scheib-watcher/internal/telemetry"
+	"github.com/jjagpal/earl-scheib-watcher/internal/update"
 	"github.com/jjagpal/earl-scheib-watcher/internal/webhook"
 )
 
@@ -127,6 +128,15 @@ func runScan(tel *telemetry.Telemetry) {
 		if cmds := commands.Poll(context.Background(), cfg.WebhookURL, secretKey, logger); cmds != nil {
 			hostName, _ := os.Hostname()
 			commands.Handle(context.Background(), cmds, cfg.WebhookURL, secretKey, dataDir, hostName, logger)
+		}
+
+		// Self-update: best-effort poll for a newer installer. Any error is logged
+		// and swallowed — must never block the scan cycle. If an update is applied,
+		// update.Check calls os.Exit(0) internally after launching the installer so
+		// the installer can replace earlscheib.exe; the next Scheduled Task tick
+		// (<=5 min) will re-launch with the new binary.
+		if err := update.Check(context.Background(), cfg.WebhookURL, secretKey, dataDir, appVersion, logger, update.DefaultLauncher); err != nil {
+			logger.Warn("update check failed (non-fatal)", "err", err)
 		}
 
 		sendFn := func(filePath string, body []byte) bool {
