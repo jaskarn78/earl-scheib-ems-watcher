@@ -2052,6 +2052,82 @@ class WebhookHandler(BaseHTTPRequestHandler):
             self.end_headers()
             return
 
+        # OH4-02: Send-now endpoint. Atomic claim + Twilio send; rolls back
+        # sent=1 on Twilio failure so the scheduler can retry later. Mirrors
+        # the DELETE /queue HMAC pattern exactly — do not introduce a new
+        # auth scheme here.
+        if self.path.split("?")[0] == "/earlscheibconcord/queue/send-now":
+            sig = self.headers.get("X-EMS-Signature", "")
+            if not _validate_hmac(raw, sig):
+                self._send_json(401, {"error": "invalid signature"})
+                return
+            try:
+                body = json.loads(raw.decode("utf-8"))
+                job_id = int(body["id"])
+            except (ValueError, KeyError, json.JSONDecodeError, UnicodeDecodeError):
+                self._send_json(400, {"error": "invalid JSON"})
+                return
+
+            con = get_db()
+            try:
+                cur = con.cursor()
+                # Atomic claim: only one concurrent caller can flip this row.
+                cur.execute(
+                    "UPDATE jobs SET sent = 1, sent_at = ? "
+                    "WHERE id = ? AND sent = 0",
+                    (int(time.time()), job_id),
+                )
+                con.commit()
+                if cur.rowcount != 1:
+                    self._send_json(404, {"error": "not_found_or_already_sent"})
+                    return
+                cur.execute(
+                    "SELECT job_type, phone, name FROM jobs WHERE id = ?",
+                    (job_id,),
+                )
+                row = cur.fetchone()
+            finally:
+                con.close()
+
+            # Compose SMS body using the existing templates — MUST match
+            # the UI preview (internal/admin/ui/main.js previewSMS).
+            if row["job_type"] == "24h":
+                sms_body = MSG_24H.format(name=row["name"])
+            elif row["job_type"] == "3day":
+                sms_body = MSG_3DAY.format(name=row["name"])
+            elif row["job_type"] == "review":
+                sms_body = MSG_REVIEW.format(name=row["name"])
+            else:
+                sms_body = ""
+
+            phone = row["phone"]
+            if TEST_PHONE_OVERRIDE:
+                log.info("send-now TEST_PHONE_OVERRIDE: %s -> %s", phone, TEST_PHONE_OVERRIDE)
+                phone = clean_phone(TEST_PHONE_OVERRIDE)
+
+            ok = send_sms(phone, sms_body)
+            if ok:
+                log.info("send-now: id=%s phone=%s type=%s OK",
+                         job_id, phone, row["job_type"])
+                self._send_json(200, {"sent": True})
+            else:
+                # Twilio failed — roll back the sent flag so the scheduler
+                # can retry. Without this the row is permanently "sent"
+                # without an SMS ever leaving Twilio.
+                con2 = get_db()
+                try:
+                    cur2 = con2.cursor()
+                    cur2.execute(
+                        "UPDATE jobs SET sent = 0, sent_at = 0 WHERE id = ?",
+                        (job_id,),
+                    )
+                    con2.commit()
+                finally:
+                    con2.close()
+                log.error("send-now: id=%s twilio send failed; rolled back sent flag", job_id)
+                self._send_json(500, {"error": "twilio_send_failed"})
+            return
+
         if self.path.split("?")[0] == "/earlscheibconcord/heartbeat":
             import xml.etree.ElementTree as _ET
             try:

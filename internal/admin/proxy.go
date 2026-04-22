@@ -117,6 +117,70 @@ func (s *server) handleCancel(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(respBody)
 }
 
+// handleSendNow proxies POST /api/send-now -> POST {webhookURL}/queue/send-now.
+// Mirrors handleCancel byte-for-byte (the only differences are the upstream
+// method=POST and URL=/queue/send-now — everything else about canonical
+// re-marshal + HMAC sign + body/status relay is the established pattern).
+func (s *server) handleSendNow(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	raw, err := io.ReadAll(io.LimitReader(r.Body, 1024))
+	if err != nil {
+		s.jsonError(w, http.StatusBadRequest, "read body: "+err.Error())
+		return
+	}
+	var parsed struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil || parsed.ID == 0 {
+		s.jsonError(w, http.StatusBadRequest, "body must be {\"id\": N} with non-zero integer N")
+		return
+	}
+
+	// Re-marshal to canonical compact JSON — the HMAC covers these exact bytes.
+	outBody, err := json.Marshal(struct {
+		ID int64 `json:"id"`
+	}{ID: parsed.ID})
+	if err != nil {
+		s.jsonError(w, http.StatusInternalServerError, "marshal: "+err.Error())
+		return
+	}
+
+	sig := webhook.Sign(s.cfg.Secret, outBody)
+
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.remoteSendNowURL(), bytes.NewReader(outBody))
+	if err != nil {
+		s.jsonError(w, http.StatusInternalServerError, "build request: "+err.Error())
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Length", fmt.Sprintf("%d", len(outBody)))
+	req.Header.Set("X-EMS-Signature", sig)
+	req.Header.Set("X-EMS-Source", "EarlScheibWatcher-Admin")
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		s.jsonError(w, http.StatusBadGateway, "upstream unreachable: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if err != nil {
+		s.jsonError(w, http.StatusBadGateway, "read upstream body: "+err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	_, _ = w.Write(respBody)
+}
+
 func (s *server) jsonError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

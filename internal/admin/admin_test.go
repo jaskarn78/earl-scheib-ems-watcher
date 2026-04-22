@@ -320,6 +320,75 @@ func TestPortBind_ReturnsLocalhostURL(t *testing.T) {
 	}
 }
 
+func TestProxySendNow_SignsJSONBodyAndForwardsAsPOST(t *testing.T) {
+	secret := "test-secret-send-now"
+	captured := &atomic.Pointer[capturedRequest]{}
+	remote := newFakeRemote(t, 200, []byte(`{"sent":true}`), captured)
+	defer remote.Close()
+
+	adminURL, stop := startAdminWithURLCh(t, remote.URL, secret, 5*time.Second)
+	defer stop()
+
+	resp, body := postJSON(t, adminURL+"/api/send-now", `{"id": 7}`)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: got %d, want 200; body=%s", resp.StatusCode, body)
+	}
+
+	cr := captured.Load()
+	if cr == nil {
+		t.Fatal("fake remote never captured a request")
+	}
+	if cr.method != http.MethodPost {
+		t.Errorf("upstream method: got %s, want POST", cr.method)
+	}
+	if !strings.HasSuffix(cr.path, "/earlscheibconcord/queue/send-now") {
+		t.Errorf("upstream path: got %q, want suffix /earlscheibconcord/queue/send-now", cr.path)
+	}
+	wantBody := `{"id":7}`
+	if string(cr.body) != wantBody {
+		t.Errorf("upstream body: got %q, want %q", cr.body, wantBody)
+	}
+	wantSig := webhook.Sign(secret, []byte(wantBody))
+	if cr.sig != wantSig {
+		t.Errorf("upstream X-EMS-Signature: got %q, want %q", cr.sig, wantSig)
+	}
+}
+
+func TestProxySendNow_Propagates404(t *testing.T) {
+	captured := &atomic.Pointer[capturedRequest]{}
+	notFoundBody := []byte(`{"error":"not_found_or_already_sent"}`)
+	remote := newFakeRemote(t, 404, notFoundBody, captured)
+	defer remote.Close()
+
+	adminURL, stop := startAdminWithURLCh(t, remote.URL, "secret", 5*time.Second)
+	defer stop()
+
+	resp, body := postJSON(t, adminURL+"/api/send-now", `{"id": 999}`)
+	if resp.StatusCode != 404 {
+		t.Errorf("status: got %d, want 404", resp.StatusCode)
+	}
+	if !bytes.Equal(body, notFoundBody) {
+		t.Errorf("body forwarding: got %q, want %q", body, notFoundBody)
+	}
+}
+
+func TestProxySendNow_BadJSON(t *testing.T) {
+	captured := &atomic.Pointer[capturedRequest]{}
+	remote := newFakeRemote(t, 200, []byte(`{}`), captured)
+	defer remote.Close()
+
+	adminURL, stop := startAdminWithURLCh(t, remote.URL, "secret", 5*time.Second)
+	defer stop()
+
+	resp, _ := postJSON(t, adminURL+"/api/send-now", "not-json")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want 400", resp.StatusCode)
+	}
+	if captured.Load() != nil {
+		t.Error("upstream must not be called on malformed body")
+	}
+}
+
 func TestProxyQueue_PropagatesUpstream401(t *testing.T) {
 	captured := &atomic.Pointer[capturedRequest]{}
 	remote := newFakeRemote(t, 401, []byte(`{"error":"invalid signature"}`), captured)

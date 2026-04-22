@@ -89,6 +89,7 @@ func Run(ctx context.Context, cfg Config) error {
 	// API
 	mux.HandleFunc("/api/queue", s.handleQueue)
 	mux.HandleFunc("/api/cancel", s.handleCancel)
+	mux.HandleFunc("/api/send-now", s.handleSendNow)
 	mux.HandleFunc("/api/diagnostic", s.handleDiagnostic)
 	mux.HandleFunc("/alive", s.handleAlive)
 
@@ -170,6 +171,12 @@ func Run(ctx context.Context, cfg Config) error {
 // heartbeat appends /heartbeat).
 func (s *server) remoteQueueURL() string {
 	return strings.TrimRight(s.cfg.WebhookURL, "/") + "/queue"
+}
+
+// remoteSendNowURL returns the remote /queue/send-now endpoint.
+// Shares the same /earlscheibconcord prefix convention as remoteQueueURL.
+func (s *server) remoteSendNowURL() string {
+	return strings.TrimRight(s.cfg.WebhookURL, "/") + "/queue/send-now"
 }
 
 // handleAlive is the browser heartbeat endpoint. Resets the last-alive timer.
