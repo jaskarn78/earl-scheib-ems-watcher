@@ -1854,6 +1854,48 @@ class WebhookHandler(BaseHTTPRequestHandler):
             })
             return
 
+        # Self-update: client polls this with HMAC-signed empty body each scan.
+        # Returns the first-16 hex of SHA256(EarlScheibWatcher-Setup.exe) plus a
+        # kill-switch flag. Client compares to its own os.Executable() hash and
+        # downloads /earlscheibconcord/download.exe if they differ. Setting
+        # AUTO_UPDATE_PAUSED=1 in the environment, or creating an empty file
+        # named `update_paused` in this app dir, flips paused=True and halts
+        # rollout across every deployed client within one scan cycle.
+        if path == "/earlscheibconcord/version":
+            import os as _os
+            sig = self.headers.get("X-EMS-Signature", "")
+            if not _validate_hmac(b"", sig):
+                self._send_json(401, {"error": "invalid signature"})
+                return
+
+            app_dir = _os.path.dirname(_os.path.abspath(__file__))
+            installer_path = _os.path.join(app_dir, "EarlScheibWatcher-Setup.exe")
+            if not _os.path.exists(installer_path):
+                self._send_json(404, {"error": "no installer available"})
+                return
+
+            paused = (
+                _os.environ.get("AUTO_UPDATE_PAUSED") == "1"
+                or _os.path.exists(_os.path.join(app_dir, "update_paused"))
+            )
+
+            # 64 KB chunk-hash — <10 ms for 6 MB installer, keeps memory flat.
+            h = hashlib.sha256()
+            with open(installer_path, "rb") as fh:
+                while True:
+                    chunk = fh.read(65536)
+                    if not chunk:
+                        break
+                    h.update(chunk)
+            version = h.hexdigest()[:16]
+
+            self._send_json(200, {
+                "version": version,
+                "download_url": "/earlscheibconcord/download.exe",
+                "paused": paused,
+            })
+            return
+
         # Default: 404
         self.send_response(404); self.end_headers()
         return
