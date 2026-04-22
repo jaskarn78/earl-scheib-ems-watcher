@@ -274,8 +274,11 @@ def send_sms(to: str, body: str) -> bool:
     from_number = f"whatsapp:{TWILIO_FROM}"
     to_number = f"whatsapp:{to}"
 
-    payload = f"From={from_number}&To={to_number}&Body={body}"
-    data = payload.encode("utf-8")
+    # URL-encode each field — body contains spaces, apostrophes, parens,
+    # slashes, colons. Raw f-string interpolation silently produces
+    # invalid form bodies and Twilio returns 400 Bad Request.
+    from urllib.parse import urlencode
+    data = urlencode({"From": from_number, "To": to_number, "Body": body}).encode("utf-8")
 
     credentials = f"{TWILIO_API_KEY}:{TWILIO_API_SECRET}"
     encoded = base64.b64encode(credentials.encode("utf-8")).decode("utf-8")
