@@ -158,6 +158,12 @@ def init_db():
     # OH4-01 migration: add richer customer/vehicle columns for the admin UI.
     # Each ALTER TABLE is wrapped individually so a duplicate-column error on
     # re-run is silently tolerated — safe for idempotent startup.
+    #
+    # QAJ-01 migration: add estimate_key for (phone + VIN)-based deduplication.
+    # Collapses CCC ONE "Resave" bursts — same estimate being re-exported many
+    # times a minute produces one pending job, not N. After adding the column,
+    # run a one-time backfill for any existing row so the new dedup path has
+    # keys to match against.
     migrations = [
         ("vin", "ALTER TABLE jobs ADD COLUMN vin TEXT DEFAULT ''"),
         ("vehicle_desc", "ALTER TABLE jobs ADD COLUMN vehicle_desc TEXT DEFAULT ''"),
@@ -165,6 +171,7 @@ def init_db():
         ("email", "ALTER TABLE jobs ADD COLUMN email TEXT DEFAULT ''"),
         ("address", "ALTER TABLE jobs ADD COLUMN address TEXT DEFAULT ''"),
         ("sent_at", "ALTER TABLE jobs ADD COLUMN sent_at INTEGER DEFAULT 0"),
+        ("estimate_key", "ALTER TABLE jobs ADD COLUMN estimate_key TEXT DEFAULT ''"),
     ]
     added = 0
     for col, stmt in migrations:
@@ -176,6 +183,22 @@ def init_db():
             # Column already exists — idempotent, continue.
             pass
     log.info("DB migrated: +%d columns (0 if already applied)", added)
+
+    # QAJ-01 one-time backfill: populate estimate_key for any pre-existing
+    # jobs row that still has the empty default. Key formula matches
+    # schedule_job: "<phone>|<vin>" when VIN is present, otherwise
+    # "<phone>|<doc_id>" so rows without a VIN still dedup on resave.
+    try:
+        cur.execute(
+            "UPDATE jobs SET estimate_key = phone || '|' || "
+            "COALESCE(NULLIF(vin, ''), doc_id) WHERE estimate_key = ''"
+        )
+        con.commit()
+        if cur.rowcount:
+            log.info("QAJ-01 backfill: populated estimate_key on %d rows", cur.rowcount)
+    except sqlite3.OperationalError as exc:
+        # Should not happen after the ALTER above; log and continue.
+        log.warning("QAJ-01 backfill skipped: %s", exc)
 
     con.close()
     log.info("DB initialised at %s", DB_PATH)
@@ -205,27 +228,84 @@ def schedule_job(
     email: str = "",
     address: str = "",
 ):
-    """Insert a job, skipping duplicates (same doc_id + job_type).
+    """Schedule a follow-up SMS, with CCC-ONE-resave-tolerant dedup.
 
-    OH4-01: extended to accept vin / vehicle_desc / ro_id / email / address.
-    All new fields default to "" so existing positional callers keep working.
-    sent_at persists as 0 until the job is actually sent (scheduler_loop or
-    /queue/send-now set it to the Unix timestamp of successful delivery).
+    QAJ-01: dedup key is now ``(phone + VIN)`` rather than ``(doc_id)``. CCC ONE
+    emits a new DocumentVerCode on every "Resave" — sometimes 20+ copies of the
+    same estimate inside a minute. Keying on the stable (phone, VIN) pair
+    collapses the burst into a single pending job while still letting a brand
+    new estimate (different phone OR different VIN) schedule cleanly.
+
+    Behaviour by existing row state for ``(estimate_key, job_type)``:
+      - No existing row                → INSERT (fresh estimate).
+      - Existing row, sent=0           → UPDATE customer/vehicle fields on
+                                         the pending row; keep original
+                                         send_at so the window isn't reset.
+                                         Useful when CCC re-saves with a
+                                         corrected phone / VIN / name.
+      - Existing row, sent=1, < 60d    → SKIP (already delivered recently).
+      - Existing row, sent=1, >= 60d   → INSERT (genuine new visit; treat as
+                                         a fresh estimate for reopen).
+
+    Falls back to ``"<phone>|<doc_id>"`` when VIN is missing so the dedup still
+    triggers across repeated doc_id sightings. All new columns default to ""
+    for backward-compatible positional callers.
     """
+    estimate_key = f"{phone}|{vin}" if vin else f"{phone}|{doc_id}"
+
     con = get_db()
     try:
         cur = con.cursor()
         cur.execute(
-            "SELECT id FROM jobs WHERE doc_id = ? AND job_type = ?",
-            (doc_id, job_type),
+            "SELECT id, sent, created_at FROM jobs "
+            "WHERE estimate_key = ? AND job_type = ? "
+            "ORDER BY id DESC LIMIT 1",
+            (estimate_key, job_type),
         )
-        if cur.fetchone():
-            log.info("Duplicate job skipped: doc_id=%s job_type=%s", doc_id, job_type)
-            return
+        existing = cur.fetchone()
+        now = int(time.time())
+
+        if existing:
+            eid = existing["id"]
+            sent = existing["sent"]
+            created_at = existing["created_at"]
+
+            if sent == 0:
+                # Refresh customer/vehicle data on the pending row; preserve
+                # send_at and created_at so the scheduled window doesn't reset.
+                cur.execute(
+                    "UPDATE jobs SET name=?, phone=?, vin=?, vehicle_desc=?, "
+                    " ro_id=?, email=?, address=?, doc_id=? "
+                    "WHERE id=?",
+                    (name, phone, vin, vehicle_desc, ro_id, email, address,
+                     doc_id, eid),
+                )
+                con.commit()
+                log.info(
+                    "updated pending job: id=%s estimate_key=%s job_type=%s "
+                    "(CCC resave collapsed)",
+                    eid, estimate_key, job_type,
+                )
+                return
+
+            # sent == 1: only reopen if the previous delivery is > 60 days old.
+            if created_at >= now - 60 * 86400:
+                log.info(
+                    "skip duplicate: sent job for estimate_key=%s job_type=%s "
+                    "within 60d window (created_at=%s)",
+                    estimate_key, job_type, created_at,
+                )
+                return
+            # Fall through to INSERT — stale sent row, treat as new visit.
+            log.info(
+                "reopening estimate_key=%s job_type=%s — previous send was "
+                ">60d ago",
+                estimate_key, job_type,
+            )
 
         # OH4-04 testing override — after dedup, before INSERT. Collapses
         # 24h / 72h / review scheduling to now+60s. Dedup still works so
-        # a re-POST of the same doc_id won't double-schedule.
+        # a re-POST of the same estimate_key won't double-schedule.
         if IMMEDIATE_SEND_FOR_TESTING:
             new_send_at = int(time.time()) + 60
             log.info(
@@ -235,19 +315,20 @@ def schedule_job(
             )
             send_at = new_send_at
 
-        now = int(time.time())
         cur.execute(
             "INSERT INTO jobs "
             "(doc_id, job_type, phone, name, send_at, sent, created_at, "
-            " vin, vehicle_desc, ro_id, email, address, sent_at) "
-            "VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, 0)",
+            " vin, vehicle_desc, ro_id, email, address, sent_at, estimate_key) "
+            "VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, 0, ?)",
             (doc_id, job_type, phone, name, send_at, now,
-             vin, vehicle_desc, ro_id, email, address),
+             vin, vehicle_desc, ro_id, email, address, estimate_key),
         )
         con.commit()
         log.info(
-            "Scheduled job: doc_id=%s job_type=%s phone=%s send_at=%s vehicle=%r ro=%s",
-            doc_id, job_type, phone, send_at, vehicle_desc, ro_id,
+            "Scheduled job: doc_id=%s job_type=%s phone=%s send_at=%s "
+            "estimate_key=%s vehicle=%r ro=%s",
+            doc_id, job_type, phone, send_at, estimate_key,
+            vehicle_desc, ro_id,
         )
     finally:
         con.close()
@@ -1872,9 +1953,12 @@ class WebhookHandler(BaseHTTPRequestHandler):
             con = get_db()
             try:
                 cur = con.cursor()
+                # QAJ-01: include estimate_key so the admin UI can group
+                # pending jobs per estimate into a timeline view.
                 cur.execute(
                     "SELECT id, doc_id, job_type, phone, name, send_at, created_at, "
-                    "       vin, vehicle_desc, ro_id, email, address, sent_at "
+                    "       vin, vehicle_desc, ro_id, email, address, sent_at, "
+                    "       estimate_key "
                     "FROM jobs WHERE sent = 0 ORDER BY send_at ASC"
                 )
                 rows = [dict(r) for r in cur.fetchall()]
