@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: v1.0 milestone complete
-stopped_at: Completed quick task 260422-oh4 — admin UI rework + send-now + schema migration + 120s cooldown shipped and live
-last_updated: "2026-04-22T18:00:48Z"
+stopped_at: Completed quick task 260422-qaj — (phone+VIN) dedup + per-estimate timeline UI + 24h heartbeat bump shipped and live
+last_updated: "2026-04-22T19:15:00Z"
 progress:
   total_phases: 0
   completed_phases: 0
@@ -134,6 +134,7 @@ Recent decisions affecting current work:
 - [Quick 260422-k38]: Tests chdir into uppercase-safe workdir to work around go-dbase v1.12.10 NewTable full-path ToUpper behaviour; tests drop t.Parallel (conflict with t.Chdir in Go 1.25)
 - [Phase quick-260422-nk1]: Self-update mechanism shipped: client polls /version HMAC-signed each scan, SHA256-verifies installer, launches /VERYSILENT reinstall; kill-switch via update_paused sentinel file or AUTO_UPDATE_PAUSED env; cooldown 3600s + 3-strike fail limit
 - [Phase quick-260422-oh4]: Admin UI rework shipped — LIGHT Fraunces/Work Sans/IBM Plex Mono palette (cream + oxblood + amber), rejected the planned industrial-garage dark aesthetic per user override; added VIN/vehicle_desc/ro_id/email/address/sent_at columns via idempotent ALTER TABLE; send-now endpoint with Twilio-failure rollback; 30-min heartbeat + friendly sleep panel; IMMEDIATE_SEND_FOR_TESTING env flag; update cooldown 3600s -> 120s for testing cadence
+- [Phase quick-260422-qaj]: Dedup by (phone+VIN) with doc_id fallback collapses CCC ONE "Resave" bursts into one pending row; update-pending path preserves send_at on resave; 60-day reopen window; per-estimate timeline UI groups jobs by estimate_key client-side; filter chips (All/Estimates/Work Completed/Sent) + debounced live search (150ms); HeartbeatTimeout bumped 30m→24h (TODO revert before next prod release); verify_dedup.py runnable 4-case evidence script; added .claude/ + received_logs/ to .gitignore
 
 ### Roadmap Evolution
 
@@ -157,9 +158,10 @@ None yet.
 | 260422-k38 | EMS dBase bundle parser — CCC ONE AD1/VEH/ENV → BMS XML, scanner bundle track, ?trigger=ems_bundle routing | 2026-04-22 | 967770b | [260422-k38-ems-bundle-parser-dbase-cccone](./quick/260422-k38-ems-bundle-parser-dbase-cccone/) |
 | 260422-nk1 | Self-update mechanism — client polls /version each scan, SHA256-verifies installer, silently reinstalls via /VERYSILENT; kill-switch via update_paused sentinel | 2026-04-22 | c8a7544 | [260422-nk1-self-update-autoupdate-mechanism](./quick/260422-nk1-self-update-autoupdate-mechanism/) |
 | 260422-oh4 | Admin UI rework (LIGHT Fraunces palette, not dark) + send-now endpoint + VIN/vehicle/RO/email schema + 30m heartbeat + IMMEDIATE_SEND flag + 120s update cooldown | 2026-04-22 | 3620fe4 | [260422-oh4-admin-ui-rework-send-now-customer-detail](./quick/260422-oh4-admin-ui-rework-send-now-customer-detail/) |
+| 260422-qaj | Dedup jobs by (phone+VIN) to collapse CCC resave bursts + per-estimate timeline UI with filter chips + live search + bump admin heartbeat 30m→24h | 2026-04-22 | 70be77e | [260422-qaj-timeline-view-dedup-ingestion-keepalive](./quick/260422-qaj-timeline-view-dedup-ingestion-keepalive/) |
 
 ## Session Continuity
 
-Last session: 2026-04-22T18:00:48Z
-Stopped at: Completed quick task 260422-oh4 — admin UI rework + send-now + schema migration + 120s cooldown shipped and live
+Last session: 2026-04-22T19:15:00Z
+Stopped at: Completed quick task 260422-qaj — (phone+VIN) dedup + per-estimate timeline UI + 24h heartbeat bump shipped and live
 Resume file: None
