@@ -13,6 +13,8 @@
   // dismisses the panel and resumes normal cadence.
   const RETRY_MS    = 3000;
   const RETRY_LIMIT = 20; // 20 * 3s = 60s retry window
+  // QAJ-02: debounce for search input.
+  const SEARCH_DEBOUNCE_MS = 150;
 
   // SMS templates — MUST stay byte-for-byte identical to app.py MSG_*.
   // If you change the app.py templates, update the three strings below.
@@ -63,15 +65,24 @@
   const statPendingEl  = document.getElementById('stat-pending');
   const statSentEl     = document.getElementById('stat-sent');
   const statFailedEl   = document.getElementById('stat-failed');
-  const cardTpl        = document.getElementById('job-card-template');
+  const estimateTpl    = document.getElementById('estimate-card-template');
+  const entryTpl       = document.getElementById('timeline-entry-template');
   const emptyTpl       = document.getElementById('empty-state-template');
   const errorTpl       = document.getElementById('error-state-template');
   const sleepTpl       = document.getElementById('sleep-state-template');
+  const searchEl       = document.getElementById('search');
 
   let lastFetchedAt = 0;
   let retryAttempt  = 0;
   let inRetryMode   = false;
   let retryTimerId  = null;
+
+  // QAJ-02 filter + search state. Re-applied against the cached `lastJobs`
+  // array on chip click or search keystroke — avoids a network round-trip.
+  let currentFilter = 'all';
+  let currentSearch = '';
+  let lastJobs      = [];
+  let searchTimerId = null;
 
   // ---------- Helpers --------------------------------------------------
 
@@ -113,43 +124,161 @@
     return diffSec >= 0 ? `in ${pieces}` : `overdue ${pieces}`;
   }
 
+  // ---------- Filter + search logic (QAJ-02) --------------------------
+
+  // Returns true if a single job matches the active filter chip.
+  function jobMatchesFilter(job, filter) {
+    switch (filter) {
+      case 'all':
+        return true;
+      case 'estimates':
+        return (job.job_type === '24h' || job.job_type === '3day')
+          && (job.sent === 0 || job.sent === undefined);
+      case 'completed':
+        return job.job_type === 'review' || job.sent === 1;
+      case 'sent':
+        return job.sent === 1;
+      default:
+        return true;
+    }
+  }
+
+  // Returns true if any searchable field on the job contains the needle.
+  function jobMatchesSearch(job, needle) {
+    if (!needle) return true;
+    const hay = [
+      job.name, job.phone, job.vin, job.doc_id, job.ro_id, job.email,
+      job.vehicle_desc,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    return hay.includes(needle);
+  }
+
+  // Group jobs by estimate_key — preserves server ordering (ASC by send_at)
+  // inside each group since jobs.forEach walks the array in order.
+  function groupByEstimate(jobs) {
+    const map = new Map();
+    jobs.forEach((job) => {
+      // Fallback to doc_id if the server didn't emit an estimate_key yet
+      // (pre-QAJ-01 deployments); groups still render one-per-estimate.
+      const key = job.estimate_key || job.doc_id || String(job.id);
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          // Identity + vehicle — copy from the first row; all rows in a
+          // group should match since schedule_job now refreshes these
+          // fields on every resave.
+          name:         job.name || '',
+          phone:        job.phone || '',
+          email:        job.email || '',
+          vehicle_desc: job.vehicle_desc || '',
+          vin:          job.vin || '',
+          ro_id:        job.ro_id || '',
+          jobs:         [],
+        });
+      }
+      map.get(key).jobs.push(job);
+    });
+    return Array.from(map.values());
+  }
+
   // ---------- Rendering ------------------------------------------------
 
   function renderQueue(jobs) {
     queueEl.innerHTML = '';
     queueEl.setAttribute('aria-busy', 'false');
 
-    counters.pending = jobs ? jobs.length : 0;
+    counters.pending = jobs ? jobs.filter((j) => !j.sent).length : 0;
     updateStats();
 
-    if (!jobs || jobs.length === 0) {
-      queueEl.appendChild(emptyTpl.content.cloneNode(true));
-      return;
-    }
+    const groups = groupByEstimate(jobs || []);
+    const needle = currentSearch.trim().toLowerCase();
 
-    // Preserve server ordering (already ASC by send_at) — no regrouping.
-    jobs.forEach((job, i) => {
-      queueEl.appendChild(buildJobCard(job, i));
+    // Build visibility decisions up-front so we can detect "no results".
+    let visibleGroups = 0;
+    groups.forEach((group, i) => {
+      const visibleJobs = group.jobs.filter(
+        (job) => jobMatchesFilter(job, currentFilter)
+              && jobMatchesSearch(job, needle),
+      );
+      if (visibleJobs.length === 0) return;
+      visibleGroups += 1;
+      queueEl.appendChild(buildEstimateCard(group, visibleJobs, i));
     });
+
+    if (visibleGroups === 0) {
+      queueEl.appendChild(emptyTpl.content.cloneNode(true));
+      // Customise empty-state copy when filters are active so it doesn't
+      // falsely claim "All caught up" while the user has a filter on.
+      const titleEl = queueEl.querySelector('.empty-title');
+      const subEl   = queueEl.querySelector('.empty-sub');
+      if (titleEl && (currentFilter !== 'all' || needle)) {
+        titleEl.textContent = 'No matches';
+        if (subEl) {
+          subEl.textContent = needle
+            ? `No jobs match "${currentSearch.trim()}".`
+            : 'No jobs in this view right now.';
+        }
+      }
+    }
   }
 
-  function buildJobCard(job, index) {
-    const frag = cardTpl.content.cloneNode(true);
-    const article = frag.querySelector('.job-card');
-    article.style.setProperty('--i', String(index));
-    article.dataset.jobId = String(job.id);
+  function buildEstimateCard(group, visibleJobs, index) {
+    const frag = estimateTpl.content.cloneNode(true);
+    const card = frag.querySelector('.estimate-card');
+    card.style.setProperty('--i', String(index));
+    card.dataset.estimateKey = group.key;
 
-    // Identity
-    frag.querySelector('.job-name').textContent = job.name || 'Unknown customer';
-    frag.querySelector('.job-phone').textContent = formatPhone(job.phone);
-    const emailEl = frag.querySelector('.job-email');
-    if (job.email) {
-      emailEl.textContent = job.email;
+    frag.querySelector('.estimate-card__name').textContent =
+      group.name || 'Unknown customer';
+    frag.querySelector('.estimate-phone').textContent = formatPhone(group.phone);
+    const emailEl = frag.querySelector('.estimate-email');
+    if (group.email) {
+      emailEl.textContent = group.email;
     } else {
       emailEl.remove();
     }
 
-    // Chip + scheduled send
+    const vehDescEl = frag.querySelector('.estimate-vehicle-desc');
+    const vinEl     = frag.querySelector('.estimate-vin');
+    const roEl      = frag.querySelector('.estimate-ro');
+    vehDescEl.textContent = group.vehicle_desc || '';
+    if (group.vin) {
+      vinEl.textContent = maskVIN(group.vin);
+      vinEl.setAttribute('title', group.vin);
+    }
+    if (group.ro_id) {
+      roEl.textContent = 'RO ' + group.ro_id;
+    }
+    if (!group.vehicle_desc && !group.vin && !group.ro_id) {
+      frag.querySelector('.estimate-card__vehicle').remove();
+    }
+
+    const timeline = frag.querySelector('.timeline');
+    // Sort visible jobs ASC by send_at so the timeline reads chronologically
+    // (earlier at top). Server already returns ASC for pending rows but a
+    // belt-and-braces sort keeps the invariant under any future server
+    // changes.
+    const sortedJobs = visibleJobs.slice().sort((a, b) => {
+      const sa = a.send_at || 0;
+      const sb = b.send_at || 0;
+      return sa - sb;
+    });
+    sortedJobs.forEach((job) => {
+      timeline.appendChild(buildTimelineEntry(job));
+    });
+
+    return frag;
+  }
+
+  function buildTimelineEntry(job) {
+    const frag = entryTpl.content.cloneNode(true);
+    const li   = frag.querySelector('.timeline__entry');
+    li.dataset.jobId = String(job.id);
+    li.dataset.state = job.sent === 1 ? 'sent' : 'pending';
+
     const chip = frag.querySelector('.job-chip');
     chip.textContent = JOB_TYPE_LABELS[job.job_type] || job.job_type;
     chip.setAttribute('data-type', job.job_type);
@@ -157,34 +286,22 @@
     frag.querySelector('.job-send-relative').textContent = formatRelative(job.send_at);
     frag.querySelector('.job-send-absolute').textContent = formatAbsolute(job.send_at);
 
-    // Vehicle block
-    const vehDescEl = frag.querySelector('.vehicle-desc');
-    const vinEl = frag.querySelector('.vehicle-vin');
-    const roEl = frag.querySelector('.vehicle-ro');
-    vehDescEl.textContent = job.vehicle_desc || '';
-    if (job.vin) {
-      vinEl.textContent = maskVIN(job.vin);
-      vinEl.setAttribute('title', job.vin); // hover-reveal full VIN
-    }
-    if (job.ro_id) {
-      roEl.textContent = 'RO ' + job.ro_id;
-    }
-    // If the whole vehicle block is empty, drop the panel entirely
-    // so there's no empty box on cards with no vehicle data.
-    if (!job.vehicle_desc && !job.vin && !job.ro_id) {
-      frag.querySelector('.job-vehicle').remove();
+    // Show a "Sent at …" stamp instead of scheduled-send once delivered.
+    if (job.sent === 1) {
+      const stampEl = frag.querySelector('.timeline__sent-stamp');
+      stampEl.hidden = false;
+      const whenTs = job.sent_at && job.sent_at > 0 ? job.sent_at : job.send_at;
+      stampEl.textContent = 'Sent · ' + formatAbsolute(whenTs);
+      frag.querySelector('.job-send').hidden = true;
     }
 
-    // SMS preview
     frag.querySelector('.sms-bubble').textContent = previewSMS(job.job_type, job.name);
 
-    // Actions
-    const sendBtn = frag.querySelector('.send-now-btn');
+    const sendBtn   = frag.querySelector('.send-now-btn');
     const cancelBtn = frag.querySelector('.cancel-btn');
-    const errEl = frag.querySelector('.job-error');
-
-    sendBtn.addEventListener('click', () => handleSendNow(job, article, sendBtn, errEl));
-    cancelBtn.addEventListener('click', () => handleCancel(job, article, cancelBtn, errEl));
+    const errEl     = frag.querySelector('.job-error');
+    sendBtn.addEventListener('click',   () => handleSendNow(job, li, sendBtn, errEl));
+    cancelBtn.addEventListener('click', () => handleCancel(job, li, cancelBtn, errEl));
 
     return frag;
   }
@@ -197,7 +314,7 @@
 
   // ---------- Send-now flow -------------------------------------------
 
-  async function handleSendNow(job, cardEl, btnEl, errEl) {
+  async function handleSendNow(job, entryEl, btnEl, errEl) {
     const name = job.name || 'this customer';
     const type = JOB_TYPE_LABELS[job.job_type] || job.job_type;
     const confirmMsg = `Send "${type}" SMS to ${name} right now?`;
@@ -217,8 +334,8 @@
       if (resp.status === 200) {
         counters.sentToday++;
         updateStats();
-        markCardSent(cardEl);
-        // Re-fetch so the row drops out of pending in the next tick.
+        markEntrySent(entryEl);
+        // Re-fetch so the row updates to sent/drops out of pending.
         setTimeout(fetchQueue, 600);
         return;
       }
@@ -226,7 +343,7 @@
       if (resp.status === 404) {
         counters.failed++;
         updateStats();
-        showCardError(errEl, 'Already sent or cancelled — refreshing list…');
+        showEntryError(errEl, 'Already sent or cancelled — refreshing list…');
         setTimeout(fetchQueue, 600);
         return;
       }
@@ -235,24 +352,30 @@
       const msg = parsed.error ? `Send failed: ${parsed.error}` : `Send failed (${resp.status})`;
       counters.failed++;
       updateStats();
-      showCardError(errEl, msg);
+      showEntryError(errEl, msg);
       btnEl.disabled = false;
 
     } catch (e) {
       counters.failed++;
       updateStats();
-      showCardError(errEl, 'Network error — please retry');
+      showEntryError(errEl, 'Network error — please retry');
       btnEl.disabled = false;
     }
   }
 
-  function markCardSent(cardEl) {
+  function markEntrySent(entryEl) {
     const stamp = timeFmt.format(new Date());
-    cardEl.setAttribute('data-sent-label', 'Sent at ' + stamp);
-    cardEl.setAttribute('data-state', 'sent');
+    entryEl.dataset.state = 'sent';
+    const stampEl = entryEl.querySelector('.timeline__sent-stamp');
+    if (stampEl) {
+      stampEl.hidden = false;
+      stampEl.textContent = 'Sent · ' + stamp;
+    }
+    const sendMeta = entryEl.querySelector('.job-send');
+    if (sendMeta) sendMeta.hidden = true;
   }
 
-  function showCardError(errEl, msg) {
+  function showEntryError(errEl, msg) {
     errEl.textContent = msg;
     errEl.hidden = false;
     setTimeout(() => { errEl.hidden = true; }, 5000);
@@ -260,12 +383,12 @@
 
   // ---------- Cancel flow ---------------------------------------------
 
-  async function handleCancel(job, cardEl, btnEl, errEl) {
+  async function handleCancel(job, entryEl, btnEl, errEl) {
     const name = job.name || 'this customer';
     const type = JOB_TYPE_LABELS[job.job_type] || job.job_type;
     if (!window.confirm(`Cancel the "${type}" follow-up for ${name}?`)) return;
 
-    cardEl.setAttribute('data-state', 'cancelling');
+    entryEl.dataset.state = 'cancelling';
     btnEl.disabled = true;
     errEl.hidden = true;
 
@@ -276,25 +399,35 @@
         body: JSON.stringify({ id: job.id }),
       });
       if (resp.ok) {
-        cardEl.style.transition = 'opacity 240ms ease, transform 240ms ease';
-        cardEl.style.opacity = '0';
-        cardEl.style.transform = 'translateY(-8px)';
-        setTimeout(fetchQueue, 260);
+        entryEl.style.transition = 'opacity 240ms ease, transform 240ms ease';
+        entryEl.style.opacity = '0';
+        entryEl.style.transform = 'translateX(-8px)';
+        setTimeout(() => {
+          const parentCard = entryEl.closest('.estimate-card');
+          entryEl.remove();
+          // If this was the last visible entry in the estimate card, drop
+          // the whole card — main.js re-renders on the next fetchQueue
+          // tick anyway, but this keeps the UI tidy in the interim.
+          if (parentCard && !parentCard.querySelector('.timeline__entry')) {
+            parentCard.remove();
+          }
+          fetchQueue();
+        }, 260);
       } else {
         const parsed = await resp.json().catch(() => ({}));
         const msg = parsed.error ? `Cancel failed: ${parsed.error}` : `Cancel failed (${resp.status})`;
         counters.failed++;
         updateStats();
-        cardEl.setAttribute('data-state', 'pending');
+        entryEl.dataset.state = 'pending';
         btnEl.disabled = false;
-        showCardError(errEl, msg);
+        showEntryError(errEl, msg);
       }
     } catch (_) {
       counters.failed++;
       updateStats();
-      cardEl.setAttribute('data-state', 'pending');
+      entryEl.dataset.state = 'pending';
       btnEl.disabled = false;
-      showCardError(errEl, 'Network error — please retry');
+      showEntryError(errEl, 'Network error — please retry');
     }
   }
 
@@ -313,7 +446,8 @@
       const data = await resp.json();
       // Success — exit retry mode if we were in it.
       onPollSuccess();
-      renderQueue(data);
+      lastJobs = Array.isArray(data) ? data : [];
+      renderQueue(lastJobs);
       pulseSyncDot();
       lastFetchedAt = Date.now();
       updateSyncCaption();
@@ -445,9 +579,43 @@
     return tag === 'input' || tag === 'textarea' || el.isContentEditable;
   }
 
+  // ---------- Filter + search wiring (QAJ-02) -------------------------
+
+  function wireFilters() {
+    document.querySelectorAll('.filter').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const f = btn.getAttribute('data-filter') || 'all';
+        if (f === currentFilter) return;
+        currentFilter = f;
+        document.querySelectorAll('.filter').forEach((b) => {
+          b.setAttribute(
+            'aria-selected',
+            b.getAttribute('data-filter') === f ? 'true' : 'false',
+          );
+        });
+        renderQueue(lastJobs);
+      });
+    });
+  }
+
+  function wireSearch() {
+    if (!searchEl) return;
+    searchEl.addEventListener('input', () => {
+      const val = searchEl.value;
+      if (searchTimerId) clearTimeout(searchTimerId);
+      searchTimerId = setTimeout(() => {
+        currentSearch = val;
+        renderQueue(lastJobs);
+      }, SEARCH_DEBOUNCE_MS);
+    });
+  }
+
   // ---------- Wire up --------------------------------------------------
 
   document.addEventListener('DOMContentLoaded', () => {
+    wireFilters();
+    wireSearch();
+
     fetchQueue();
     setInterval(fetchQueue, REFRESH_MS);
     setInterval(updateSyncCaption, 1000);

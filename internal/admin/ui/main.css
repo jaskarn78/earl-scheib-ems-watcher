@@ -209,13 +209,261 @@ body {
 .queue {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 32px 32px 80px;
+  padding: 16px 32px 80px;
   display: grid;
   grid-template-columns: 1fr;
   gap: 20px;
 }
 @media (min-width: 960px) {
   .queue { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+}
+
+/* ============== Filter chips + search (QAJ-02) ============== */
+
+.controls {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 28px 32px 4px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.filters {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.filter {
+  background-color: var(--surface);
+  border: 1px solid var(--hairline);
+  color: var(--ink-soft);
+  font-family: "Work Sans", ui-sans-serif, sans-serif;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 7px 14px;
+  border-radius: var(--r-chip);
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.filter:hover {
+  color: var(--oxblood);
+  border-color: var(--oxblood);
+}
+.filter[aria-selected="true"] {
+  background-color: var(--oxblood);
+  border-color: var(--oxblood);
+  color: #fff;
+  box-shadow: var(--shadow-sm);
+}
+.filter:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+
+.search-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-width: 260px;
+  flex: 0 1 340px;
+}
+.search-icon {
+  position: absolute;
+  left: 12px;
+  color: var(--ink-soft);
+  pointer-events: none;
+}
+.search {
+  flex: 1;
+  background-color: var(--canvas);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-button);
+  padding: 9px 14px 9px 34px;
+  font-family: "Work Sans", ui-sans-serif, sans-serif;
+  font-size: 14px;
+  color: var(--ink);
+  transition: border-color 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
+}
+.search::placeholder { color: var(--ink-soft); }
+.search:focus {
+  outline: none;
+  border-color: var(--oxblood);
+  background-color: var(--surface);
+  box-shadow: 0 0 0 3px rgba(139, 42, 42, 0.10);
+}
+
+/* ============== Estimate card + timeline (QAJ-02) ============== */
+
+.estimate-card {
+  grid-column: 1 / -1;
+  background-color: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-card);
+  padding: 26px 30px 22px;
+  box-shadow: var(--shadow-md);
+  opacity: 0;
+  transform: translateY(8px);
+  animation: fadeUp 440ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation-delay: calc(min(var(--i, 0), 5) * 50ms);
+  transition: box-shadow 180ms ease;
+}
+.estimate-card:hover { box-shadow: var(--shadow-lg); }
+.estimate-card[data-hidden="true"] { display: none; }
+
+.estimate-card__header {
+  margin-bottom: 18px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--hairline);
+}
+.estimate-card__name {
+  font-family: "Fraunces", Georgia, serif;
+  font-weight: 600;
+  font-size: 28px;
+  line-height: 1.15;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  margin: 0 0 6px;
+  word-break: break-word;
+}
+@media (min-width: 960px) { .estimate-card__name { font-size: 30px; } }
+.estimate-card__contact {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 14px;
+  row-gap: 2px;
+  font-size: 14px;
+  color: var(--ink-soft);
+  margin: 0 0 8px;
+}
+.estimate-phone {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.estimate-email { color: var(--ink-soft); word-break: break-all; }
+.estimate-email:empty { display: none; }
+.estimate-card__vehicle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 12px;
+  row-gap: 4px;
+  margin: 0;
+  font-size: 14.5px;
+  color: var(--ink-soft);
+}
+.estimate-vehicle-desc {
+  font-family: "Fraunces", Georgia, serif;
+  font-weight: 500;
+  font-size: 17px;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.estimate-vehicle-desc:empty { display: none; }
+.estimate-vin { font-size: 12.5px; font-weight: 500; cursor: help; }
+.estimate-vin:empty { display: none; }
+.estimate-ro {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: var(--r-chip);
+  background-color: var(--surface-alt);
+  border: 1px solid var(--hairline);
+  color: var(--ink-soft);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.estimate-ro:empty { display: none; }
+
+/* Timeline — vertical list with spine line + dots at each entry. */
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0 0 22px;
+  position: relative;
+}
+.timeline::before {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  background-color: var(--hairline);
+  border-radius: 1px;
+}
+
+.timeline__entry {
+  position: relative;
+  padding: 14px 0 14px 22px;
+  border-bottom: 1px dashed var(--hairline);
+}
+.timeline__entry:last-child { border-bottom: none; padding-bottom: 4px; }
+.timeline__entry[data-hidden="true"] { display: none; }
+
+.timeline__dot {
+  position: absolute;
+  left: -18px;
+  top: 20px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background-color: var(--oxblood);
+  border: 2px solid var(--surface);
+  box-shadow: 0 0 0 1px var(--hairline);
+}
+.timeline__entry[data-state="sent"] .timeline__dot {
+  background-color: var(--amber);
+}
+.timeline__entry[data-state="cancelled"] .timeline__dot,
+.timeline__entry[data-state="cancelling"] .timeline__dot {
+  background-color: var(--ink-soft);
+}
+
+.timeline__body { display: flex; flex-direction: column; gap: 10px; }
+
+.timeline__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.timeline__sent-stamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background-color: rgba(200, 149, 63, 0.15);
+  color: var(--amber);
+  padding: 4px 10px;
+  border-radius: var(--r-chip);
+  font-family: "Work Sans", ui-sans-serif, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Sent/cancelling visual — fade the body but keep dot + meta legible. */
+.timeline__entry[data-state="sent"] .sms-preview,
+.timeline__entry[data-state="sent"] .job-actions {
+  opacity: 0.55;
+}
+.timeline__entry[data-state="sent"] .job-actions { display: none; }
+.timeline__entry[data-state="cancelling"] .btn-primary { visibility: hidden; }
+
+/* Hide the Send-now + Cancel actions for non-pending rows. */
+.timeline__entry[data-state="sent"]      .job-actions,
+.timeline__entry[data-state="cancelled"] .job-actions {
+  display: none;
 }
 
 /* ============== Job card ============== */
@@ -661,9 +909,17 @@ body {
     gap: 14px;
   }
   .stats { display: none; } /* keep topbar clean on mobile; stats visible in diag below */
-  .queue { padding: 20px 18px 60px; }
+  .controls {
+    padding: 20px 18px 4px;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .search-wrap { flex: 1 1 auto; width: 100%; }
+  .queue { padding: 16px 18px 60px; }
   .job-card { padding: 22px; }
   .job-name { font-size: 24px; }
+  .estimate-card { padding: 22px 22px 16px; }
+  .estimate-card__name { font-size: 24px; }
   .empty-card { padding: 44px 28px; }
   .sleep-card { padding: 40px 28px; }
   .diagnostic { margin: 0 18px 60px; padding: 22px 22px 26px; }

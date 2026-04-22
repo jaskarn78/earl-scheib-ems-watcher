@@ -44,8 +44,27 @@
     </div>
   </header>
 
+  <!-- QAJ-02: filter chips + live search. Keep the light Fraunces aesthetic;
+       Work Sans uppercase with letter-spacing for the chips; oxblood selected
+       state. Search uses canvas bg + oxblood focus accent. -->
+  <section class="controls" aria-label="Queue filters">
+    <nav class="filters" role="tablist" aria-label="Filter jobs">
+      <button class="filter" type="button" data-filter="all" role="tab" aria-selected="true">All</button>
+      <button class="filter" type="button" data-filter="estimates" role="tab" aria-selected="false">Estimates</button>
+      <button class="filter" type="button" data-filter="completed" role="tab" aria-selected="false">Work Completed</button>
+      <button class="filter" type="button" data-filter="sent" role="tab" aria-selected="false">Sent</button>
+    </nav>
+    <div class="search-wrap">
+      <svg class="search-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="7" cy="7" r="5"></circle>
+        <path d="M14 14l-3.5-3.5"></path>
+      </svg>
+      <input id="search" class="search" type="search" placeholder="Search by name, phone, VIN, RO…" aria-label="Search">
+    </div>
+  </section>
+
   <main id="queue" class="queue" aria-live="polite" aria-busy="true">
-    <!-- Cards injected by main.js -->
+    <!-- Estimate cards (with nested timelines) injected by main.js -->
   </main>
 
   <section id="diagnostic" class="diagnostic" aria-label="Diagnostic">
@@ -61,50 +80,58 @@
     </dl>
   </section>
 
-  <!-- Per-job card. Matches the OH4 plan_override spec exactly:
-       name + phone/email + chip + scheduled send + vehicle + SMS preview + actions. -->
-  <template id="job-card-template">
-    <article class="job-card" data-state="pending">
-      <header class="job-head">
-        <div class="job-identity">
-          <h2 class="job-name"></h2>
-          <div class="job-contact">
-            <span class="job-phone mono"></span>
-            <span class="job-email"></span>
-          </div>
-        </div>
-        <div class="job-meta">
+  <!-- Estimate card = one customer + one vehicle with ALL their pending/sent
+       follow-ups rendered as a vertical timeline. Preserves the OH4 aesthetic
+       (Fraunces name, soft cream card, oxblood accents) while adding timeline
+       structure for QAJ-02. -->
+  <template id="estimate-card-template">
+    <article class="estimate-card">
+      <header class="estimate-card__header">
+        <h2 class="estimate-card__name"></h2>
+        <p class="estimate-card__contact">
+          <span class="estimate-phone mono"></span>
+          <span class="estimate-email"></span>
+        </p>
+        <p class="estimate-card__vehicle">
+          <span class="estimate-vehicle-desc"></span>
+          <span class="estimate-vin mono" title=""></span>
+          <span class="estimate-ro"></span>
+        </p>
+      </header>
+      <ol class="timeline"></ol>
+    </article>
+  </template>
+
+  <!-- One row inside a timeline = one follow-up job (24h/3day/review). -->
+  <template id="timeline-entry-template">
+    <li class="timeline__entry" data-state="pending">
+      <span class="timeline__dot" aria-hidden="true"></span>
+      <div class="timeline__body">
+        <div class="timeline__meta">
           <span class="job-chip"></span>
           <span class="job-send">
             <span class="job-send-relative"></span>
             <span class="job-send-absolute mono"></span>
           </span>
+          <span class="timeline__sent-stamp" hidden></span>
         </div>
-      </header>
-
-      <div class="job-vehicle">
-        <span class="vehicle-desc"></span>
-        <span class="vehicle-vin mono" title=""></span>
-        <span class="vehicle-ro"></span>
+        <figure class="sms-preview">
+          <figcaption class="sms-label">Customer receives</figcaption>
+          <div class="sms-bubble"></div>
+        </figure>
+        <footer class="job-actions">
+          <button class="btn btn-primary send-now-btn" type="button">
+            <span>Send now</span>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 8h10"></path>
+              <path d="M9 4l4 4-4 4"></path>
+            </svg>
+          </button>
+          <button class="btn btn-ghost cancel-btn" type="button">Cancel</button>
+          <span class="job-error" hidden></span>
+        </footer>
       </div>
-
-      <figure class="sms-preview">
-        <figcaption class="sms-label">Customer receives</figcaption>
-        <div class="sms-bubble"></div>
-      </figure>
-
-      <footer class="job-actions">
-        <button class="btn btn-primary send-now-btn" type="button">
-          <span>Send now</span>
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M3 8h10"></path>
-            <path d="M9 4l4 4-4 4"></path>
-          </svg>
-        </button>
-        <button class="btn btn-ghost cancel-btn" type="button">Cancel</button>
-        <span class="job-error" hidden></span>
-      </footer>
-    </article>
+    </li>
   </template>
 
   <!-- Empty state: warm, friendly. Not "NO PENDING JOBS" in caps. -->
