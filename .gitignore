@@ -29,6 +29,8 @@ jobs.db
 __pycache__/
 tests/__pycache__/
 payloads/
+received_logs/
+.claude/
 
 # Legacy artifacts (pre-v1.0 Python watcher)
 watcher.zip
