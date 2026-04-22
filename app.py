@@ -150,6 +150,29 @@ def init_db():
         """
     )
     con.commit()
+
+    # OH4-01 migration: add richer customer/vehicle columns for the admin UI.
+    # Each ALTER TABLE is wrapped individually so a duplicate-column error on
+    # re-run is silently tolerated — safe for idempotent startup.
+    migrations = [
+        ("vin", "ALTER TABLE jobs ADD COLUMN vin TEXT DEFAULT ''"),
+        ("vehicle_desc", "ALTER TABLE jobs ADD COLUMN vehicle_desc TEXT DEFAULT ''"),
+        ("ro_id", "ALTER TABLE jobs ADD COLUMN ro_id TEXT DEFAULT ''"),
+        ("email", "ALTER TABLE jobs ADD COLUMN email TEXT DEFAULT ''"),
+        ("address", "ALTER TABLE jobs ADD COLUMN address TEXT DEFAULT ''"),
+        ("sent_at", "ALTER TABLE jobs ADD COLUMN sent_at INTEGER DEFAULT 0"),
+    ]
+    added = 0
+    for col, stmt in migrations:
+        try:
+            cur.execute(stmt)
+            con.commit()
+            added += 1
+        except sqlite3.OperationalError:
+            # Column already exists — idempotent, continue.
+            pass
+    log.info("DB migrated: +%d columns (0 if already applied)", added)
+
     con.close()
     log.info("DB initialised at %s", DB_PATH)
 
@@ -166,8 +189,25 @@ def get_db():
 
 
 LAST_HEARTBEAT = {"ts": None, "host": None}
-def schedule_job(doc_id: str, job_type: str, phone: str, name: str, send_at: int):
-    """Insert a job, skipping duplicates (same doc_id + job_type)."""
+def schedule_job(
+    doc_id: str,
+    job_type: str,
+    phone: str,
+    name: str,
+    send_at: int,
+    vin: str = "",
+    vehicle_desc: str = "",
+    ro_id: str = "",
+    email: str = "",
+    address: str = "",
+):
+    """Insert a job, skipping duplicates (same doc_id + job_type).
+
+    OH4-01: extended to accept vin / vehicle_desc / ro_id / email / address.
+    All new fields default to "" so existing positional callers keep working.
+    sent_at persists as 0 until the job is actually sent (scheduler_loop or
+    /queue/send-now set it to the Unix timestamp of successful delivery).
+    """
     con = get_db()
     try:
         cur = con.cursor()
@@ -180,14 +220,17 @@ def schedule_job(doc_id: str, job_type: str, phone: str, name: str, send_at: int
             return
         now = int(time.time())
         cur.execute(
-            "INSERT INTO jobs (doc_id, job_type, phone, name, send_at, sent, created_at) "
-            "VALUES (?, ?, ?, ?, ?, 0, ?)",
-            (doc_id, job_type, phone, name, send_at, now),
+            "INSERT INTO jobs "
+            "(doc_id, job_type, phone, name, send_at, sent, created_at, "
+            " vin, vehicle_desc, ro_id, email, address, sent_at) "
+            "VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, 0)",
+            (doc_id, job_type, phone, name, send_at, now,
+             vin, vehicle_desc, ro_id, email, address),
         )
         con.commit()
         log.info(
-            "Scheduled job: doc_id=%s job_type=%s phone=%s send_at=%s",
-            doc_id, job_type, phone, send_at,
+            "Scheduled job: doc_id=%s job_type=%s phone=%s send_at=%s vehicle=%r ro=%s",
+            doc_id, job_type, phone, send_at, vehicle_desc, ro_id,
         )
     finally:
         con.close()
@@ -344,6 +387,20 @@ def parse_bms(xml_bytes: bytes) -> dict:
         if phone:
             break
 
+    # OH4-01: vehicle + RO + contact enrichment. Matches the extended
+    # RenderBMS emission in internal/ems/bms.go (VIN/Year/Make/Model/ROId
+    # under <VehicleInfo>, CommEmail under <Owner>). Uses .//bms:TAG so
+    # nesting depth is irrelevant — each tag appears at most once under
+    # the single BMSTrans subtree.
+    vin = find_text(root, ".//bms:VIN")
+    year = find_text(root, ".//bms:Year")
+    make_ = find_text(root, ".//bms:Make")  # trailing underscore — avoid builtin shadow
+    model = find_text(root, ".//bms:Model")
+    ro_id = find_text(root, ".//bms:ROId")
+    email = find_text(root, ".//bms:CommEmail")
+    address = find_text(root, ".//bms:CommAddr")
+    vehicle_desc = " ".join(filter(None, [year, make_, model])).strip()
+
     return {
         "doc_id": doc_id,
         "doc_ver": doc_ver,
@@ -352,6 +409,11 @@ def parse_bms(xml_bytes: bytes) -> dict:
         "pickup_dt": pickup_dt,
         "name": name,
         "phone": phone,
+        "vin": vin,
+        "vehicle_desc": vehicle_desc,
+        "ro_id": ro_id,
+        "email": email,
+        "address": address,
     }
 
 
@@ -1791,7 +1853,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
             try:
                 cur = con.cursor()
                 cur.execute(
-                    "SELECT id, doc_id, job_type, phone, name, send_at, created_at "
+                    "SELECT id, doc_id, job_type, phone, name, send_at, created_at, "
+                    "       vin, vehicle_desc, ro_id, email, address, sent_at "
                     "FROM jobs WHERE sent = 0 ORDER BY send_at ASC"
                 )
                 rows = [dict(r) for r in cur.fetchall()]
@@ -2014,6 +2077,14 @@ class WebhookHandler(BaseHTTPRequestHandler):
         name = data.get("name", "there")
         phone = data.get("phone", "")
 
+        # OH4-01 extra customer context threaded through to schedule_job for
+        # the admin UI (VIN masked display, vehicle_desc header, RO tag, etc.)
+        vin = data.get("vin", "")
+        vehicle_desc = data.get("vehicle_desc", "")
+        ro_id = data.get("ro_id", "")
+        email = data.get("email", "")
+        address = data.get("address", "")
+
         if TEST_PHONE_OVERRIDE:
             log.info("TEST_PHONE_OVERRIDE active: replacing %s with %s", phone, TEST_PHONE_OVERRIDE)
             phone = clean_phone(TEST_PHONE_OVERRIDE)
@@ -2027,11 +2098,17 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
         if doc_status in ESTIMATE_STATUSES:
             log.info("Estimate status %s for doc_id=%s", doc_status, doc_id)
-            schedule_job(doc_id, "24h", phone, name, next_send_window(now + 24*3600))
-            schedule_job(doc_id, "3day", phone, name, next_send_window(now + 72*3600))
+            schedule_job(doc_id, "24h", phone, name, next_send_window(now + 24*3600),
+                         vin=vin, vehicle_desc=vehicle_desc, ro_id=ro_id,
+                         email=email, address=address)
+            schedule_job(doc_id, "3day", phone, name, next_send_window(now + 72*3600),
+                         vin=vin, vehicle_desc=vehicle_desc, ro_id=ro_id,
+                         email=email, address=address)
         elif doc_status in CLOSED_STATUSES:
             log.info("Closed status %s for doc_id=%s", doc_status, doc_id)
-            schedule_job(doc_id, "review", phone, name, next_send_window(now + 24*3600))
+            schedule_job(doc_id, "review", phone, name, next_send_window(now + 24*3600),
+                         vin=vin, vehicle_desc=vehicle_desc, ro_id=ro_id,
+                         email=email, address=address)
         else:
             log.info("Unhandled doc_status=%s for doc_id=%s, no jobs scheduled", doc_status, doc_id)
 

@@ -21,9 +21,16 @@ package ems
 // shared with bundleSHA256 in the scanner package so dedup hashing is
 // deterministic across scans.
 type Bundle struct {
-	Basename    string            // GUID basename, e.g. "AB12CDEF-1234-...-0000"
-	AD1         map[string]string // V_OWNER_F, V_OWNER_L, V_OWNER_PH, V_OWNER_AD, V_OWNER_E
-	VEH         map[string]string // V_VIN, V_YR, V_MAKE, V_MODEL
-	ENV         map[string]string // E_DOC_NUM / E_RO / E_EST_NUM / E_DOC_ID / E_REF
-	SourceFiles []string          // sorted ascending by lowercase(filepath.Base)
+	Basename string // GUID basename, e.g. "AB12CDEF-1234-...-0000"
+	// AD1: OWNR_FN / OWNR_LN / OWNR_PH1 / OWNR_EA (email) / OWNR_ADDR1,
+	//      with INSD_* fallback keys for shops that populate insured only.
+	AD1 map[string]string
+	// VEH: V_VIN, V_MODEL_YR (year), V_MAKEDESC (make), V_MODEL, V_COLOR —
+	//      matches the field names parse.go extracts via go-dbase and the
+	//      VehicleInfo emission in bms.go.
+	VEH map[string]string
+	// ENV: UNQFILE_ID / ESTFILE_ID / RO_ID / SUPP_NO / TRANS_TYPE —
+	//      DocumentVerCode priority chain + RO tag for the admin UI.
+	ENV         map[string]string
+	SourceFiles []string // sorted ascending by lowercase(filepath.Base)
 }

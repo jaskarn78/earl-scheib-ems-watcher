@@ -33,9 +33,13 @@ type bmsGroup struct {
 }
 
 type bmsTrans struct {
-	DocumentInfo   bmsDocumentInfo   `xml:"DocumentInfo"`
-	EventInfo      bmsEventInfo      `xml:"EventInfo"`
-	EstimateAddRq  bmsEstimateAddRq  `xml:"VehicleDamageEstimateAddRq"`
+	DocumentInfo  bmsDocumentInfo  `xml:"DocumentInfo"`
+	EventInfo     bmsEventInfo     `xml:"EventInfo"`
+	// VehicleInfo (OH4-01) carries VIN / Year / Make / Model / ROId so the
+	// parallel Python parser in app.py can synthesize vehicle_desc for the
+	// admin UI. omitempty on each field keeps blanks out of the wire payload.
+	VehicleInfo   bmsVehicleInfo   `xml:"VehicleInfo"`
+	EstimateAddRq bmsEstimateAddRq `xml:"VehicleDamageEstimateAddRq"`
 }
 
 type bmsDocumentInfo struct {
@@ -55,6 +59,17 @@ type bmsRepairEvent struct {
 	CloseDateTime string `xml:"CloseDateTime"`
 }
 
+// bmsVehicleInfo groups the vehicle attributes Python's parse_bms pulls via
+// .//bms:VIN, .//bms:Year, .//bms:Make, .//bms:Model, .//bms:ROId. All fields
+// are optional — ElementTree tolerates missing elements by returning "".
+type bmsVehicleInfo struct {
+	VIN   string `xml:"VIN,omitempty"`
+	Year  string `xml:"Year,omitempty"`
+	Make  string `xml:"Make,omitempty"`
+	Model string `xml:"Model,omitempty"`
+	ROId  string `xml:"ROId,omitempty"`
+}
+
 type bmsEstimateAddRq struct {
 	Owner                bmsOwner `xml:"Owner"`
 	ActualPickupDateTime string   `xml:"ActualPickupDateTime"`
@@ -64,7 +79,11 @@ type bmsOwner struct {
 	GivenName      string `xml:"GivenName"`
 	OtherOrSurName string `xml:"OtherOrSurName"`
 	CommPhone      string `xml:"CommPhone,omitempty"`
-	CommAddr       string `xml:"CommAddr,omitempty"`
+	// CommEmail (OH4-01) — surfaced in the admin UI under the phone number
+	// so Marco can reach customers who prefer email. Optional; omitempty
+	// keeps the element absent when the OWNR/INSD block has no address.
+	CommEmail string `xml:"CommEmail,omitempty"`
+	CommAddr  string `xml:"CommAddr,omitempty"`
 }
 
 // RenderBMS returns an XML byte slice representing b as a BMS 2.6 envelope
@@ -78,10 +97,23 @@ type bmsOwner struct {
 //     its DocumentID fallback branch.
 //   - DocumentStatus: ENV.TRANS_TYPE verbatim (E, EM, EL, EP, I, C, ...) —
 //     defaults to "E" when blank so plain estimate POSTs schedule jobs.
-//   - Owner.GivenName / OtherOrSurName / CommPhone / CommAddr: AD1 OWNR_*
-//     fields, with INSD_* fallback (some shops populate only the insured).
+//   - Owner.GivenName / OtherOrSurName / CommPhone / CommEmail / CommAddr:
+//     AD1 OWNR_* fields (FN/LN/PH1/EA/ADDR1), with INSD_* fallback (some
+//     shops populate only the insured) via pickOwnerField.
+//   - VehicleInfo (OH4-01): VIN=V_VIN, Year=V_MODEL_YR, Make=V_MAKEDESC,
+//     Model=V_MODEL, ROId=ENV.RO_ID. All optional; omitempty on blanks.
 //   - ActualPickupDateTime: ""  (no pickup yet at estimate time)
 //   - CloseDateTime: ""         (no close yet at estimate time)
+//
+// Parallel Python contract (app.py parse_bms):
+//
+//	<VIN>       -> data["vin"]
+//	<Year>      -> year
+//	<Make>      -> make_
+//	<Model>     -> model                 vehicle_desc = "<Year> <Make> <Model>"
+//	<ROId>      -> data["ro_id"]
+//	<CommEmail> -> data["email"]
+//	<CommAddr>  -> data["address"]
 func RenderBMS(b *Bundle) []byte {
 	doc := bmsDoc{
 		Xmlns: bmsNamespace,
@@ -94,11 +126,19 @@ func RenderBMS(b *Bundle) []byte {
 				EventInfo: bmsEventInfo{
 					RepairEvent: bmsRepairEvent{CloseDateTime: ""},
 				},
+				VehicleInfo: bmsVehicleInfo{
+					VIN:   lookup(b.VEH, "V_VIN"),
+					Year:  lookup(b.VEH, "V_MODEL_YR"),
+					Make:  lookup(b.VEH, "V_MAKEDESC"),
+					Model: lookup(b.VEH, "V_MODEL"),
+					ROId:  lookup(b.ENV, "RO_ID"),
+				},
 				EstimateAddRq: bmsEstimateAddRq{
 					Owner: bmsOwner{
 						GivenName:      pickOwnerField(b, "FN"),
 						OtherOrSurName: pickOwnerField(b, "LN"),
 						CommPhone:      pickOwnerField(b, "PH1"),
+						CommEmail:      pickOwnerField(b, "EA"),
 						CommAddr:       lookup(b.AD1, "OWNR_ADDR1"),
 					},
 					ActualPickupDateTime: "",
