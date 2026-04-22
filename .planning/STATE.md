@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: v1.0 milestone complete
-stopped_at: Completed 05-queue-admin-ui 05-04-PLAN.md
-last_updated: "2026-04-21T07:15:32.249Z"
+stopped_at: Completed quick task 260422-k38 — EMS dBase bundle parser
+last_updated: "2026-04-22T14:52:57Z"
 progress:
   total_phases: 5
   completed_phases: 5
@@ -127,6 +127,11 @@ Recent decisions affecting current work:
 - [Phase 05-queue-admin-ui]: runAdmin uses context.Background() — admin.Run manages its own SIGINT watchdog via signal.NotifyContext internally
 - [Phase 05-queue-admin-ui]: ui_test.go sequenced in plan 05-04 (Wave 3) to compile after both 05-02 (uiFS) and 05-03 (UI assets) — prevents parallel-wave compile race
 - [Phase 05-queue-admin-ui]: Go 1.25.0 already in go.mod satisfies Go 1.22+ for min builtin; no go.mod bump needed for ui_test.go
+- [Quick 260422-k38]: Valentin-Kaiser/go-dbase v1.12.10 (pure Go, CGO_ENABLED=0) chosen over LindsayBradford fork (404 on pkg.go.dev); FoxBasePlus + Untested=true opens CCC ONE EMS 2.01 dBase III files
+- [Quick 260422-k38]: Virtual-path dedup key (<dir>/<basename>.bundle) for EMS bundles — guaranteed no collision with plain-file processed_files rows
+- [Quick 260422-k38]: DocumentVerCode priority E_DOC_NUM > E_RO > E_EST_NUM > E_DOC_ID > E_REF > basename; guaranteed non-empty so app.py DocumentID fallback never fires
+- [Quick 260422-k38]: sendFn URL wrapping (strings.HasSuffix ".bundle" → append ?trigger=ems_bundle) keeps RunConfig stable; no new BundleSender field
+- [Quick 260422-k38]: Tests chdir into uppercase-safe workdir to work around go-dbase v1.12.10 NewTable full-path ToUpper behaviour; tests drop t.Parallel (conflict with t.Chdir in Go 1.25)
 
 ### Roadmap Evolution
 
@@ -147,9 +152,10 @@ None yet.
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 260421-shq | Debuggability improvements — scanner error detail, admin Diagnostic panel, server /diagnostic endpoint | 2026-04-21 | b54eb96 | [260421-shq-debuggability-improvements-scanner-admin](./quick/260421-shq-debuggability-improvements-scanner-admin/) |
+| 260422-k38 | EMS dBase bundle parser — CCC ONE AD1/VEH/ENV → BMS XML, scanner bundle track, ?trigger=ems_bundle routing | 2026-04-22 | 967770b | [260422-k38-ems-bundle-parser-dbase-cccone](./quick/260422-k38-ems-bundle-parser-dbase-cccone/) |
 
 ## Session Continuity
 
-Last session: 2026-04-21T20:30:52.778Z
-Stopped at: Completed quick task 260421-shq — debuggability improvements
+Last session: 2026-04-22T14:52:57Z
+Stopped at: Completed quick task 260422-k38 — EMS dBase bundle parser shipped (MD5 parity verified)
 Resume file: None
