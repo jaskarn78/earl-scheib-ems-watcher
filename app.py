@@ -1918,6 +1918,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
         # Returns {"upload_log": true} if commands.json has the flag set, else 204.
         # Trigger from this box: `echo '{"upload_log": true}' > commands.json`
         if path == "/earlscheibconcord/commands":
+            # HMAC-only: machine-to-machine (watcher client polling).
+            # Browser /earlscheib never hits this — no dual-auth path needed.
             import os
             sig = self.headers.get("X-EMS-Signature", "")
             if not _validate_hmac(b"", sig):
@@ -1978,6 +1980,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/earlscheibconcord/remote-config":
+            # HMAC-only: machine-to-machine (watcher client config pull).
+            # Browser /earlscheib never hits this.
             sig = self.headers.get("X-EMS-Signature", "")
             # Client signs GET with HMAC of empty body: Sign(secret, b"")
             if not _validate_hmac(b"", sig):
@@ -2001,9 +2005,10 @@ class WebhookHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/earlscheibconcord/queue":
-            sig = self.headers.get("X-EMS-Signature", "")
-            # GET signs empty body b"" — matches remote-config precedent
-            if not _validate_hmac(b"", sig):
+            # RJL-02: accept HMAC (Go admin proxy) OR Basic auth (public
+            # /earlscheib browser). GET signs empty body b"" — matches
+            # remote-config precedent.
+            if not _validate_auth(self, b""):
                 self._send_json(401, {"error": "invalid signature"})
                 return
             con = get_db()
@@ -2029,8 +2034,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
         # HMAC-authed so only holders of CCC_SECRET can inspect.
         if path == "/earlscheibconcord/diagnostic":
             import os as _os
-            sig = self.headers.get("X-EMS-Signature", "")
-            if not _validate_hmac(b"", sig):
+            # RJL-02: dual auth — HMAC or Basic. Operator browser needs this
+            # endpoint for the live diagnostic panel on /earlscheib.
+            if not _validate_auth(self, b""):
                 self._send_json(401, {"error": "invalid signature"})
                 return
 
@@ -2085,6 +2091,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
         # named `update_paused` in this app dir, flips paused=True and halts
         # rollout across every deployed client within one scan cycle.
         if path == "/earlscheibconcord/version":
+            # HMAC-only: self-update mechanism, client-side only.
+            # Browser /earlscheib never hits this.
             import os as _os
             sig = self.headers.get("X-EMS-Signature", "")
             if not _validate_hmac(b"", sig):
@@ -2222,6 +2230,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
         # commands.json upload_log flag on successful write so the next scan
         # doesn't re-upload.
         if self.path.split("?")[0] == "/earlscheibconcord/logs":
+            # HMAC-only: operator-triggered log upload from watcher client.
+            # Browser /earlscheib never hits this.
             import os
             sig = self.headers.get("X-EMS-Signature", "")
             if not _validate_hmac(raw, sig):
@@ -2270,6 +2280,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
             return
 
         if self.path.split("?")[0] == "/earlscheibconcord/telemetry":
+            # HMAC-only: crash telemetry from watcher client.
+            # Browser /earlscheib never hits this.
             sig = self.headers.get("X-EMS-Signature", "")
             if not _validate_hmac(raw, sig):
                 self._send_json(401, {"error": "invalid signature"})
@@ -2302,8 +2314,10 @@ class WebhookHandler(BaseHTTPRequestHandler):
         # the DELETE /queue HMAC pattern exactly — do not introduce a new
         # auth scheme here.
         if self.path.split("?")[0] == "/earlscheibconcord/queue/send-now":
-            sig = self.headers.get("X-EMS-Signature", "")
-            if not _validate_hmac(raw, sig):
+            # RJL-02: dual auth — operator can click "Send now" from the
+            # browser UI at /earlscheib. Body-signed HMAC still works for the
+            # Go admin proxy.
+            if not _validate_auth(self, raw):
                 self._send_json(401, {"error": "invalid signature"})
                 return
             try:
@@ -2445,9 +2459,10 @@ class WebhookHandler(BaseHTTPRequestHandler):
         content_length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(content_length) if content_length > 0 else b""
 
-        sig = self.headers.get("X-EMS-Signature", "")
-        # DELETE signs the exact JSON body bytes received — matches telemetry precedent
-        if not _validate_hmac(raw, sig):
+        # RJL-02: dual auth — operator's browser cancels jobs via DELETE too.
+        # HMAC signs the exact JSON body bytes (matches telemetry precedent);
+        # Basic auth is accepted unconditionally of body content.
+        if not _validate_auth(self, raw):
             self._send_json(401, {"error": "invalid signature"})
             return
 
