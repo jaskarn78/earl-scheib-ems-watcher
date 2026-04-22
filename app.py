@@ -83,6 +83,13 @@ REMOTE_CONFIG_PATH = os.getenv(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "remote_config.json"),
 )
 TEST_PHONE_OVERRIDE = os.getenv("TEST_PHONE_OVERRIDE", "")
+# TEST_PHONE_RECIPIENTS (plural) takes precedence over TEST_PHONE_OVERRIDE when
+# set. Comma-separated list of E.164 numbers that EVERY outgoing SMS is
+# fan-out delivered to during testing. Lets the operator + shop owner both
+# receive copies of each message. Unset the var to return to normal behaviour.
+TEST_PHONE_RECIPIENTS = [
+    p.strip() for p in os.getenv("TEST_PHONE_RECIPIENTS", "").split(",") if p.strip()
+]
 # OH4-04: collapse all scheduling (24h / 72h / review-24h) to now+60s when
 # this env var is "1". Useful for inside-a-shift end-to-end testing; leave
 # dedup intact so duplicate /estimate POSTs still skip.
@@ -395,7 +402,33 @@ def schedule_job(
 # ---------------------------------------------------------------------------
 
 def send_sms(to: str, body: str) -> bool:
-    """Send an SMS via Twilio REST API using WhatsApp channel."""
+    """Send an SMS/WhatsApp message via Twilio.
+
+    During testing, recipient resolution follows:
+      1. TEST_PHONE_RECIPIENTS (comma-sep list)  — fan out to every entry.
+      2. TEST_PHONE_OVERRIDE  (single number)    — replace `to`.
+      3. Default                                 — use `to`.
+
+    When fan-out is active, returns True only if EVERY recipient delivered.
+    """
+    if TEST_PHONE_RECIPIENTS:
+        recipients = [clean_phone(p) for p in TEST_PHONE_RECIPIENTS]
+        log.info("TEST_PHONE_RECIPIENTS fan-out: %s -> %s", to, ",".join(recipients))
+    elif TEST_PHONE_OVERRIDE:
+        recipients = [clean_phone(TEST_PHONE_OVERRIDE)]
+        log.info("TEST_PHONE_OVERRIDE: %s -> %s", to, recipients[0])
+    else:
+        recipients = [to]
+
+    all_ok = True
+    for recipient in recipients:
+        if not _send_single_sms(recipient, body):
+            all_ok = False
+    return all_ok
+
+
+def _send_single_sms(to: str, body: str) -> bool:
+    """Deliver one SMS/WhatsApp message via Twilio REST API."""
     url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json"
     # ===== Twilio WhatsApp (sandbox) -> SMS (production) switch =====
     # Currently using Twilio WhatsApp sandbox for dev/test.
@@ -427,10 +460,10 @@ def send_sms(to: str, body: str) -> bool:
     try:
         with urlopen(req, timeout=15) as resp:
             resp_body = resp.read().decode("utf-8")
-            log.info("Twilio response %s: %s", resp.status, resp_body[:200])
+            log.info("Twilio response %s to=%s: %s", resp.status, to, resp_body[:200])
             return resp.status in (200, 201)
     except URLError as exc:
-        log.error("Twilio request failed: %s", exc)
+        log.error("Twilio request failed to=%s: %s", to, exc)
         return False
 
 
@@ -2365,10 +2398,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 sms_body = ""
 
             phone = row["phone"]
-            if TEST_PHONE_OVERRIDE:
-                log.info("send-now TEST_PHONE_OVERRIDE: %s -> %s", phone, TEST_PHONE_OVERRIDE)
-                phone = clean_phone(TEST_PHONE_OVERRIDE)
-
+            # Recipient redirection (TEST_PHONE_OVERRIDE / TEST_PHONE_RECIPIENTS)
+            # is handled inside send_sms so admin UI shows the real customer
+            # phone while testing still routes messages to the operator.
             ok = send_sms(phone, sms_body)
             if ok:
                 log.info("send-now: id=%s phone=%s type=%s OK",
@@ -2425,11 +2457,13 @@ class WebhookHandler(BaseHTTPRequestHandler):
         email = data.get("email", "")
         address = data.get("address", "")
 
-        if TEST_PHONE_OVERRIDE:
-            log.info("TEST_PHONE_OVERRIDE active: replacing %s with %s", phone, TEST_PHONE_OVERRIDE)
-            phone = clean_phone(TEST_PHONE_OVERRIDE)
-
-        if not phone:
+        # Keep the real customer phone in the jobs table so the admin UI is
+        # accurate; redirection to TEST_PHONE_OVERRIDE / TEST_PHONE_RECIPIENTS
+        # happens inside send_sms at dispatch time.
+        # When those test flags are set we also need to schedule even if the
+        # customer row itself has no phone — otherwise we'd silently drop
+        # test estimates whose AD1 block was blank.
+        if not phone and not (TEST_PHONE_OVERRIDE or TEST_PHONE_RECIPIENTS):
             log.warning("No valid phone for doc_id=%s, skipping", doc_id)
             self._send_json(200, {"status": "no_phone"})
             return
