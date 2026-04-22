@@ -2212,6 +2212,90 @@ class WebhookHandler(BaseHTTPRequestHandler):
             self._send_json(200, rows)
             return
 
+        # WMH-02: GET /templates — returns the effective body for each
+        # job_type (override-if-present, else default), the is_override flag,
+        # placeholder catalog, and a sample row for client-side preview.
+        # Dual-auth (HMAC or Basic) — operator-only.
+        if path == "/earlscheibconcord/templates":
+            if not _validate_auth(self, b""):
+                self._send_json(401, {"error": "invalid signature"})
+                return
+
+            # Pull all override rows in one query so we don't hit the DB per
+            # job_type.
+            overrides = {}
+            con = get_db()
+            try:
+                cur = con.cursor()
+                cur.execute("SELECT job_type, body, updated_at FROM templates")
+                for r in cur.fetchall():
+                    body = r["body"] if (r["body"] and r["body"].strip()) else ""
+                    if body:
+                        overrides[r["job_type"]] = {
+                            "body": body,
+                            "updated_at": r["updated_at"],
+                        }
+
+                # Sample row: newest pending job (sent=0), if any.
+                cur.execute(
+                    "SELECT name, phone, vin, vehicle_desc, ro_id, email, doc_id "
+                    "FROM jobs WHERE sent = 0 ORDER BY id DESC LIMIT 1"
+                )
+                sample_src = cur.fetchone()
+            finally:
+                con.close()
+
+            job_types_out = []
+            for meta in JOB_TYPE_META:
+                jt = meta["job_type"]
+                ov = overrides.get(jt)
+                effective_body = ov["body"] if ov else DEFAULT_TEMPLATES[jt]
+                job_types_out.append({
+                    "job_type":    jt,
+                    "label":       meta["label"],
+                    "when":        meta["when"],
+                    "body":        effective_body,
+                    "is_override": ov is not None,
+                    "updated_at":  ov["updated_at"] if ov else 0,
+                })
+
+            if sample_src is not None:
+                name = sample_src["name"] or ""
+                first = name.split()[0] if name else "there"
+                sample_row = {
+                    "first_name":   first,
+                    "name":         name,
+                    "phone":        sample_src["phone"] or "",
+                    "vin":          sample_src["vin"] or "",
+                    "vehicle_desc": sample_src["vehicle_desc"] or "",
+                    "ro_id":        sample_src["ro_id"] or "",
+                    "doc_id":       sample_src["doc_id"] or "",
+                    "email":        sample_src["email"] or "",
+                }
+            else:
+                # Static realistic fallback for live-preview on an empty queue.
+                sample_row = {
+                    "first_name":   "Alex",
+                    "name":         "Alex Martinez",
+                    "phone":        "+15551234567",
+                    "vin":          "1HGCM82633A004352",
+                    "vehicle_desc": "2018 Honda Accord",
+                    "ro_id":        "RO-1234",
+                    "doc_id":       "DOC-ABC-01",
+                    "email":        "alex@example.com",
+                }
+            sample_row.update(SHOP_CONSTANTS)
+
+            self._send_json(200, {
+                "job_types":    job_types_out,
+                "placeholders": {
+                    "per_row": list(PLACEHOLDERS_PER_ROW),
+                    "shop":    list(PLACEHOLDERS_SHOP),
+                },
+                "sample_row":   sample_row,
+            })
+            return
+
         # Live debug snapshot — consumed by Claude (not Marco). Returns heartbeat
         # freshness, current commands.json state (READ-ONLY), log tail of the
         # most recently uploaded client log, and the count of logs received.
@@ -2674,6 +2758,121 @@ class WebhookHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"deleted": 1})
         else:
             self._send_json(404, {"error": "not found or already sent"})
+
+    # ------------------------------------------------------------------
+    def do_PUT(self):
+        """WMH-02: Marco-editable message templates.
+
+        Routes:
+          PUT /earlscheibconcord/templates/{job_type}
+            Body: {"body": "..."}  (<=2000 chars)
+            Empty/whitespace body → DELETE row (revert to default).
+            Non-empty body        → UPSERT (validates renderability first).
+            job_type must be one of the keys in JOB_TYPE_META.
+
+        All other paths return 404. Dual-auth (HMAC over the raw body, or
+        browser Basic auth).
+        """
+        path = urlparse(self.path).path.rstrip("/")
+        prefix = "/earlscheibconcord/templates/"
+
+        if not path.startswith(prefix):
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        content_length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(content_length) if content_length > 0 else b""
+
+        if not _validate_auth(self, raw):
+            self._send_json(401, {"error": "invalid signature"})
+            return
+
+        job_type = path[len(prefix):]
+        valid_types = {m["job_type"] for m in JOB_TYPE_META}
+        if job_type not in valid_types:
+            self._send_json(400, {"error": "unknown job_type"})
+            return
+
+        # Body parse + size guard. 2000-char cap matches the textarea
+        # maxlength on the client — defence in depth, not UX.
+        try:
+            parsed = json.loads(raw.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
+            self._send_json(400, {"error": "invalid JSON"})
+            return
+        if not isinstance(parsed, dict) or "body" not in parsed:
+            self._send_json(400, {"error": "missing body field"})
+            return
+        body_val = parsed["body"]
+        if not isinstance(body_val, str):
+            self._send_json(400, {"error": "body must be a string"})
+            return
+        if len(body_val) > 2000:
+            self._send_json(400, {"error": "body exceeds 2000 characters"})
+            return
+
+        # Empty / whitespace-only → DELETE (revert to default).
+        if not body_val.strip():
+            con = get_db()
+            try:
+                cur = con.cursor()
+                cur.execute("DELETE FROM templates WHERE job_type = ?", (job_type,))
+                con.commit()
+            finally:
+                con.close()
+            log.info("templates: %s reverted to default", job_type)
+            self._send_json(200, {
+                "is_override": False,
+                "body":        DEFAULT_TEMPLATES[job_type],
+                "updated_at":  0,
+            })
+            return
+
+        # Renderability check — a malformed template (e.g. "Hi {unclosed")
+        # would crash every future send. Test against a realistic sample
+        # built from SHOP_CONSTANTS + a canned per-row dict.
+        sample_ctx = {
+            "first_name":   "Alex",
+            "name":         "Alex Martinez",
+            "phone":        "+15551234567",
+            "vin":          "1HGCM82633A004352",
+            "vehicle_desc": "2018 Honda Accord",
+            "ro_id":        "RO-1234",
+            "doc_id":       "DOC-ABC-01",
+            "email":        "alex@example.com",
+        }
+        render_ctx = defaultdict(str)
+        render_ctx.update(SHOP_CONSTANTS)
+        render_ctx.update(sample_ctx)
+        try:
+            body_val.format_map(render_ctx)
+        except (KeyError, IndexError, ValueError) as exc:
+            self._send_json(400, {
+                "error":  "template syntax error",
+                "detail": str(exc),
+            })
+            return
+
+        now = int(time.time())
+        con = get_db()
+        try:
+            cur = con.cursor()
+            cur.execute(
+                "INSERT OR REPLACE INTO templates(job_type, body, updated_at) "
+                "VALUES (?, ?, ?)",
+                (job_type, body_val, now),
+            )
+            con.commit()
+        finally:
+            con.close()
+
+        log.info("templates: %s override saved (%d chars)", job_type, len(body_val))
+        self._send_json(200, {
+            "is_override": True,
+            "body":        body_val,
+            "updated_at":  now,
+        })
 
 
 # ---------------------------------------------------------------------------
