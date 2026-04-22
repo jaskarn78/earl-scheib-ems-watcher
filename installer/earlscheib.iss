@@ -2,6 +2,15 @@
 ; Binary source: dist/earlscheib-artifact.exe (built by make build-windows + CI signing)
 ; Build command: docker run --rm -v "$PWD:/work" amake/innosetup:6.7.1 iscc /work/installer/earlscheib.iss
 ; Output: installer/Output/EarlScheibWatcher-Setup.exe
+;
+; Silent install contract (used by self-update in internal/update):
+;   setup.exe /VERYSILENT /NORESTART /SUPPRESSMSGBOXES /SP-
+;   - Preserves existing config.ini (onlyifdoesntexist)
+;   - Preserves existing Scheduled Task (skip re-register in WizardSilent())
+;   - Overwrites earlscheib.exe (ignoreversion)
+;   - ACLs re-applied by [Run] icacls (idempotent)
+;   - Skips CCC ONE info page and connection test (WizardSilent guard)
+;   - UninstallSilent() preserves data dir (log + db) when triggered non-interactively
 
 #define MyAppName "Earl Scheib EMS Watcher"
 #define MyAppVersion "1.0.0"
@@ -343,6 +352,19 @@ var
 begin
   Result := True;
 
+  // Silent upgrade (from self-update loop): skip all interactive validation.
+  // config.ini is already present (onlyifdoesntexist preserves it) and the
+  // Scheduled Task is already registered from the prior install. Still copy
+  // the folder value into FWatchFolder so CurStepChanged has something to
+  // hand to WriteConfigIni, even though the file-exists guard makes that a
+  // no-op on upgrade.
+  if WizardSilent() then begin
+    if CurPageID = FolderPage.ID then
+      FWatchFolder := FolderPage.Values[0];
+    Result := True;
+    Exit;
+  end;
+
   // Folder page validation (UI-06)
   if CurPageID = FolderPage.ID then begin
     Folder := FolderPage.Values[0];
@@ -433,6 +455,15 @@ end;
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then begin
+    // Silent upgrade from the self-updater: config.ini is already present
+    // (onlyifdoesntexist preserves it), and the Scheduled Task is already
+    // registered from the prior install. Skip re-registering so we don't
+    // briefly take the task offline during the exe swap.
+    if WizardSilent() then begin
+      WriteConfigIni(FWatchFolder);   // no-op when config.ini exists (guarded internally)
+      Exit;                            // skip RegisterScheduledTask
+    end;
+
     // Write config.ini with chosen folder (UI-09, INST-02)
     WriteConfigIni(FWatchFolder);
 
@@ -457,6 +488,12 @@ var
   DataDir: String;
   MsgResult: Integer;
 begin
+  // Silent uninstall (/VERYSILENT): preserve data dir (log + db).
+  // Matches the "No" response in the interactive prompt — the safe default.
+  if UninstallSilent() then begin
+    Exit;
+  end;
+
   DataDir := ExpandConstant('{app}');
   if DirExists(DataDir) then begin
     MsgResult := MsgBox(

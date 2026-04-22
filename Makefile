@@ -78,12 +78,16 @@ dev-sign: build-windows
 
 ## installer: build the Inno Setup installer exe using Docker (requires Docker, produces installer/Output/EarlScheibWatcher-Setup.exe)
 ## The binary at dist/earlscheib-artifact.exe must exist first (run make build-windows or use CI artifact).
+## Uses amake/innosetup:latest — the pinned 6.7.1 tag is no longer published on Docker Hub.
 installer:
-	docker run --rm -v "$(CURDIR):/work" amake/innosetup:6.7.1 iscc /work/installer/earlscheib.iss
+	docker run --rm -v "$(CURDIR):/work" amake/innosetup:latest /work/installer/earlscheib.iss
 
-## installer-syntax: parse-check the .iss script without producing output (CI fast-fail)
+## installer-syntax: parse-check the .iss script by running a full compile into a
+## throwaway location. The amake/innosetup:latest image's entrypoint is iscc itself
+## and only accepts a single filename argument, so there is no parse-only flag
+## exposed here — a full compile acts as the syntax check.
 installer-syntax:
-	docker run --rm -v "$(CURDIR):/work" amake/innosetup:6.7.1 iscc /Dq /O- /work/installer/earlscheib.iss
+	docker run --rm -v "$(CURDIR):/work" amake/innosetup:latest /work/installer/earlscheib.iss
 
 ## portable: build the portable zip distribution (requires zip binary; ubuntu: apt-get install zip)
 ## Produces dist/EarlScheibWatcher-Portable.zip containing:
