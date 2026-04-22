@@ -69,6 +69,13 @@ func ParseBundle(basename string, files map[string]string) (*Bundle, error) {
 //
 // CCC ONE EMS 2.01 bundles are single-row dBase tables — we only need row 0.
 // If the table is empty, every requested field returns "".
+//
+// Memo (type M) columns are SKIPPED during interpretation — CCC ONE writes
+// the companion memo sidecar with a .DBT extension (dBase III/IV format)
+// but go-dbase opens only .FPT (FoxPro). We don't need memo content for SMS
+// follow-up (customer name, phone, VIN are all non-memo), so bypassing Row()
+// and interpreting each non-memo column manually lets us read the row even
+// when the memo sidecar file is missing or in the wrong format.
 func readFields(path string, fields []string) (map[string]string, error) {
 	tbl, err := dbase.OpenTable(&dbase.Config{
 		Filename:   path,
@@ -85,27 +92,59 @@ func readFields(path string, fields []string) (map[string]string, error) {
 	for _, f := range fields {
 		out[f] = "" // default — every requested field is present in the result
 	}
+	wanted := make(map[string]bool, len(fields))
+	for _, f := range fields {
+		wanted[f] = true
+	}
 
 	// Short-circuit on an empty table — every field already defaults to "".
 	if tbl.Header().RecordsCount() == 0 {
 		return out, nil
 	}
 
-	row, err := tbl.Row()
+	// Read raw row bytes directly, bypassing Row() → BytesToRow() which
+	// eagerly resolves memo fields via the FPT sidecar (not present in the
+	// CCC ONE bundle — they ship .DBT memo sidecars we don't need).
+	raw, err := tbl.ReadRow(0)
 	if err != nil {
 		return nil, fmt.Errorf("read row 0 of %s: %w", filepath.Base(path), err)
 	}
+	if len(raw) < 1 {
+		return out, nil
+	}
 
-	for _, name := range fields {
-		field := row.FieldByName(name)
-		if field == nil {
+	// Walk columns at their fixed offsets. First byte of the row is the
+	// delete marker (0x20 active, 0x2A deleted); column data starts at 1.
+	offset := uint16(1)
+	for _, col := range tbl.Columns() {
+		length := uint16(col.Length)
+		// Bail early if the row is truncated — defensive against malformed files.
+		if int(offset)+int(length) > len(raw) {
+			break
+		}
+
+		// Skip memo columns — their raw bytes are an FPT address we'd have
+		// to resolve via the (missing or wrong-format) memo sidecar. We
+		// don't need memo content for the /estimate contract.
+		if dbase.DataType(col.DataType) == dbase.Memo {
+			offset += length
 			continue
 		}
-		v := field.GetValue()
-		if v == nil {
+
+		name := col.Name()
+		if !wanted[name] {
+			offset += length
 			continue
 		}
-		out[name] = strings.TrimSpace(fmt.Sprint(v))
+
+		cellBytes := raw[offset : offset+length]
+		offset += length
+
+		val, ierr := tbl.Interpret(cellBytes, col)
+		if ierr != nil || val == nil {
+			continue
+		}
+		out[name] = strings.TrimSpace(fmt.Sprint(val))
 	}
 	return out, nil
 }
