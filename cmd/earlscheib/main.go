@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jjagpal/earl-scheib-watcher/internal/admin"
@@ -129,8 +130,20 @@ func runScan(tel *telemetry.Telemetry) {
 		}
 
 		sendFn := func(filePath string, body []byte) bool {
+			// EMS dBase bundles are sent with ?trigger=ems_bundle so the
+			// server-side /estimate handler can distinguish them from plain
+			// CCC ONE BMS XML files (and, if it wants, route/tag accordingly).
+			// Scanner flags bundles by using a virtual path ending in .bundle.
+			url := cfg.WebhookURL
+			if strings.HasSuffix(filePath, ".bundle") {
+				if strings.Contains(url, "?") {
+					url += "&trigger=ems_bundle"
+				} else {
+					url += "?trigger=ems_bundle"
+				}
+			}
 			return webhook.Send(webhook.SendConfig{
-				WebhookURL: cfg.WebhookURL,
+				WebhookURL: url,
 				SecretKey:  secretKey,
 				Timeout:    30 * time.Second,
 			}, filePath, body, logger)

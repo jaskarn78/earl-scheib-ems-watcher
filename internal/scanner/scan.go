@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/jjagpal/earl-scheib-watcher/internal/db"
+	"github.com/jjagpal/earl-scheib-watcher/internal/ems"
 )
 
 // RunConfig holds the dependencies for a single scan run.
@@ -119,8 +120,10 @@ func Run(cfg RunConfig) (int, int) {
 	candidates := Candidates(cfg.WatchFolder, logger)
 	if len(candidates) == 0 {
 		logger.Debug("No .xml/.ems files found", "folder", cfg.WatchFolder)
-		_ = db.RecordRun(cfg.DB, 0, 0, "no files")
-		return 0, 0
+		// Do NOT early-return — a folder with only an EMS dBase bundle has
+		// zero plain candidates but still has work for the bundle track
+		// below. If BOTH tracks end up empty we still emit the "no files"
+		// run record to preserve the pre-bundle semantics.
 	}
 
 	processed := 0
@@ -196,7 +199,79 @@ func Run(cfg RunConfig) (int, int) {
 		}
 	}
 
-	note := "scan of " + cfg.WatchFolder + " (" + itoa(len(candidates)) + " candidates)"
+	// --- EMS dBase bundle track -----------------------------------------
+	// Runs AFTER the plain-file track using the same DB and Sender, so a
+	// folder holding both a plain .xml AND a dBase bundle emits both POSTs.
+	// A virtual path "<dir>/<basename>.bundle" is used as the processed_files
+	// filepath — guaranteed not to collide with individual component files.
+	bundles := DetectBundles(cfg.WatchFolder, logger)
+	for _, bun := range bundles {
+		logger.Info("ems bundle detected", "basename", bun.Basename, "files", len(bun.Files))
+
+		preAnchor, err := bundleMtimeAnchor(bun.Files)
+		if err != nil {
+			logger.Error("bundle mtime anchor failed", "basename", bun.Basename, "err", err)
+			errors++
+			continue
+		}
+		already, err := db.IsProcessed(cfg.DB, bun.VirtualPath, preAnchor)
+		if err != nil {
+			logger.Error("bundle IsProcessed failed", "basename", bun.Basename, "err", err)
+		}
+		if already {
+			logger.Debug("bundle already processed", "basename", bun.Basename)
+			continue
+		}
+
+		settled, postAnchor, totalSize := bundleSettle(bun, opts, func(m string, a ...any) {
+			logger.Debug(m, a...)
+		})
+		if !settled {
+			logger.Info("bundle not settled — will retry next cycle", "basename", bun.Basename)
+			continue
+		}
+
+		already, _ = db.IsProcessed(cfg.DB, bun.VirtualPath, postAnchor)
+		if already {
+			logger.Debug("bundle already processed (post-settle)", "basename", bun.Basename)
+			continue
+		}
+
+		bundle, err := ems.ParseBundle(bun.Basename, bun.Files)
+		if err != nil {
+			logger.Error("ems parse failed", "basename", bun.Basename, "err", err)
+			errors++
+			continue
+		}
+		xmlBytes := ems.RenderBMS(bundle)
+
+		sha, err := bundleSHA256(bun.Files)
+		if err != nil {
+			logger.Error("bundle sha256 failed", "basename", bun.Basename, "err", err)
+			errors++
+			continue
+		}
+
+		if cfg.Sender(bun.VirtualPath, xmlBytes) {
+			if mErr := db.MarkProcessed(cfg.DB, bun.VirtualPath, postAnchor, totalSize, sha); mErr != nil {
+				logger.Error("bundle MarkProcessed failed", "basename", bun.Basename, "err", mErr)
+				errors++
+				continue
+			}
+			logger.Info("ems bundle processed", "basename", bun.Basename, "bytes", len(xmlBytes))
+			processed++
+		} else {
+			errors++
+		}
+	}
+
+	var note string
+	if len(candidates) == 0 && len(bundles) == 0 {
+		// Preserve pre-bundle semantics: empty-folder runs record "no files".
+		note = "no files"
+	} else {
+		note = "scan of " + cfg.WatchFolder + " (" + itoa(len(candidates)) + " xml + " + itoa(len(bundles)) + " bundle candidates)"
+	}
 	_ = db.RecordRun(cfg.DB, processed, errors, note)
 	return processed, errors
 }
