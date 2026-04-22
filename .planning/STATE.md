@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: v1.0 milestone complete
-stopped_at: Completed quick task 260422-qaj — (phone+VIN) dedup + per-estimate timeline UI + 24h heartbeat bump shipped and live
-last_updated: "2026-04-22T19:15:00Z"
+stopped_at: Completed quick task 260422-rjl — public admin UI at /earlscheib with Basic auth + dual-auth helper; feature disabled pending operator cred rotation
+last_updated: "2026-04-22T20:00:00Z"
 progress:
   total_phases: 0
   completed_phases: 0
@@ -135,6 +135,7 @@ Recent decisions affecting current work:
 - [Phase quick-260422-nk1]: Self-update mechanism shipped: client polls /version HMAC-signed each scan, SHA256-verifies installer, launches /VERYSILENT reinstall; kill-switch via update_paused sentinel file or AUTO_UPDATE_PAUSED env; cooldown 3600s + 3-strike fail limit
 - [Phase quick-260422-oh4]: Admin UI rework shipped — LIGHT Fraunces/Work Sans/IBM Plex Mono palette (cream + oxblood + amber), rejected the planned industrial-garage dark aesthetic per user override; added VIN/vehicle_desc/ro_id/email/address/sent_at columns via idempotent ALTER TABLE; send-now endpoint with Twilio-failure rollback; 30-min heartbeat + friendly sleep panel; IMMEDIATE_SEND_FOR_TESTING env flag; update cooldown 3600s -> 120s for testing cadence
 - [Phase quick-260422-qaj]: Dedup by (phone+VIN) with doc_id fallback collapses CCC ONE "Resave" bursts into one pending row; update-pending path preserves send_at on resave; 60-day reopen window; per-estimate timeline UI groups jobs by estimate_key client-side; filter chips (All/Estimates/Work Completed/Sent) + debounced live search (150ms); HeartbeatTimeout bumped 30m→24h (TODO revert before next prod release); verify_dedup.py runnable 4-case evidence script; added .claude/ + received_logs/ to .gitignore
+- [Phase quick-260422-rjl]: Shared main.js across Go admin + Python app.py via window.API_BASE_PATH injection (unset → `/api/*`; `"/earlscheibconcord"` → remaps queue fetch, cancel becomes DELETE, send-now path shifts, /alive skipped); ui_public/ runtime copy + `make sync-ui` target keeps it byte-identical to internal/admin/ui/; `_validate_auth` accepts HMAC OR Basic on 4 operator endpoints (GET /queue, DELETE /queue, POST /queue/send-now, GET /diagnostic); watcher endpoints (/commands, /remote-config, /version, /logs, /telemetry) stay HMAC-only; feature disabled when ADMIN_UI_USER or ADMIN_UI_PASSWORD env vars unset (/earlscheib → 404, basic-auth rejected); Cloudflare tunnel at https://support.jjagpal.me/earlscheib verified reachable; deviation: `import os as _os_ui` local alias needed inside new branch because a later `import os` in the same do_GET method makes `os` function-local across all branches
 
 ### Roadmap Evolution
 
@@ -159,9 +160,10 @@ None yet.
 | 260422-nk1 | Self-update mechanism — client polls /version each scan, SHA256-verifies installer, silently reinstalls via /VERYSILENT; kill-switch via update_paused sentinel | 2026-04-22 | c8a7544 | [260422-nk1-self-update-autoupdate-mechanism](./quick/260422-nk1-self-update-autoupdate-mechanism/) |
 | 260422-oh4 | Admin UI rework (LIGHT Fraunces palette, not dark) + send-now endpoint + VIN/vehicle/RO/email schema + 30m heartbeat + IMMEDIATE_SEND flag + 120s update cooldown | 2026-04-22 | 3620fe4 | [260422-oh4-admin-ui-rework-send-now-customer-detail](./quick/260422-oh4-admin-ui-rework-send-now-customer-detail/) |
 | 260422-qaj | Dedup jobs by (phone+VIN) to collapse CCC resave bursts + per-estimate timeline UI with filter chips + live search + bump admin heartbeat 30m→24h | 2026-04-22 | 70be77e | [260422-qaj-timeline-view-dedup-ingestion-keepalive](./quick/260422-qaj-timeline-view-dedup-ingestion-keepalive/) |
+| 260422-rjl | Public admin UI at `/earlscheib` with HTTP Basic auth — shared main.js between Go admin (`/api/*`) and app.py (`/earlscheibconcord/*`) via window.API_BASE_PATH; dual-auth helper (HMAC OR Basic) on operator endpoints only; watcher endpoints stay HMAC-only; feature disabled-by-default (404 when env vars unset) | 2026-04-22 | 66f7ccf | [260422-rjl-public-admin-ui-at-slash-earlscheib](./quick/260422-rjl-public-admin-ui-at-slash-earlscheib/) |
 
 ## Session Continuity
 
-Last session: 2026-04-22T19:15:00Z
-Stopped at: Completed quick task 260422-qaj — (phone+VIN) dedup + per-estimate timeline UI + 24h heartbeat bump shipped and live
+Last session: 2026-04-22T20:00:00Z
+Stopped at: Completed quick task 260422-rjl — public admin UI at /earlscheib with Basic auth + dual-auth helper; feature disabled pending operator cred rotation
 Resume file: None
