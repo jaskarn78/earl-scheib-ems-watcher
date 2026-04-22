@@ -14,6 +14,12 @@ VERSION  ?= 0.1.0-dev
 LDFLAGS  := -s -w -X main.appVersion=$(VERSION)
 HMAC_SECRET ?= $(GSD_HMAC_SECRET)
 
+# Self-update cooldown (internal/update/update.go): default 120s (testing
+# cadence — see OH4-05 plan). For production GA, either bump the default
+# in internal/update/update.go or migrate to a string-based ldflags
+# override (-ldflags -X accepts strings only; would need init() Atoi).
+# Current production-raise path is: edit the int64 default directly.
+
 # Inject HMAC secret if provided; fall back to in-source dev default otherwise.
 # Use strip to ensure empty-string assignment does not trigger injection.
 ifneq ($(strip $(HMAC_SECRET)),)

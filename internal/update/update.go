@@ -39,12 +39,22 @@ import (
 )
 
 const (
-	cooldownSeconds = 3600
 	maxFailCount    = 3
 	pollTimeout     = 5 * time.Second
 	downloadTimeout = 60 * time.Second
 	exitSleep       = 500 * time.Millisecond
 )
+
+// cooldownSeconds is the minimum gap between self-update polls.
+// OH4-05: tuned to 120s (2 minutes) for the testing cadence so Marco's
+// watcher picks up new binaries inside a single /scan cycle. Production
+// GA should raise this to 3600+ (1 hour) — either bump the default here
+// or migrate to a string-based ldflags override (-ldflags "-X ...")
+// with an init() Atoi step, since `go build -ldflags -X` only supports
+// string vars, not int64.
+//
+// TODO(oh4): swap to const or ldflags-string+Atoi when GA cadence lands.
+var cooldownSeconds int64 = 120
 
 // exitFn and sleepFn are package-level so tests can stub them without
 // changing the public Check signature. Production: os.Exit + time.Sleep.

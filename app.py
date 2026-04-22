@@ -83,6 +83,10 @@ REMOTE_CONFIG_PATH = os.getenv(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "remote_config.json"),
 )
 TEST_PHONE_OVERRIDE = os.getenv("TEST_PHONE_OVERRIDE", "")
+# OH4-04: collapse all scheduling (24h / 72h / review-24h) to now+60s when
+# this env var is "1". Useful for inside-a-shift end-to-end testing; leave
+# dedup intact so duplicate /estimate POSTs still skip.
+IMMEDIATE_SEND_FOR_TESTING = os.getenv("IMMEDIATE_SEND_FOR_TESTING", "") == "1"
 
 # BMS namespace
 BMS_NS = "http://www.cieca.com/BMS"
@@ -218,6 +222,19 @@ def schedule_job(
         if cur.fetchone():
             log.info("Duplicate job skipped: doc_id=%s job_type=%s", doc_id, job_type)
             return
+
+        # OH4-04 testing override — after dedup, before INSERT. Collapses
+        # 24h / 72h / review scheduling to now+60s. Dedup still works so
+        # a re-POST of the same doc_id won't double-schedule.
+        if IMMEDIATE_SEND_FOR_TESTING:
+            new_send_at = int(time.time()) + 60
+            log.info(
+                "IMMEDIATE_SEND_FOR_TESTING=1 — overriding send_at "
+                "from %s to %s (now+60) for doc_id=%s job_type=%s",
+                send_at, new_send_at, doc_id, job_type,
+            )
+            send_at = new_send_at
+
         now = int(time.time())
         cur.execute(
             "INSERT INTO jobs "
