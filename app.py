@@ -594,7 +594,7 @@ def _send_single_sms(to: str, body: str) -> bool:
     # No other changes needed. The rest of the scheduler, HMAC validation, and
     # dedup logic is SMS/WhatsApp agnostic.
     # ================================================================
-    from_number = f"whatsapp:{TWILIO_FROM}"
+    from_number = TWILIO_FROM
     to_number = f"whatsapp:{to}"
 
     # URL-encode each field — body contains spaces, apostrophes, parens,
