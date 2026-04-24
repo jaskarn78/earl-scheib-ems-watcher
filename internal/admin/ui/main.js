@@ -500,7 +500,7 @@
   async function fetchQueue() {
     if (refreshBtn) refreshBtn.classList.add('spinning');
     try {
-      const resp = await fetch(`${API_BASE}/queue`, { cache: 'no-store' });
+      const resp = await fetch(`${API_BASE}/queue?status=all`, { cache: 'no-store' });
       if (!resp.ok) {
         const parsed = await resp.json().catch(() => ({}));
         showError(parsed.error || `queue fetch failed (${resp.status})`);
