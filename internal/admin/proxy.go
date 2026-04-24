@@ -13,13 +13,38 @@ import (
 	"github.com/jjagpal/earl-scheib-watcher/internal/webhook"
 )
 
+// VAB-02: known queue status values — used as a whitelist on GET /api/queue
+// so the proxy isn't a free-range query-string passthrough to upstream.
+// Must stay in lock-step with app.py /queue handler (260424-ulh / ULH-01).
+var validQueueStatuses = map[string]bool{
+	"pending": true,
+	"sent":    true,
+	"all":     true,
+}
+
 // handleQueue proxies GET /api/queue -> GET {webhookURL}/earlscheibconcord/queue.
 // The browser sends no body; the outbound HMAC signs []byte("") matching the
 // remote-config precedent in internal/remoteconfig/remoteconfig.go.
+//
+// VAB-02: optional ?status= is whitelist-validated and forwarded upstream.
+// Empty status preserves the legacy behaviour (no query string forwarded;
+// upstream defaults to pending) — backwards-compatible with pre-VAB clients.
 func (s *server) handleQueue(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
+	}
+
+	status := r.URL.Query().Get("status")
+	if status != "" && !validQueueStatuses[status] {
+		s.jsonError(w, http.StatusBadRequest, "invalid status; must be one of: pending, sent, all")
+		return
+	}
+
+	upstreamURL := s.remoteQueueURL()
+	if status != "" {
+		// Whitelist guarantees status is alphabetic only; no URL escaping needed.
+		upstreamURL = upstreamURL + "?status=" + status
 	}
 
 	sig := webhook.Sign(s.cfg.Secret, []byte(""))
@@ -27,7 +52,7 @@ func (s *server) handleQueue(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.remoteQueueURL(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstreamURL, nil)
 	if err != nil {
 		s.jsonError(w, http.StatusInternalServerError, "build request: "+err.Error())
 		return
