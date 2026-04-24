@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: v1.0 milestone complete
-stopped_at: Completed quick task 260422-wmh — Marco-editable SMS templates (storage, dual-auth GET/PUT endpoints, Go proxy, Templates tab UI)
-last_updated: "2026-04-22T23:55:00Z"
+stopped_at: Completed quick task 260424-oyk — pre-staged Twilio sandbox→prod-SMS migration on branch twilio-prod-sms-migration; master untouched; flip-day requires 4 new Twilio values
+last_updated: "2026-04-24T17:58:17Z"
 progress:
   total_phases: 0
   completed_phases: 0
@@ -164,9 +164,10 @@ None yet.
 | 260422-rjl | Public admin UI at `/earlscheib` with HTTP Basic auth — shared main.js between Go admin (`/api/*`) and app.py (`/earlscheibconcord/*`) via window.API_BASE_PATH; dual-auth helper (HMAC OR Basic) on operator endpoints only; watcher endpoints stay HMAC-only; feature disabled-by-default (404 when env vars unset) | 2026-04-22 | 66f7ccf | [260422-rjl-public-admin-ui-at-slash-earlscheib](./quick/260422-rjl-public-admin-ui-at-slash-earlscheib/) |
 | 260422-wmh | Marco-editable message templates — new `templates` DB table + `render_template` helper (str.format_map + defaultdict(str)); dual-auth GET/PUT `/earlscheibconcord/templates/{job_type}` with renderable-check; Go admin proxies `/api/templates*` with job_type whitelist; Templates tab in admin UI (chips, 150ms-debounced live preview, amber dirty-dot, Save + Reset-to-default); 36 new tests | 2026-04-22 | 688a33f | [260422-wmh-add-a-message-template-editor-to-both-ad](./quick/260422-wmh-add-a-message-template-editor-to-both-ad/) |
 | 260424-lmf | Rebuild and redeploy EarlScheibWatcher-Setup.exe — fresh Windows build (Templates tab baked in, HMAC secret injected 3 matches), Inno Setup compile via amake/innosetup:latest, /tmp rezip; old live hash `8d586028e9c4143f` → new `d0be23a1e5a2aaa1`; /version + /download.exe confirmed serving new installer on-demand (no app.py restart needed); Marco's self-update loop primed to pull within ~7 min | 2026-04-24 | 4810e41 | [260424-lmf-rebuild-and-redeploy-earlscheibwatcher-s](./quick/260424-lmf-rebuild-and-redeploy-earlscheibwatcher-s/) |
+| 260424-oyk | Pre-stage Twilio WhatsApp-sandbox → production-SMS migration on branch `twilio-prod-sms-migration` — one-line `app.py:597` change (drop `whatsapp:` prefix so TWILIO_FROM is used as SMS sender as-is); branch pushed to origin, NOT merged to master; master still on sandbox path until user provides new ACCOUNT_SID/API_KEY/API_SECRET/TWILIO_FROM and flip-day runbook is executed | 2026-04-24 | 54cb771 | [260424-oyk-pre-stage-twilio-whatsapp-sandbox-to-pro](./quick/260424-oyk-pre-stage-twilio-whatsapp-sandbox-to-pro/) |
 
 ## Session Continuity
 
-Last session: 2026-04-24T15:44:43Z
-Stopped at: Completed quick task 260424-lmf — rebuilt+pushed EarlScheibWatcher-Setup.exe (sha256[:16] d0be23a1e5a2aaa1) with Templates tab; live /version serves new hash; self-update loop primed
+Last session: 2026-04-24T17:58:17Z
+Stopped at: Completed quick task 260424-oyk — pre-staged Twilio sandbox→prod-SMS migration on branch twilio-prod-sms-migration (commit 54cb771); master untouched; flip-day requires 4 new Twilio values + .env update + merge + service restart + delivery verification
 Resume file: None
