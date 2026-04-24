@@ -595,7 +595,7 @@ def _send_single_sms(to: str, body: str) -> bool:
     # dedup logic is SMS/WhatsApp agnostic.
     # ================================================================
     from_number = TWILIO_FROM
-    to_number = f"whatsapp:{to}"
+    to_number = to
 
     # URL-encode each field — body contains spaces, apostrophes, parens,
     # slashes, colons. Raw f-string interpolation silently produces
