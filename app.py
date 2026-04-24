@@ -130,7 +130,7 @@ DEFAULT_TEMPLATES = {
 }
 
 SHOP_CONSTANTS = {
-    "shop_name":  "Earl Scheib Auto Body Concord",
+    "shop_name":  "Earl Scheib Of Concord",
     "shop_phone": "(925) 609-7780",
     "review_url": "https://g.page/r/review",
 }
