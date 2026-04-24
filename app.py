@@ -2212,10 +2212,16 @@ class WebhookHandler(BaseHTTPRequestHandler):
             # ULH-01: branch on whitelisted status — parameter is validated
             # above; SQL strings are constants (not interpolated from user
             # input) so there is no injection surface even without binding.
+            # VAB-03 fix: include `sent` in the projection. The frontend
+            # filter chips (jobMatchesFilter at main.js:184) and per-row
+            # state classification (li.dataset.state at main.js:334) both
+            # depend on `job.sent`. Without it, the 'sent' chip is always
+            # empty and rows render as 'pending' regardless of actual state.
+            # This is additive — pre-existing clients only consume new fields.
             base_cols = (
-                "SELECT id, doc_id, job_type, phone, name, send_at, created_at, "
-                "       vin, vehicle_desc, ro_id, email, address, sent_at, "
-                "       estimate_key "
+                "SELECT id, doc_id, job_type, phone, name, send_at, sent, "
+                "       created_at, vin, vehicle_desc, ro_id, email, address, "
+                "       sent_at, estimate_key "
                 "FROM jobs"
             )
             if status == "pending":
