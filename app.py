@@ -10,7 +10,7 @@ import xml.etree.ElementTree as ET
 from collections import defaultdict
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 from urllib.request import urlopen, Request
 from urllib.error import URLError
 import base64
@@ -2195,17 +2195,49 @@ class WebhookHandler(BaseHTTPRequestHandler):
             if not _validate_auth(self, b""):
                 self._send_json(401, {"error": "invalid signature"})
                 return
+
+            # ULH-01: optional ?status= filter so the admin UI lifecycle
+            # chips (pending/sent/all) can populate. Default is "pending"
+            # to preserve the previous contract (bare GET returns pending
+            # only — shared main.js and Go admin proxy depend on this).
+            qs = parse_qs(parsed.query)
+            status = qs.get("status", ["pending"])[0]
+            if status not in ("all", "pending", "sent"):
+                self._send_json(
+                    400,
+                    {"error": "invalid status; must be one of: all, pending, sent"},
+                )
+                return
+
+            # ULH-01: branch on whitelisted status — parameter is validated
+            # above; SQL strings are constants (not interpolated from user
+            # input) so there is no injection surface even without binding.
+            base_cols = (
+                "SELECT id, doc_id, job_type, phone, name, send_at, created_at, "
+                "       vin, vehicle_desc, ro_id, email, address, sent_at, "
+                "       estimate_key "
+                "FROM jobs"
+            )
+            if status == "pending":
+                sql = base_cols + " WHERE sent = 0 ORDER BY send_at ASC"
+            elif status == "sent":
+                sql = (
+                    base_cols
+                    + " WHERE sent = 1 "
+                    "ORDER BY COALESCE(sent_at, send_at, created_at) DESC"
+                )
+            else:  # "all"
+                sql = (
+                    base_cols
+                    + " ORDER BY COALESCE(sent_at, send_at, created_at) DESC"
+                )
+
             con = get_db()
             try:
                 cur = con.cursor()
                 # QAJ-01: include estimate_key so the admin UI can group
                 # pending jobs per estimate into a timeline view.
-                cur.execute(
-                    "SELECT id, doc_id, job_type, phone, name, send_at, created_at, "
-                    "       vin, vehicle_desc, ro_id, email, address, sent_at, "
-                    "       estimate_key "
-                    "FROM jobs WHERE sent = 0 ORDER BY send_at ASC"
-                )
+                cur.execute(sql)
                 rows = [dict(r) for r in cur.fetchall()]
             finally:
                 con.close()
