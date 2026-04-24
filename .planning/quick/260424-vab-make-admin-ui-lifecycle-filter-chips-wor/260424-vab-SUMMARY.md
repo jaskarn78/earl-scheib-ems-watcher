@@ -8,7 +8,7 @@ commits:
     task: Task 1 — frontend fetch /queue?status=all + sync-ui
   - hash: 5d591aa
     task: Task 2 — Go admin proxy passthrough with whitelist
-  - hash: <task3>
+  - hash: 0966ec4
     task: Task 3 — --batch / --remove-batch + 6 rows + this SUMMARY + sent-column fix
 files_modified:
   - internal/admin/ui/main.js

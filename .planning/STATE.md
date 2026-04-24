@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: v1.0 milestone complete
-stopped_at: Completed quick task 260424-ulh — `/queue` lifecycle filter (`?status=all|pending|sent`) + reversible test-row script + evidence-cited watcher diagnostic (WIN-8I9KME32KLC healthy; only 1 new CCC bundle since Apr 23)
-last_updated: "2026-04-24T22:10:00Z"
+stopped_at: Completed quick task 260424-vab — admin UI lifecycle chips wired end-to-end (frontend `/queue?status=all` + Go proxy whitelist passthrough + 6 ULH2 batch rows + Rule-1 fix: added missing `sent` column to /queue projection)
+last_updated: "2026-04-24T22:50:00Z"
 progress:
   total_phases: 0
   completed_phases: 0
@@ -166,9 +166,10 @@ None yet.
 | 260424-lmf | Rebuild and redeploy EarlScheibWatcher-Setup.exe — fresh Windows build (Templates tab baked in, HMAC secret injected 3 matches), Inno Setup compile via amake/innosetup:latest, /tmp rezip; old live hash `8d586028e9c4143f` → new `d0be23a1e5a2aaa1`; /version + /download.exe confirmed serving new installer on-demand (no app.py restart needed); Marco's self-update loop primed to pull within ~7 min | 2026-04-24 | 4810e41 | [260424-lmf-rebuild-and-redeploy-earlscheibwatcher-s](./quick/260424-lmf-rebuild-and-redeploy-earlscheibwatcher-s/) |
 | 260424-oyk | Pre-stage Twilio WhatsApp-sandbox → production-SMS migration on branch `twilio-prod-sms-migration` — one-line `app.py:597` change (drop `whatsapp:` prefix so TWILIO_FROM is used as SMS sender as-is); branch pushed to origin, NOT merged to master; master still on sandbox path until user provides new ACCOUNT_SID/API_KEY/API_SECRET/TWILIO_FROM and flip-day runbook is executed | 2026-04-24 | 54cb771 | [260424-oyk-pre-stage-twilio-whatsapp-sandbox-to-pro](./quick/260424-oyk-pre-stage-twilio-whatsapp-sandbox-to-pro/) |
 | 260424-ulh | Fix `/queue` lifecycle filter + reversible test-row injector + evidence-cited Windows-watcher diagnostic — `GET /earlscheibconcord/queue?status=all\|pending\|sent` (default pending, backwards-compat; 400 on bogus); `scripts/insert_test_pending_job.py` (stdlib-only; 7d-future send_at survives IMMEDIATE_SEND; idempotent `--remove` via `"ULH test row"` tombstone); SUMMARY.md concludes WIN-8I9KME32KLC silence is because CCC ONE folder has 1 new bundle since Apr 23 (`e8b18b75` Apr 24 17:01), not a watcher bug — 374 heartbeats, 0 4xx/5xx, client-side dedup working as designed | 2026-04-24 | cab062b | [260424-ulh-fix-queue-filter-to-show-all-jobs-insert](./quick/260424-ulh-fix-queue-filter-to-show-all-jobs-insert/) |
+| 260424-vab | Wire admin UI lifecycle filter chips end-to-end — frontend `internal/admin/ui/main.js:503` now requests `/queue?status=all` (synced via `make sync-ui` to `ui_public/main.js`); Go admin proxy `handleQueue` passes `?status=` through with whitelist `{pending,sent,all}` (HTTP 400 on bogus, empty status preserves legacy no-param upstream call for backwards-compat; HMAC over empty body unchanged); `scripts/insert_test_pending_job.py` extended with `--batch` / `--remove-batch` (BATCH_TOMBSTONE `"ULH2 test"` disjoint from existing TOMBSTONE; mutex with `--remove`); 6 ULH2 rows = `(24h, 3day, review) × (pending, sent)` all using `+15308450190`; Rule-1 deviation: `/queue` SELECT in app.py was missing the `sent` column, breaking `jobMatchesFilter` chip semantics (frontend reads `job.sent === 0\|1`) — added one column to projection, additive change, requires earl-scheib.service restart once | 2026-04-24 | 0966ec4 | [260424-vab-make-admin-ui-lifecycle-filter-chips-wor](./quick/260424-vab-make-admin-ui-lifecycle-filter-chips-wor/) |
 
 ## Session Continuity
 
-Last session: 2026-04-24T22:10:00Z
-Stopped at: Completed quick task 260424-ulh — `/queue` now honors `?status=`; reversible test-row script in scripts/; evidence-cited diagnostic concludes Marco's watcher is healthy and CCC ONE has simply produced only 1 new bundle since Apr 23 (confirm with Marco before any code action)
+Last session: 2026-04-24T22:50:00Z
+Stopped at: Completed quick task 260424-vab — admin UI lifecycle chips fully wired (frontend → Go proxy → app.py); 6 ULH2 batch rows present in jobs.db awaiting visual review; cleanup via `python3 scripts/insert_test_pending_job.py --remove-batch`; earl-scheib.service was restarted once after the app.py `sent`-column projection fix
 Resume file: None
