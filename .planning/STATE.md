@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: v1.0 milestone complete
-stopped_at: Completed quick task 260424-oyk — pre-staged Twilio sandbox→prod-SMS migration on branch twilio-prod-sms-migration; master untouched; flip-day requires 4 new Twilio values
-last_updated: "2026-04-24T17:58:17Z"
+stopped_at: Completed quick task 260424-ulh — `/queue` lifecycle filter (`?status=all|pending|sent`) + reversible test-row script + evidence-cited watcher diagnostic (WIN-8I9KME32KLC healthy; only 1 new CCC bundle since Apr 23)
+last_updated: "2026-04-24T22:10:00Z"
 progress:
   total_phases: 0
   completed_phases: 0
@@ -165,9 +165,10 @@ None yet.
 | 260422-wmh | Marco-editable message templates — new `templates` DB table + `render_template` helper (str.format_map + defaultdict(str)); dual-auth GET/PUT `/earlscheibconcord/templates/{job_type}` with renderable-check; Go admin proxies `/api/templates*` with job_type whitelist; Templates tab in admin UI (chips, 150ms-debounced live preview, amber dirty-dot, Save + Reset-to-default); 36 new tests | 2026-04-22 | 688a33f | [260422-wmh-add-a-message-template-editor-to-both-ad](./quick/260422-wmh-add-a-message-template-editor-to-both-ad/) |
 | 260424-lmf | Rebuild and redeploy EarlScheibWatcher-Setup.exe — fresh Windows build (Templates tab baked in, HMAC secret injected 3 matches), Inno Setup compile via amake/innosetup:latest, /tmp rezip; old live hash `8d586028e9c4143f` → new `d0be23a1e5a2aaa1`; /version + /download.exe confirmed serving new installer on-demand (no app.py restart needed); Marco's self-update loop primed to pull within ~7 min | 2026-04-24 | 4810e41 | [260424-lmf-rebuild-and-redeploy-earlscheibwatcher-s](./quick/260424-lmf-rebuild-and-redeploy-earlscheibwatcher-s/) |
 | 260424-oyk | Pre-stage Twilio WhatsApp-sandbox → production-SMS migration on branch `twilio-prod-sms-migration` — one-line `app.py:597` change (drop `whatsapp:` prefix so TWILIO_FROM is used as SMS sender as-is); branch pushed to origin, NOT merged to master; master still on sandbox path until user provides new ACCOUNT_SID/API_KEY/API_SECRET/TWILIO_FROM and flip-day runbook is executed | 2026-04-24 | 54cb771 | [260424-oyk-pre-stage-twilio-whatsapp-sandbox-to-pro](./quick/260424-oyk-pre-stage-twilio-whatsapp-sandbox-to-pro/) |
+| 260424-ulh | Fix `/queue` lifecycle filter + reversible test-row injector + evidence-cited Windows-watcher diagnostic — `GET /earlscheibconcord/queue?status=all\|pending\|sent` (default pending, backwards-compat; 400 on bogus); `scripts/insert_test_pending_job.py` (stdlib-only; 7d-future send_at survives IMMEDIATE_SEND; idempotent `--remove` via `"ULH test row"` tombstone); SUMMARY.md concludes WIN-8I9KME32KLC silence is because CCC ONE folder has 1 new bundle since Apr 23 (`e8b18b75` Apr 24 17:01), not a watcher bug — 374 heartbeats, 0 4xx/5xx, client-side dedup working as designed | 2026-04-24 | cab062b | [260424-ulh-fix-queue-filter-to-show-all-jobs-insert](./quick/260424-ulh-fix-queue-filter-to-show-all-jobs-insert/) |
 
 ## Session Continuity
 
-Last session: 2026-04-24T17:58:17Z
-Stopped at: Completed quick task 260424-oyk — pre-staged Twilio sandbox→prod-SMS migration on branch twilio-prod-sms-migration (commit 54cb771); master untouched; flip-day requires 4 new Twilio values + .env update + merge + service restart + delivery verification
+Last session: 2026-04-24T22:10:00Z
+Stopped at: Completed quick task 260424-ulh — `/queue` now honors `?status=`; reversible test-row script in scripts/; evidence-cited diagnostic concludes Marco's watcher is healthy and CCC ONE has simply produced only 1 new bundle since Apr 23 (confirm with Marco before any code action)
 Resume file: None
