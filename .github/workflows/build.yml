@@ -20,12 +20,15 @@ jobs:
           mkdir -p dist
           touch dist/earlscheib-artifact.exe
 
-      - name: Validate installer script syntax (iscc parse-only)
+      - name: Validate installer script syntax (full compile = parse check)
+        # The amake/innosetup:latest image's entrypoint is iscc itself and
+        # accepts only a single filename argument — no separate /Dq /O- flags
+        # exposed. A full compile acts as the syntax check.
         run: |
           docker run --rm \
             -v "$PWD:/work" \
             amake/innosetup:latest \
-            iscc /Dq /O- /work/installer/earlscheib.iss
+            /work/installer/earlscheib.iss
 
   test:
     name: Unit tests (linux/amd64)
@@ -180,12 +183,13 @@ jobs:
         run: mv dist/earlscheib-artifact.exe dist/earlscheib-artifact.exe || true
         # The artifact is already named earlscheib-artifact.exe from build-windows
 
-      - name: Build installer via Docker (amake/innosetup 6.7.1)
+      - name: Build installer via Docker (amake/innosetup:latest)
+        # Image entrypoint is iscc, takes a single filename arg.
         run: |
           docker run --rm \
             -v "$PWD:/work" \
             amake/innosetup:latest \
-            iscc /work/installer/earlscheib.iss
+            /work/installer/earlscheib.iss
 
       - name: Verify installer output exists
         run: |
