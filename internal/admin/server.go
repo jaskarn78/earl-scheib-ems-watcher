@@ -2,9 +2,12 @@ package admin
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -91,7 +94,24 @@ func Run(ctx context.Context, cfg Config) error {
 	if tcpAddr.IP == nil || tcpAddr.IP.IsUnspecified() {
 		host = "127.0.0.1"
 	}
+
+	// Compute a content hash over every embedded UI file so any binary
+	// upgrade produces a different version stamp. This is what breaks
+	// browsers out of stale-cache loops: index.html references main.js
+	// and main.css with `?v=<hash>`, and the admin opens the browser to
+	// `/?v=<hash>`, so Chrome sees brand-new URLs and can't serve the
+	// last build's cached files.
+	uifsys := uiFS()
+	uiVersion := computeUIVersion(uifsys, logger)
+	indexHTML := buildIndexHTML(uifsys, uiVersion, logger)
+
+	// Bind URL — the bare http://host:port. Tests concatenate paths onto
+	// this, so do not append a query string here.
 	url := fmt.Sprintf("http://%s:%d", host, port)
+	// Browser entry URL — appends the UI version as a cache-buster so
+	// re-launches after an upgrade open at a brand-new URL. Chrome can't
+	// serve a cached document for a URL it has never seen.
+	entryURL := fmt.Sprintf("%s/?v=%s", url, uiVersion)
 
 	// Test hook: emit the bound URL to the caller non-blockingly.
 	if cfg.URLCh != nil {
@@ -113,10 +133,20 @@ func Run(ctx context.Context, cfg Config) error {
 	// Wrap with no-store so binary upgrades reach Marco on a regular refresh.
 	// embed.FS gives every file a zero (epoch) mtime, so without this header
 	// browsers happily serve last week's index.html / main.js after the exe
-	// is replaced — the symptom that broke the queue tabs after the Apr 27
-	// upgrade. no-store forbids caching outright; revalidation can't be
+	// is replaced. no-store forbids caching outright; revalidation can't be
 	// content-aware here since embed.FS doesn't expose stable ETags.
-	mux.Handle("/", noStoreMiddleware(http.FileServer(http.FS(uiFS()))))
+	staticHandler := noStoreMiddleware(http.FileServer(http.FS(uifsys)))
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" || r.URL.Path == "/index.html" {
+			w.Header().Set("Cache-Control", "no-store, must-revalidate")
+			w.Header().Set("Pragma", "no-cache")
+			w.Header().Set("Expires", "0")
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write(indexHTML)
+			return
+		}
+		staticHandler.ServeHTTP(w, r)
+	})
 	// API
 	mux.HandleFunc("/api/queue", s.handleQueue)
 	mux.HandleFunc("/api/cancel", s.handleCancel)
@@ -177,10 +207,12 @@ func Run(ctx context.Context, cfg Config) error {
 		serveErrCh <- httpServer.Serve(listener)
 	}()
 
-	// Best-effort browser open (skipped in tests when OpenBrowser is nil)
+	// Best-effort browser open (skipped in tests when OpenBrowser is nil).
+	// Use entryURL — the cache-busted variant — so the browser fetches
+	// a brand-new URL after every binary upgrade.
 	if cfg.OpenBrowser != nil {
-		if err := cfg.OpenBrowser(url); err != nil {
-			logger.Warn("admin: failed to open browser", "err", err, "url", url)
+		if err := cfg.OpenBrowser(entryURL); err != nil {
+			logger.Warn("admin: failed to open browser", "err", err, "url", entryURL)
 		}
 	}
 
@@ -200,6 +232,59 @@ func Run(ctx context.Context, cfg Config) error {
 		<-serveErrCh
 		return nil
 	}
+}
+
+// computeUIVersion hashes every embedded UI file's bytes (plus path, so
+// adds/removes register too) and returns the first 8 hex chars. Same inputs
+// always produce the same hash, so two binaries built from the same source
+// share a version; any UI change yields a different version.
+func computeUIVersion(uifsys fs.FS, logger *slog.Logger) string {
+	h := sha256.New()
+	walkErr := fs.WalkDir(uifsys, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		_, _ = io.WriteString(h, p+"\x00")
+		f, err := uifsys.Open(p)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		if _, err := io.Copy(h, f); err != nil {
+			return err
+		}
+		return nil
+	})
+	if walkErr != nil && logger != nil {
+		logger.Warn("admin: ui version walk failed; falling back to constant", "err", walkErr)
+		return "00000000"
+	}
+	return hex.EncodeToString(h.Sum(nil))[:8]
+}
+
+// buildIndexHTML returns index.html with `?v=<version>` appended to every
+// in-repo CSS/JS reference. External resources (Google Fonts) are untouched.
+// Any read error degrades to serving the raw bytes — better to render a stale
+// cache-prone page than to 500 the queue viewer.
+func buildIndexHTML(uifsys fs.FS, version string, logger *slog.Logger) []byte {
+	raw, err := fs.ReadFile(uifsys, "index.html")
+	if err != nil {
+		if logger != nil {
+			logger.Error("admin: index.html read failed", "err", err)
+		}
+		return []byte("<!doctype html><meta charset=\"utf-8\"><title>queue</title><p>UI assets missing.</p>")
+	}
+	html := string(raw)
+	html = strings.Replace(html, `href="/main.css"`, fmt.Sprintf(`href="/main.css?v=%s"`, version), 1)
+	html = strings.Replace(html, `src="/main.js"`, fmt.Sprintf(`src="/main.js?v=%s"`, version), 1)
+	// Inject a visible version stamp in the topbar's brand mode so Marco
+	// can confirm at a glance which build the page is running.
+	stamp := fmt.Sprintf(`<span class="brand-version" style="margin-left:8px;font-size:11px;font-family:'IBM Plex Mono',monospace;color:#a8a39d;letter-spacing:0.04em;">v%s</span>`, version)
+	html = strings.Replace(html, `<span class="brand-mode">Queue</span>`, `<span class="brand-mode">Queue</span>`+stamp, 1)
+	return []byte(html)
 }
 
 // noStoreMiddleware sets Cache-Control: no-store on every static UI response
