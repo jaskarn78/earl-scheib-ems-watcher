@@ -25,6 +25,8 @@ jobs:
         # accepts only a single filename argument — no separate /Dq /O- flags
         # exposed. A full compile acts as the syntax check.
         run: |
+          mkdir -p installer/Output
+          chmod -R 777 installer/Output
           docker run --rm \
             -v "$PWD:/work" \
             amake/innosetup:latest \
@@ -185,7 +187,13 @@ jobs:
 
       - name: Build installer via Docker (amake/innosetup:latest)
         # Image entrypoint is iscc, takes a single filename arg.
+        # Pre-create + world-writable Output dir: the :latest image runs
+        # under a non-root uid that can't write into the bind-mounted
+        # workspace as-is, so iscc fails with "File access denied" when
+        # emitting EarlScheibWatcher-Setup.exe.
         run: |
+          mkdir -p installer/Output
+          chmod -R 777 installer/Output
           docker run --rm \
             -v "$PWD:/work" \
             amake/innosetup:latest \
