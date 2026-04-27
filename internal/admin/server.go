@@ -109,8 +109,14 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 
 	mux := http.NewServeMux()
-	// Static UI at root
-	mux.Handle("/", http.FileServer(http.FS(uiFS())))
+	// Static UI at root.
+	// Wrap with no-store so binary upgrades reach Marco on a regular refresh.
+	// embed.FS gives every file a zero (epoch) mtime, so without this header
+	// browsers happily serve last week's index.html / main.js after the exe
+	// is replaced — the symptom that broke the queue tabs after the Apr 27
+	// upgrade. no-store forbids caching outright; revalidation can't be
+	// content-aware here since embed.FS doesn't expose stable ETags.
+	mux.Handle("/", noStoreMiddleware(http.FileServer(http.FS(uiFS()))))
 	// API
 	mux.HandleFunc("/api/queue", s.handleQueue)
 	mux.HandleFunc("/api/cancel", s.handleCancel)
@@ -194,6 +200,17 @@ func Run(ctx context.Context, cfg Config) error {
 		<-serveErrCh
 		return nil
 	}
+}
+
+// noStoreMiddleware sets Cache-Control: no-store on every static UI response
+// so browsers always pull a fresh copy after a binary upgrade.
+func noStoreMiddleware(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store, must-revalidate")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
+		h.ServeHTTP(w, r)
+	})
 }
 
 // remoteQueueURL returns the remote webhook base URL with /queue appended.
