@@ -24,7 +24,7 @@ jobs:
         run: |
           docker run --rm \
             -v "$PWD:/work" \
-            amake/innosetup:6.7.1 \
+            amake/innosetup:latest \
             iscc /Dq /O- /work/installer/earlscheib.iss
 
   test:
@@ -184,7 +184,7 @@ jobs:
         run: |
           docker run --rm \
             -v "$PWD:/work" \
-            amake/innosetup:6.7.1 \
+            amake/innosetup:latest \
             iscc /work/installer/earlscheib.iss
 
       - name: Verify installer output exists
