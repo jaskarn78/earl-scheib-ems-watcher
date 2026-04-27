@@ -71,13 +71,18 @@ body {
   background-color: var(--surface);
   min-height: 64px;
   padding: 14px 32px;
-  display: grid;
-  /* WMH-04: 4 columns — brand, topnav, stats, sync. */
-  grid-template-columns: auto auto 1fr auto;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 24px;
+  column-gap: 24px;
+  row-gap: 8px;
   border-bottom: 1px solid var(--hairline);
 }
+/* Push stats + sync to the right edge so the row reads:
+   brand · nav | … | stats · sync. Auto-margin on .stats consumes all slack,
+   .sync sits flush right. When the row wraps (narrow viewports), stats and
+   sync drop to a second line together rather than spilling outside. */
+.topbar .stats { margin-left: auto; }
 
 /* ============== Topnav (WMH-04) ============== */
 
@@ -163,7 +168,6 @@ body {
 }
 
 .stats {
-  justify-self: center;
   display: inline-flex;
   align-items: center;
   gap: 10px;

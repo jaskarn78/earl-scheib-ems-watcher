@@ -202,7 +202,11 @@
         return (job.job_type === '24h' || job.job_type === '3day')
           && (job.sent === 0 || job.sent === undefined);
       case 'completed':
-        return job.job_type === 'review' || job.sent === 1;
+        // Scope to review messages only (any state). Work Completed becomes
+        // "the review-request lifecycle for jobs that finished" — pending
+        // reviews stay actionable (Send Now), sent ones display as history.
+        // Past 24h/3day sends moved to the Sent tab where they belong.
+        return job.job_type === 'review';
       case 'sent':
         return job.sent === 1;
       default:
