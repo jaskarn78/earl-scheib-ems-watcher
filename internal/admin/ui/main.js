@@ -138,6 +138,19 @@
   let lastJobs      = [];
   let searchTimerId = null;
 
+  // Anti-jitter: skip a full DOM rebuild when neither the data nor the
+  // filter/search has changed since the last render. Without this the 15s
+  // poll wipes innerHTML and re-runs the staggered fadeUp animation, which
+  // reads as visible flicker even when nothing changed.
+  let lastRenderKey = '';
+
+  function jobsRenderKey(jobs, filter, search) {
+    const parts = (jobs || []).map((j) =>
+      `${j.id}:${j.sent || 0}:${j.send_at || 0}:${j.sent_at || 0}`,
+    );
+    return `${filter}|${search}|${parts.join(',')}`;
+  }
+
   // ---------- Helpers --------------------------------------------------
 
   function maskVIN(vin) {
@@ -241,6 +254,16 @@
   // ---------- Rendering ------------------------------------------------
 
   function renderQueue(jobs) {
+    const needle = currentSearch.trim().toLowerCase();
+    const renderKey = jobsRenderKey(jobs, currentFilter, needle);
+    if (renderKey === lastRenderKey) {
+      // Data + view unchanged — skip the rebuild so animations don't replay.
+      counters.pending = jobs ? jobs.filter((j) => !j.sent).length : 0;
+      updateStats();
+      return;
+    }
+    lastRenderKey = renderKey;
+
     queueEl.innerHTML = '';
     queueEl.setAttribute('aria-busy', 'false');
 
@@ -248,7 +271,6 @@
     updateStats();
 
     const groups = groupByEstimate(jobs || []);
-    const needle = currentSearch.trim().toLowerCase();
 
     // Build visibility decisions up-front so we can detect "no results".
     let visibleGroups = 0;
@@ -311,14 +333,14 @@
     }
 
     const timeline = frag.querySelector('.timeline');
-    // Sort visible jobs ASC by send_at so the timeline reads chronologically
-    // (earlier at top). Server already returns ASC for pending rows but a
-    // belt-and-braces sort keeps the invariant under any future server
-    // changes.
+    // Sort DESC by most-recent activity so freshly sent / soonest-scheduled
+    // entries surface at the top of each estimate card. Uses sent_at when
+    // available (sent rows), otherwise send_at — matches the server's
+    // COALESCE(sent_at, send_at, created_at) ordering for the "all" view.
     const sortedJobs = visibleJobs.slice().sort((a, b) => {
-      const sa = a.send_at || 0;
-      const sb = b.send_at || 0;
-      return sa - sb;
+      const ta = a.sent_at || a.send_at || 0;
+      const tb = b.sent_at || b.send_at || 0;
+      return tb - ta;
     });
     sortedJobs.forEach((job) => {
       timeline.appendChild(buildTimelineEntry(job));
