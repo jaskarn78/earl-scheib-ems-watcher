@@ -108,9 +108,13 @@ CLOSED_STATUSES = {"I", "C", "F", "FI", "FC", "WC"}
 #
 # DEFAULT_TEMPLATES is the fall-back copy when the `templates` DB row for a
 # given job_type is missing / empty / whitespace-only. Placeholders:
-#   Per-row   : {first_name} {name} {phone} {vin} {vehicle_desc} {ro_id}
-#               {doc_id} {email}
+#   Per-row   : {first_name} {name} {phone} {vin} {year} {make} {model}
+#               {vehicle_desc} {ro_id} {doc_id} {email}
 #   Shop-wide : {shop_name} {shop_phone} {review_url}
+#
+# {vehicle_desc} stays available for back-compat with any saved overrides
+# but the defaults below prefer the more granular {year} {make} pair so
+# Marco can tweak the shape (e.g. "your 2018 Honda" vs "your 2018 Honda Accord").
 #
 # The defaults parameterise shop name / phone / review URL so the literal
 # brand values only live in SHOP_CONSTANTS below (single source of truth).
@@ -119,14 +123,17 @@ CLOSED_STATUSES = {"I", "C", "F", "FI", "FC", "WC"}
 # collections.defaultdict) — never as `{literal}`, never KeyError.
 DEFAULT_TEMPLATES = {
     "24h":
-        "Hi {first_name}, this is {shop_name}. Just following up on your recent estimate. "
-        "Have questions or ready to schedule? Call us at {shop_phone}.",
+        "Hi {first_name}, this is {shop_name}. Just following up on the estimate "
+        "for your {year} {make}. Have questions or ready to schedule? "
+        "Call us at {shop_phone}.",
     "3day":
-        "Hi {first_name}, {shop_name} checking in about your estimate from a few days ago. "
-        "We'd love to help get your car looking great! Call {shop_phone}.",
+        "Hi {first_name}, {shop_name} checking in about the estimate for your "
+        "{year} {make} from a few days ago. We'd love to help get it looking "
+        "great! Call {shop_phone}.",
     "review":
-        "Hi {first_name}, thank you for choosing {shop_name}! Hope you're happy with your repair. "
-        "Would you mind leaving us a Google review? It means a lot: {review_url}",
+        "Hi {first_name}, thank you for choosing {shop_name}! Hope you're happy "
+        "with the repair on your {year} {make}. Would you mind leaving us a "
+        "Google review? It means a lot: {review_url}",
 }
 
 SHOP_CONSTANTS = {
@@ -144,8 +151,11 @@ JOB_TYPE_META = [
 ]
 
 # Placeholder catalog — rendered as clickable chips on the Templates page.
+# Order matters: Templates UI lays out chips in this exact sequence.
 PLACEHOLDERS_PER_ROW = [
-    "first_name", "name", "phone", "vin", "vehicle_desc", "ro_id", "doc_id", "email",
+    "first_name", "name", "phone", "vin",
+    "year", "make", "model", "vehicle_desc",
+    "ro_id", "doc_id", "email",
 ]
 PLACEHOLDERS_SHOP = ["shop_name", "shop_phone", "review_url"]
 
@@ -274,6 +284,12 @@ def init_db():
         ("address", "ALTER TABLE jobs ADD COLUMN address TEXT DEFAULT ''"),
         ("sent_at", "ALTER TABLE jobs ADD COLUMN sent_at INTEGER DEFAULT 0"),
         ("estimate_key", "ALTER TABLE jobs ADD COLUMN estimate_key TEXT DEFAULT ''"),
+        # Granular vehicle fields — VPL-01: power {year} {make} {model}
+        # template placeholders without splitting vehicle_desc on whitespace
+        # (Land Rover / Mercedes-Benz break naive splitting).
+        ("year",  "ALTER TABLE jobs ADD COLUMN year TEXT DEFAULT ''"),
+        ("make",  "ALTER TABLE jobs ADD COLUMN make TEXT DEFAULT ''"),
+        ("model", "ALTER TABLE jobs ADD COLUMN model TEXT DEFAULT ''"),
     ]
     added = 0
     for col, stmt in migrations:
@@ -443,6 +459,9 @@ def schedule_job(
     ro_id: str = "",
     email: str = "",
     address: str = "",
+    year: str = "",
+    make: str = "",
+    model: str = "",
 ):
     """Schedule a follow-up SMS, with CCC-ONE-resave-tolerant dedup.
 
@@ -491,10 +510,11 @@ def schedule_job(
                 # send_at and created_at so the scheduled window doesn't reset.
                 cur.execute(
                     "UPDATE jobs SET name=?, phone=?, vin=?, vehicle_desc=?, "
-                    " ro_id=?, email=?, address=?, doc_id=? "
+                    " ro_id=?, email=?, address=?, doc_id=?, "
+                    " year=?, make=?, model=? "
                     "WHERE id=?",
                     (name, phone, vin, vehicle_desc, ro_id, email, address,
-                     doc_id, eid),
+                     doc_id, year, make, model, eid),
                 )
                 con.commit()
                 log.info(
@@ -534,10 +554,12 @@ def schedule_job(
         cur.execute(
             "INSERT INTO jobs "
             "(doc_id, job_type, phone, name, send_at, sent, created_at, "
-            " vin, vehicle_desc, ro_id, email, address, sent_at, estimate_key) "
-            "VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, 0, ?)",
+            " vin, vehicle_desc, ro_id, email, address, sent_at, estimate_key, "
+            " year, make, model) "
+            "VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)",
             (doc_id, job_type, phone, name, send_at, now,
-             vin, vehicle_desc, ro_id, email, address, estimate_key),
+             vin, vehicle_desc, ro_id, email, address, estimate_key,
+             year, make, model),
         )
         con.commit()
         log.info(
@@ -751,6 +773,12 @@ def parse_bms(xml_bytes: bytes) -> dict:
         "name": name,
         "phone": phone,
         "vin": vin,
+        # Granular vehicle fields kept alongside the joined vehicle_desc so
+        # callers (schedule_job, render_template) can pick {year}/{make}/{model}
+        # individually without re-splitting the joined string.
+        "year": year,
+        "make": make_,
+        "model": model,
         "vehicle_desc": vehicle_desc,
         "ro_id": ro_id,
         "email": email,
@@ -2221,7 +2249,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
             base_cols = (
                 "SELECT id, doc_id, job_type, phone, name, send_at, sent, "
                 "       created_at, vin, vehicle_desc, ro_id, email, address, "
-                "       sent_at, estimate_key "
+                "       sent_at, estimate_key, year, make, model "
                 "FROM jobs"
             )
             if status == "pending":
@@ -2276,7 +2304,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
                 # Sample row: newest pending job (sent=0), if any.
                 cur.execute(
-                    "SELECT name, phone, vin, vehicle_desc, ro_id, email, doc_id "
+                    "SELECT name, phone, vin, vehicle_desc, ro_id, email, doc_id, "
+                    "       year, make, model "
                     "FROM jobs WHERE sent = 0 ORDER BY id DESC LIMIT 1"
                 )
                 sample_src = cur.fetchone()
@@ -2305,6 +2334,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
                     "name":         name,
                     "phone":        sample_src["phone"] or "",
                     "vin":          sample_src["vin"] or "",
+                    "year":         sample_src["year"] or "",
+                    "make":         sample_src["make"] or "",
+                    "model":        sample_src["model"] or "",
                     "vehicle_desc": sample_src["vehicle_desc"] or "",
                     "ro_id":        sample_src["ro_id"] or "",
                     "doc_id":       sample_src["doc_id"] or "",
@@ -2317,6 +2349,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
                     "name":         "Alex Martinez",
                     "phone":        "+15551234567",
                     "vin":          "1HGCM82633A004352",
+                    "year":         "2018",
+                    "make":         "Honda",
+                    "model":        "Accord",
                     "vehicle_desc": "2018 Honda Accord",
                     "ro_id":        "RO-1234",
                     "doc_id":       "DOC-ABC-01",
@@ -2653,7 +2688,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
                     return
                 cur.execute(
                     "SELECT job_type, phone, name, vin, vehicle_desc, "
-                    "       ro_id, email, doc_id "
+                    "       ro_id, email, doc_id, year, make, model "
                     "FROM jobs WHERE id = ?",
                     (job_id,),
                 )
@@ -2726,6 +2761,10 @@ class WebhookHandler(BaseHTTPRequestHandler):
         ro_id = data.get("ro_id", "")
         email = data.get("email", "")
         address = data.get("address", "")
+        # VPL-01: granular vehicle fields for {year} {make} {model} placeholders.
+        year = data.get("year", "")
+        make = data.get("make", "")
+        model = data.get("model", "")
 
         # Keep the real customer phone in the jobs table so the admin UI is
         # accurate; redirection to TEST_PHONE_OVERRIDE / TEST_PHONE_RECIPIENTS
@@ -2744,15 +2783,18 @@ class WebhookHandler(BaseHTTPRequestHandler):
             log.info("Estimate status %s for doc_id=%s", doc_status, doc_id)
             schedule_job(doc_id, "24h", phone, name, next_send_window(now + 24*3600),
                          vin=vin, vehicle_desc=vehicle_desc, ro_id=ro_id,
-                         email=email, address=address)
+                         email=email, address=address,
+                         year=year, make=make, model=model)
             schedule_job(doc_id, "3day", phone, name, next_send_window(now + 72*3600),
                          vin=vin, vehicle_desc=vehicle_desc, ro_id=ro_id,
-                         email=email, address=address)
+                         email=email, address=address,
+                         year=year, make=make, model=model)
         elif doc_status in CLOSED_STATUSES:
             log.info("Closed status %s for doc_id=%s", doc_status, doc_id)
             schedule_job(doc_id, "review", phone, name, next_send_window(now + 24*3600),
                          vin=vin, vehicle_desc=vehicle_desc, ro_id=ro_id,
-                         email=email, address=address)
+                         email=email, address=address,
+                         year=year, make=make, model=model)
         else:
             log.info("Unhandled doc_status=%s for doc_id=%s, no jobs scheduled", doc_status, doc_id)
 
@@ -2875,6 +2917,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
             "name":         "Alex Martinez",
             "phone":        "+15551234567",
             "vin":          "1HGCM82633A004352",
+            "year":         "2018",
+            "make":         "Honda",
+            "model":        "Accord",
             "vehicle_desc": "2018 Honda Accord",
             "ro_id":        "RO-1234",
             "doc_id":       "DOC-ABC-01",

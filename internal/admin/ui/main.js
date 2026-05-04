@@ -44,14 +44,17 @@
   // in `effectiveTemplates` below; previewSMS prefers that cache.
   const SMS_TEMPLATES = {
     '24h':
-      'Hi {first_name}, this is {shop_name}. Just following up on your recent estimate. ' +
-      'Have questions or ready to schedule? Call us at {shop_phone}.',
+      'Hi {first_name}, this is {shop_name}. Just following up on the estimate ' +
+      'for your {year} {make}. Have questions or ready to schedule? ' +
+      'Call us at {shop_phone}.',
     '3day':
-      'Hi {first_name}, {shop_name} checking in about your estimate from a few days ago. ' +
-      "We'd love to help get your car looking great! Call {shop_phone}.",
+      'Hi {first_name}, {shop_name} checking in about the estimate for your ' +
+      "{year} {make} from a few days ago. We'd love to help get it looking " +
+      'great! Call {shop_phone}.',
     'review':
-      'Hi {first_name}, thank you for choosing {shop_name}! Hope you\'re happy with your repair. ' +
-      'Would you mind leaving us a Google review? It means a lot: {review_url}',
+      'Hi {first_name}, thank you for choosing {shop_name}! Hope you\'re happy ' +
+      'with the repair on your {year} {make}. Would you mind leaving us a ' +
+      'Google review? It means a lot: {review_url}',
   };
   const SHOP_CONSTANTS = {
     shop_name:  'Earl Scheib Auto Body Concord',

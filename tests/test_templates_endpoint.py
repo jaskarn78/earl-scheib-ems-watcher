@@ -63,7 +63,8 @@ def test_get_templates_placeholder_catalog(queue_server):
         body = json.loads(resp.read().decode("utf-8"))
 
     assert body["placeholders"]["per_row"] == [
-        "first_name", "name", "phone", "vin", "vehicle_desc",
+        "first_name", "name", "phone", "vin",
+        "year", "make", "model", "vehicle_desc",
         "ro_id", "doc_id", "email",
     ]
     assert body["placeholders"]["shop"] == ["shop_name", "shop_phone", "review_url"]

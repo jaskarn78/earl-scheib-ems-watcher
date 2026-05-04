@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/jjagpal/earl-scheib-watcher/internal/commands"
 	"github.com/jjagpal/earl-scheib-watcher/internal/config"
 	"github.com/jjagpal/earl-scheib-watcher/internal/db"
+	"github.com/jjagpal/earl-scheib-watcher/internal/ems"
 	"github.com/jjagpal/earl-scheib-watcher/internal/heartbeat"
 	"github.com/jjagpal/earl-scheib-watcher/internal/install"
 	"github.com/jjagpal/earl-scheib-watcher/internal/logging"
@@ -70,6 +73,18 @@ func main() {
 		runConfigure()
 	case "--admin":
 		runAdmin(tel)
+	case "--dump-bundle":
+		// Diagnostic-only: dump every column of every dBase file in a bundle.
+		// Used to identify which CCC ONE field carries close/lock state since
+		// every TRANS_TYPE we see is "E" — the close indicator must live in
+		// some other field/file we don't currently parse. Marco runs this on
+		// (a) a known-still-open RO and (b) a known-closed RO; the diff tells
+		// us where to look.
+		if len(os.Args) < 3 {
+			fmt.Fprintln(os.Stderr, "usage: earlscheib --dump-bundle <basename-or-path>")
+			os.Exit(1)
+		}
+		runDumpBundle(os.Args[2])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n", os.Args[1])
 		printUsage()
@@ -366,6 +381,153 @@ func runStub(name string) {
 	os.Exit(0)
 }
 
+// runDumpBundle prints every column of every dBase file in the bundle whose
+// basename (or absolute path containing) matches the argument. Output goes to
+// stdout in a paste-friendly format so the operator can hand it back over
+// chat. Diagnostic-only — never POSTs anything, never touches the DB.
+//
+// Resolution rules for the argument:
+//   - If absolute path: scan that directory directly, filter to files whose
+//     basename (no extension) matches the path's last segment minus extension.
+//     Example: `--dump-bundle "C:\EarlScheibWatcher\7ffa697a.veh"` dumps every
+//     sibling of 7ffa697a.veh sharing the 7ffa697a basename.
+//   - If bare basename (no path separators): look in config.WatchFolder for
+//     files starting with that basename (case-insensitive).
+//
+// Exits 0 on success, 1 on missing folder / no matching bundle / any
+// per-file dump error (errors are still printed; the non-zero exit code lets
+// CI / scripts detect partial failures).
+func runDumpBundle(arg string) {
+	dataDir := config.DataDir()
+	cfg, _ := config.LoadConfig(filepath.Join(dataDir, "config.ini"))
+
+	// Pick the directory to scan and the basename to match.
+	var dir, basename string
+	if filepath.IsAbs(arg) || strings.ContainsAny(arg, `\/`) {
+		dir = filepath.Dir(arg)
+		stem := filepath.Base(arg)
+		if ext := filepath.Ext(stem); ext != "" {
+			stem = strings.TrimSuffix(stem, ext)
+		}
+		basename = stem
+	} else {
+		dir = cfg.WatchFolder
+		basename = arg
+	}
+
+	if dir == "" {
+		fmt.Fprintln(os.Stderr, "dump-bundle: watch_folder not configured and arg is not an absolute path")
+		os.Exit(1)
+	}
+
+	// Use the existing detector so file-grouping rules stay consistent with
+	// what the scanner does in production. A discardLogger keeps the dump
+	// output clean of "Cannot read watch folder" lines.
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	bundles := scanner.DetectBundles(dir, logger)
+
+	// Find the bundle whose basename matches (case-insensitive, prefix or
+	// exact). Falls back to a plain prefix scan of the directory if the bundle
+	// is missing required AD1+VEH (DetectBundles filters those out, but a
+	// closed RO might be the very thing missing one of them).
+	var match *scanner.BundleCandidate
+	want := strings.ToLower(basename)
+	for i := range bundles {
+		if strings.EqualFold(bundles[i].Basename, basename) ||
+			strings.HasPrefix(strings.ToLower(bundles[i].Basename), want) {
+			match = &bundles[i]
+			break
+		}
+	}
+
+	files, err := bundleFilesByPrefix(dir, basename)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "dump-bundle: cannot read %s: %v\n", dir, err)
+		os.Exit(1)
+	}
+	if match != nil {
+		// Prefer DetectBundles' own file map (correct case + dedup), then
+		// merge in any extras from the prefix scan that DetectBundles dropped
+		// (e.g. memo sidecars, files with duplicate extensions).
+		for ext, p := range match.Files {
+			if _, seen := files[ext]; !seen {
+				files[ext] = p
+			}
+		}
+	}
+
+	if len(files) == 0 {
+		fmt.Fprintf(os.Stderr, "dump-bundle: no files found for basename %q in %s\n", basename, dir)
+		os.Exit(1)
+	}
+
+	// Sort files by extension so output is deterministic and grouped (.ad1
+	// first, then .env, .lin, .veh, ...).
+	exts := make([]string, 0, len(files))
+	for e := range files {
+		exts = append(exts, e)
+	}
+	sort.Strings(exts)
+
+	fmt.Printf("# Bundle dump: basename=%s dir=%s files=%d\n",
+		basename, dir, len(files))
+	fmt.Println("# Paste this entire block back so we can spot the close/lock field.")
+	fmt.Println()
+
+	exit := 0
+	for _, ext := range exts {
+		path := files[ext]
+		// Skip non-dBase sidecars (memo .DBT/.FPT, index .CDX/.MDX) — they
+		// are companion files, not standalone tables, and dbase.OpenTable on
+		// them errors. Listed explicitly so unknown extensions DO get tried.
+		switch strings.ToLower(ext) {
+		case "dbt", "fpt", "cdx", "mdx", "ndx":
+			fmt.Printf("=== %s — companion sidecar, skipping table read ===\n\n",
+				filepath.Base(path))
+			continue
+		}
+		if err := ems.DumpAllFields(path, os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "dump-bundle: %v\n", err)
+			exit = 1
+		}
+	}
+	os.Exit(exit)
+}
+
+// bundleFilesByPrefix returns a map of lowercased extension → full path for
+// every file in dir whose basename (minus last extension) matches stem
+// (case-insensitive). Catches files DetectBundles would skip — required for
+// closed ROs that may lack .AD1 or .VEH but still have other dBase files we
+// need to inspect.
+func bundleFilesByPrefix(dir, stem string) (map[string]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	want := strings.ToLower(stem)
+	out := make(map[string]string)
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		ext := filepath.Ext(name)
+		if ext == "" {
+			continue
+		}
+		base := strings.TrimSuffix(name, ext)
+		if strings.ToLower(base) != want {
+			continue
+		}
+		lowerExt := strings.ToLower(strings.TrimPrefix(ext, "."))
+		// First-wins on duplicate extensions matches DetectBundles policy.
+		if _, seen := out[lowerExt]; !seen {
+			out[lowerExt] = filepath.Join(dir, name)
+		}
+	}
+	return out, nil
+}
+
 func printUsage() {
-	fmt.Println("usage: earlscheib [--tray|--scan|--wizard|--test|--status|--install|--uninstall|--configure|--admin]")
+	fmt.Println("usage: earlscheib [--tray|--scan|--wizard|--test|--status|--install|--uninstall|--configure|--admin|--dump-bundle <basename>]")
 }
