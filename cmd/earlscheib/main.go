@@ -142,7 +142,7 @@ func runScan(tel *telemetry.Telemetry) {
 		// (today just "upload_log"). Failures here never block the scan.
 		if cmds := commands.Poll(context.Background(), cfg.WebhookURL, secretKey, logger); cmds != nil {
 			hostName, _ := os.Hostname()
-			commands.Handle(context.Background(), cmds, cfg.WebhookURL, secretKey, dataDir, hostName, logger)
+			commands.Handle(context.Background(), cmds, cfg.WebhookURL, secretKey, dataDir, hostName, appVersion, update.DefaultLauncher, logger)
 		}
 
 		// Self-update: best-effort poll for a newer installer. Any error is logged

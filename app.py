@@ -2146,6 +2146,21 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 commands = {}
             if not commands or all(not v for v in commands.values()):
                 self.send_response(204); self.end_headers(); return
+            # One-shot semantics for force_update: reset to false IMMEDIATELY
+            # before serving so a client crash mid-install doesn't re-trigger
+            # the command on next poll. We've already captured the True value
+            # in `commands` (the payload we're about to send).
+            if commands.get("force_update"):
+                try:
+                    reset = dict(commands)
+                    reset["force_update"] = False
+                    tmp_path = cmd_path + ".tmp"
+                    with open(tmp_path, "w", encoding="utf-8") as f:
+                        json.dump(reset, f)
+                    os.replace(tmp_path, cmd_path)
+                except OSError as e:
+                    log.warning("force_update reset failed: %s", e)
+                    # Fall through — client gets the True flag; log the failure.
             self._send_json(200, commands)
             return
 
@@ -2451,7 +2466,24 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 or _os.path.exists(_os.path.join(app_dir, "update_paused"))
             )
 
-            # 64 KB chunk-hash — <10 ms for 6 MB installer, keeps memory flat.
+            # Read sidecar for the watcher binary's SHA256[:16].
+            # The sidecar is written by `make release-prep` and contains the hash
+            # of dist/earlscheib.exe — the binary *inside* the installer.
+            # Client compares this against sha256(os.Executable()) to detect updates.
+            sidecar_path = _os.path.join(app_dir, "EarlScheibWatcher-Setup.sha256")
+            sidecar_version = None
+            try:
+                with open(sidecar_path, "r", encoding="utf-8") as fh:
+                    sidecar_version = fh.read().strip()
+                if len(sidecar_version) != 16 or not all(c in "0123456789abcdef" for c in sidecar_version):
+                    log.warning("update: sidecar present but malformed, falling back to installer hash")
+                    sidecar_version = None
+            except FileNotFoundError:
+                log.warning("update: EarlScheibWatcher-Setup.sha256 sidecar missing, falling back to installer hash for version field")
+
+            # 64 KB chunk-hash of installer — <10 ms for 6 MB, keeps memory flat.
+            # Always computed: used as installer_hash (download integrity) and as
+            # version fallback when sidecar is absent.
             h = hashlib.sha256()
             with open(installer_path, "rb") as fh:
                 while True:
@@ -2459,13 +2491,19 @@ class WebhookHandler(BaseHTTPRequestHandler):
                     if not chunk:
                         break
                     h.update(chunk)
-            version = h.hexdigest()[:16]
+            installer_hash = h.hexdigest()[:16]
+
+            # version = watcher binary SHA (from sidecar) so the client can compare
+            # against os.Executable(). Falls back to installer SHA for old deployments
+            # that don't have a sidecar yet.
+            version = sidecar_version if sidecar_version else installer_hash
 
             # download_url is joined to webhookURL on the client
             # (webhookURL already ends in /earlscheibconcord); keep this
             # path relative to that so we don't double the prefix.
             self._send_json(200, {
                 "version": version,
+                "installer_hash": installer_hash,
                 "download_url": "/download.exe",
                 "paused": paused,
             })

@@ -26,7 +26,7 @@ ifneq ($(strip $(HMAC_SECRET)),)
 LDFLAGS += -X main.secretKey=$(HMAC_SECRET)
 endif
 
-.PHONY: build-windows build-linux test clean generate-resources install-tools dev-sign installer installer-syntax portable sync-ui
+.PHONY: build-windows build-linux test clean generate-resources install-tools dev-sign installer installer-syntax portable sync-ui release-prep
 
 ## install-tools: install required build tools (go-winres)
 install-tools:
@@ -81,6 +81,14 @@ dev-sign: build-windows
 	rm -f /tmp/dev-signing.key /tmp/dev-signing.crt /tmp/dev-signing.pfx
 	@echo "Dev-signed artifact: dist/earlscheib-signed.exe"
 	@echo "NOTE: self-signed cert -- SmartScreen will block this on Windows. For production use real OV cert."
+
+## release-prep: build watcher exe + write SHA256[:16] sidecar for server /version endpoint
+## Run before `make installer` (which packages dist/earlscheib.exe into the installer).
+## Sidecar: EarlScheibWatcher-Setup.sha256 — first-16 hex chars of sha256(dist/earlscheib.exe).
+release-prep: build-windows
+	@echo "Computing watcher binary sha256[:16] sidecar..."
+	sha256sum dist/$(BINARY) | cut -c1-16 | tr -d '\n' > EarlScheibWatcher-Setup.sha256
+	@echo "Sidecar: $$(cat EarlScheibWatcher-Setup.sha256)"
 
 ## installer: build the Inno Setup installer exe using Docker (requires Docker, produces installer/Output/EarlScheibWatcher-Setup.exe)
 ## The binary at dist/earlscheib-artifact.exe must exist first (run make build-windows or use CI artifact).

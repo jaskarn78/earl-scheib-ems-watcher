@@ -39,10 +39,11 @@ import (
 )
 
 const (
-	maxFailCount    = 3
-	pollTimeout     = 5 * time.Second
-	downloadTimeout = 60 * time.Second
-	exitSleep       = 500 * time.Millisecond
+	maxFailCount        = 3
+	failCooldownSeconds = 86400 // 24h — fail-limit cooldown before retrying after 3+ failures
+	pollTimeout         = 5 * time.Second
+	downloadTimeout     = 60 * time.Second
+	exitSleep           = 500 * time.Millisecond
 )
 
 // cooldownSeconds is the minimum gap between self-update polls.
@@ -75,9 +76,10 @@ type cooldownState struct {
 
 // versionResponse mirrors the JSON shape returned by /earlscheibconcord/version.
 type versionResponse struct {
-	Version     string `json:"version"`
-	DownloadURL string `json:"download_url"`
-	Paused      bool   `json:"paused"`
+	Version      string `json:"version"`
+	InstallerHash string `json:"installer_hash"`
+	DownloadURL  string `json:"download_url"`
+	Paused       bool   `json:"paused"`
 }
 
 // DefaultLauncher spawns the installer in silent mode and returns immediately.
@@ -118,14 +120,25 @@ func Check(
 	state, _ := readCooldown(statePath)
 	now := time.Now().Unix()
 
-	// fail_count gate BEFORE cooldown gate: if we've hit the limit, skip
-	// entirely until someone resets the state file.
+	// fail_count cooldown gate: if we've hit the limit, apply a 24h cooldown
+	// so the watcher self-heals instead of going permanently silent.
 	if state.FailCount >= maxFailCount {
-		if logger != nil {
-			logger.Debug("update: fail_count at limit, skipping",
-				"fail_count", state.FailCount)
+		if now-state.Ts < failCooldownSeconds {
+			if logger != nil {
+				logger.Debug("update: fail cooldown active, skipping",
+					"fail_count", state.FailCount,
+					"age_seconds", now-state.Ts,
+					"cooldown_seconds", failCooldownSeconds)
+			}
+			return nil
 		}
-		return nil
+		// 24h elapsed — reset and retry.
+		if logger != nil {
+			logger.Info("update: fail cooldown elapsed, retrying",
+				"fail_count", state.FailCount,
+				"age_seconds", now-state.Ts)
+		}
+		state.FailCount = 0
 	}
 	if now-state.Ts < cooldownSeconds {
 		if logger != nil {
@@ -135,10 +148,69 @@ func Check(
 		return nil
 	}
 
+	return runUpdate(ctx, webhookURL, secret, dataDir, appVersion, statePath, state, now, logger, launcher, true)
+}
+
+// ForceCheck bypasses the cooldown, fail_count, and platform gates and
+// immediately polls, downloads (if needed), and launches the installer.
+// It does NOT update the Ts timestamp in the state file so normal cooldowns
+// are not disturbed. On success it resets FailCount to 0.
+// Intended for the force_update operator command.
+func ForceCheck(
+	ctx context.Context,
+	webhookURL, secret, dataDir, appVersion string,
+	logger *slog.Logger,
+	launcher func(installerPath string) error,
+) error {
+	statePath := filepath.Join(dataDir, "update_last_check.json")
+	state, _ := readCooldown(statePath)
+	now := time.Now().Unix()
+	// Pass touchTs=false so ForceCheck preserves the existing Ts (normal
+	// cooldown scheduling is not disrupted by a force-update run).
+	return runUpdate(ctx, webhookURL, secret, dataDir, appVersion, statePath, state, now, logger, launcher, false)
+}
+
+// runUpdate is the shared implementation of Check and ForceCheck.
+// touchTs: when true, writeCooldown persists Ts=now (normal Check behaviour).
+//
+//	when false, writeCooldown persists the previous Ts (ForceCheck preserves schedule).
+func runUpdate(
+	ctx context.Context,
+	webhookURL, secret, dataDir, appVersion, statePath string,
+	state cooldownState,
+	now int64,
+	logger *slog.Logger,
+	launcher func(installerPath string) error,
+	touchTs bool,
+) error {
+	tsForWrite := func(resetFailCount bool) {
+		ts := state.Ts
+		if touchTs {
+			ts = now
+		}
+		fc := state.FailCount
+		if resetFailCount {
+			fc = 0
+		}
+		_ = writeCooldown(statePath, cooldownState{Ts: ts, FailCount: fc})
+	}
+	bumpFailFn := func(reason string) {
+		ts := state.Ts
+		if touchTs {
+			ts = now
+		}
+		next := cooldownState{Ts: ts, FailCount: state.FailCount + 1}
+		if err := writeCooldown(statePath, next); err != nil && logger != nil {
+			logger.Debug("update: cooldown write failed",
+				"reason", reason,
+				"err", err)
+		}
+	}
+
 	// Poll /version.
 	remote, err := pollVersion(ctx, webhookURL, secret)
 	if err != nil {
-		bumpFail(statePath, state, now, logger, "poll version")
+		bumpFailFn("poll version")
 		return err
 	}
 
@@ -146,13 +218,13 @@ func Check(
 		if logger != nil {
 			logger.Info("update: server reports paused=true, skipping")
 		}
-		_ = writeCooldown(statePath, cooldownState{Ts: now, FailCount: 0})
+		tsForWrite(true)
 		return nil
 	}
 
 	ownHash, err := currentExeHash16()
 	if err != nil {
-		bumpFail(statePath, state, now, logger, "hash own exe")
+		bumpFailFn("hash own exe")
 		return err
 	}
 
@@ -163,7 +235,7 @@ func Check(
 				"remote_version", remote.Version,
 				"app_version", appVersion)
 		}
-		_ = writeCooldown(statePath, cooldownState{Ts: now, FailCount: 0})
+		tsForWrite(true)
 		return nil
 	}
 
@@ -178,20 +250,26 @@ func Check(
 
 	downloadedHash, err := downloadInstaller(ctx, webhookURL, remote.DownloadURL, secret, installerPath)
 	if err != nil {
-		bumpFail(statePath, state, now, logger, "download installer")
+		bumpFailFn("download installer")
 		return err
 	}
 
-	if downloadedHash != remote.Version {
+	// Prefer installer_hash (watcher binary SHA) when provided; fall back
+	// to version for backwards compat with old servers that only return version.
+	expected := remote.InstallerHash
+	if expected == "" {
+		expected = remote.Version
+	}
+	if downloadedHash != expected {
 		if logger != nil {
 			logger.Error("update: downloaded installer hash mismatch",
-				"expected", remote.Version,
+				"expected", expected,
 				"got", downloadedHash)
 		}
 		_ = os.Remove(installerPath)
-		bumpFail(statePath, state, now, logger, "hash mismatch")
-		return fmt.Errorf("update: downloaded installer sha256[:16]=%s does not match server version=%s",
-			downloadedHash, remote.Version)
+		bumpFailFn("hash mismatch")
+		return fmt.Errorf("update: downloaded installer sha256[:16]=%s does not match expected=%s",
+			downloadedHash, expected)
 	}
 
 	if logger != nil {
@@ -201,11 +279,11 @@ func Check(
 	}
 
 	if err := launcher(installerPath); err != nil {
-		bumpFail(statePath, state, now, logger, "launcher")
+		bumpFailFn("launcher")
 		return err
 	}
 
-	_ = writeCooldown(statePath, cooldownState{Ts: now, FailCount: 0})
+	tsForWrite(true)
 	// Sleep so the spawned child detaches, then exit so the installer can
 	// overwrite this binary. In tests exitFn and sleepFn are stubs.
 	sleepFn(exitSleep)

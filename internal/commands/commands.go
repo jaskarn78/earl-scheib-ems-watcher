@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jjagpal/earl-scheib-watcher/internal/update"
 	"github.com/jjagpal/earl-scheib-watcher/internal/webhook"
 )
 
@@ -84,7 +85,13 @@ func Poll(ctx context.Context, webhookURL, secret string, logger *slog.Logger) m
 
 // Handle executes any commands in the poll result.
 // Returns count of commands handled (0 if none).
-func Handle(ctx context.Context, cmds map[string]any, webhookURL, secret, dataDir, hostName string, logger *slog.Logger) int {
+func Handle(
+	ctx context.Context,
+	cmds map[string]any,
+	webhookURL, secret, dataDir, hostName, appVersion string,
+	launcher func(installerPath string) error,
+	logger *slog.Logger,
+) int {
 	if cmds == nil {
 		return 0
 	}
@@ -98,6 +105,18 @@ func Handle(ctx context.Context, cmds map[string]any, webhookURL, secret, dataDi
 			handled++
 			if logger != nil {
 				logger.Info("log tail uploaded to server")
+			}
+		}
+	}
+	if v, ok := cmds["force_update"].(bool); ok && v {
+		if err := update.ForceCheck(ctx, webhookURL, secret, dataDir, appVersion, logger, launcher); err != nil {
+			if logger != nil {
+				logger.Warn("force_update failed", "err", err)
+			}
+		} else {
+			handled++
+			if logger != nil {
+				logger.Info("force_update handled — installer launched, exiting")
 			}
 		}
 	}

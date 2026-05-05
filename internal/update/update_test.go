@@ -319,7 +319,7 @@ func TestCheck_FailLimit_BlocksEvenOffCooldown(t *testing.T) {
 	launches, _, exits, launcher := newTestContext(t)
 	dataDir := t.TempDir()
 
-	// Cooldown expired (2h old) BUT fail_count at limit: still bail.
+	// Cooldown expired (2h old) BUT fail_count at limit within 24h: still bail.
 	writeCooldownForTest(t, dataDir, cooldownState{
 		Ts:        time.Now().Unix() - 7200,
 		FailCount: maxFailCount,
@@ -336,9 +336,176 @@ func TestCheck_FailLimit_BlocksEvenOffCooldown(t *testing.T) {
 		t.Fatalf("Check returned err: %v", err)
 	}
 	if counters.Version != 0 {
-		t.Fatalf("expected 0 /version hits when fail_count at limit, got %d", counters.Version)
+		t.Fatalf("expected 0 /version hits when fail_count at limit within 24h, got %d", counters.Version)
 	}
 	if *launches != 0 || *exits != 0 {
 		t.Fatalf("launcher=%d exits=%d; both should be 0", *launches, *exits)
+	}
+}
+
+// TestCheck_FailLimit_24hElapsed verifies that after 24h the fail-cooldown
+// clears and the watcher retries (self-healing behaviour).
+func TestCheck_FailLimit_24hElapsed_Retries(t *testing.T) {
+	launches, _, exits, launcher := newTestContext(t)
+	dataDir := t.TempDir()
+
+	own := testExeHash16(t)
+
+	// fail_count at limit, but Ts is > 24h ago — should retry.
+	writeCooldownForTest(t, dataDir, cooldownState{
+		Ts:        time.Now().Unix() - (failCooldownSeconds + 1),
+		FailCount: maxFailCount,
+	})
+
+	srv, counters := newMockServer(t, map[string]any{
+		"version":      own, // same hash → no download needed
+		"download_url": "/download.exe",
+		"paused":       false,
+	}, []byte("unused"))
+
+	err := Check(t.Context(), srv.URL, testSecret, dataDir, "test", slog.Default(), launcher)
+	if err != nil {
+		t.Fatalf("Check returned err: %v", err)
+	}
+	if counters.Version != 1 {
+		t.Fatalf("expected 1 /version hit after 24h fail cooldown, got %d", counters.Version)
+	}
+	if *launches != 0 || *exits != 0 {
+		t.Fatalf("launcher=%d exits=%d; both should be 0 (hash match)", *launches, *exits)
+	}
+	state, ok := readCooldownForTest(t, dataDir)
+	if !ok {
+		t.Fatal("cooldown not written after retry")
+	}
+	if state.FailCount != 0 {
+		t.Fatalf("FailCount should reset to 0 on success after 24h retry; got %d", state.FailCount)
+	}
+}
+
+// TestCheck_InstallerHash_UsedForVerification checks that when installer_hash
+// is present, it is used for download verification instead of version.
+func TestCheck_InstallerHash_UsedForVerification(t *testing.T) {
+	launches, _, exits, launcher := newTestContext(t)
+	dataDir := t.TempDir()
+
+	installerBytes := []byte("real-installer-bytes")
+	installerHash := computeHash16(installerBytes)
+	// version is a different value (watcher binary SHA) — should NOT be used for download check.
+	srv, counters := newMockServer(t, map[string]any{
+		"version":       "aaaaaaaaaaaaaaaa", // watcher binary hash — not for installer verification
+		"installer_hash": installerHash,      // installer hash — used for download check
+		"download_url":  "/download.exe",
+		"paused":        false,
+	}, installerBytes)
+
+	err := Check(t.Context(), srv.URL, testSecret, dataDir, "test", slog.Default(), launcher)
+	if err != nil {
+		t.Fatalf("Check returned err: %v", err)
+	}
+	if *launches != 1 || *exits != 1 {
+		t.Fatalf("launcher=%d exits=%d; both should be 1", *launches, *exits)
+	}
+	if counters.Version != 1 || counters.Download != 1 {
+		t.Fatalf("expected 1 version + 1 download, got v=%d d=%d", counters.Version, counters.Download)
+	}
+}
+
+// TestCheck_InstallerHash_Empty_FallsBackToVersion verifies that when
+// installer_hash is absent, version is used as the fallback integrity check.
+func TestCheck_InstallerHash_Empty_FallsBackToVersion(t *testing.T) {
+	launches, _, exits, launcher := newTestContext(t)
+	dataDir := t.TempDir()
+
+	installerBytes := []byte("old-server-installer-bytes")
+	installerHash := computeHash16(installerBytes)
+	// Old server: no installer_hash field — version holds the installer hash.
+	srv, counters := newMockServer(t, map[string]any{
+		"version":      installerHash, // old server: version IS the installer hash
+		"download_url": "/download.exe",
+		"paused":       false,
+	}, installerBytes)
+
+	err := Check(t.Context(), srv.URL, testSecret, dataDir, "test", slog.Default(), launcher)
+	if err != nil {
+		t.Fatalf("Check returned err: %v", err)
+	}
+	if *launches != 1 || *exits != 1 {
+		t.Fatalf("launcher=%d exits=%d; both should be 1", *launches, *exits)
+	}
+	if counters.Version != 1 || counters.Download != 1 {
+		t.Fatalf("expected 1 version + 1 download, got v=%d d=%d", counters.Version, counters.Download)
+	}
+}
+
+// TestCheck_InstallerHash_Mismatch_BumpsFailCount verifies that a mismatch
+// between installer_hash and the downloaded installer's SHA bumps FailCount.
+func TestCheck_InstallerHash_Mismatch_BumpsFailCount(t *testing.T) {
+	launches, _, exits, launcher := newTestContext(t)
+	dataDir := t.TempDir()
+
+	installerBytes := []byte("tampered-installer-bytes")
+	srv, _ := newMockServer(t, map[string]any{
+		"version":       "aaaaaaaaaaaaaaaa",
+		"installer_hash": "bbbbbbbbbbbbbbbb", // won't match installerBytes SHA
+		"download_url":  "/download.exe",
+		"paused":        false,
+	}, installerBytes)
+
+	err := Check(t.Context(), srv.URL, testSecret, dataDir, "test", slog.Default(), launcher)
+	if err == nil {
+		t.Fatal("expected error from installer_hash mismatch; got nil")
+	}
+	if *launches != 0 || *exits != 0 {
+		t.Fatalf("launcher=%d exits=%d; both should be 0 on mismatch", *launches, *exits)
+	}
+	state, ok := readCooldownForTest(t, dataDir)
+	if !ok {
+		t.Fatal("cooldown not written")
+	}
+	if state.FailCount != 1 {
+		t.Fatalf("FailCount should be 1 after mismatch; got %d", state.FailCount)
+	}
+}
+
+// TestForceCheck_BypassesCooldown verifies that ForceCheck runs even when the
+// normal cooldown has not expired (fresh Ts in state file).
+func TestForceCheck_BypassesCooldown(t *testing.T) {
+	launches, _, exits, launcher := newTestContext(t)
+	dataDir := t.TempDir()
+
+	own := testExeHash16(t)
+
+	// Fresh cooldown state — normal Check would skip.
+	writeCooldownForTest(t, dataDir, cooldownState{
+		Ts:        time.Now().Unix(), // just now
+		FailCount: 0,
+	})
+	originalTs := time.Now().Unix()
+
+	srv, counters := newMockServer(t, map[string]any{
+		"version":      own, // same hash → no download, no launch
+		"download_url": "/download.exe",
+		"paused":       false,
+	}, []byte("unused"))
+
+	err := ForceCheck(t.Context(), srv.URL, testSecret, dataDir, "test", slog.Default(), launcher)
+	if err != nil {
+		t.Fatalf("ForceCheck returned err: %v", err)
+	}
+	if counters.Version != 1 {
+		t.Fatalf("ForceCheck should poll even during cooldown; got %d /version hits", counters.Version)
+	}
+	if *launches != 0 || *exits != 0 {
+		t.Fatalf("launcher=%d exits=%d; both should be 0 (hash match)", *launches, *exits)
+	}
+
+	// Ts should NOT have been bumped significantly (ForceCheck preserves schedule).
+	state, ok := readCooldownForTest(t, dataDir)
+	if !ok {
+		t.Fatal("cooldown not written after ForceCheck")
+	}
+	// Ts should be at or near the original (within 2s tolerance to avoid flaky CI timing).
+	if state.Ts > originalTs+2 {
+		t.Fatalf("ForceCheck should not advance Ts beyond original; original=%d, got=%d", originalTs, state.Ts)
 	}
 }
