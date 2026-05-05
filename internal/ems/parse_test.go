@@ -278,3 +278,31 @@ func Test_ParseBundle_MissingAD1_Errors(t *testing.T) {
 		t.Fatalf("expected error to mention AD1; got %q", err.Error())
 	}
 }
+
+// Test_ParseBundle_AD2_TTL_Optional confirms that when the files map has no
+// "ad2" or "ttl" keys, ParseBundle returns a valid Bundle with nil AD2 and
+// nil TTL and no error. This covers the "optional file" branch added in
+// 260505-q2t without requiring real .ad2/.ttl dBase fixtures.
+func Test_ParseBundle_AD2_TTL_Optional(t *testing.T) {
+	dir := t.TempDir()
+	ad1 := makeTestDBF(t, dir, "G-OPT.AD1",
+		[]columnSpec{{"OWNR_FN", 20}, {"OWNR_LN", 20}},
+		map[string]string{"OWNR_FN": "Opt", "OWNR_LN": "Test"},
+	)
+	veh := makeTestDBF(t, dir, "G-OPT.VEH",
+		[]columnSpec{{"V_VIN", 20}},
+		map[string]string{"V_VIN": "VIN-OPT"},
+	)
+	// Deliberately omit "ad2" and "ttl" keys — the optional-file branch must
+	// tolerate their absence and leave AD2/TTL nil.
+	b, err := ParseBundle("G-OPT", map[string]string{"ad1": ad1, "veh": veh})
+	if err != nil {
+		t.Fatalf("ParseBundle unexpectedly returned error: %v", err)
+	}
+	if b.AD2 != nil {
+		t.Errorf("expected b.AD2 == nil when ad2 file absent, got %v", b.AD2)
+	}
+	if b.TTL != nil {
+		t.Errorf("expected b.TTL == nil when ttl file absent, got %v", b.TTL)
+	}
+}

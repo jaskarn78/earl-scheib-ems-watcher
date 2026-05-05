@@ -145,6 +145,116 @@ func Test_RenderBMS_ENVPriorityOrder(t *testing.T) {
 	}
 }
 
+// Test_pickDocumentStatus_ClosedROOverride verifies that pickDocumentStatus
+// returns "C" when AD2 has a non-empty RO_CMPDATE or DATE_OUT AND TTL has a
+// positive G_TTL_AMT, and falls through to TRANS_TYPE / "E" otherwise.
+func Test_pickDocumentStatus_ClosedROOverride(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name       string
+		ad2        map[string]string // nil → .ad2 absent
+		ttl        map[string]string // nil → .ttl absent
+		transType  string
+		want       string
+	}{
+		{
+			name:      "open-estimate",
+			ad2:       nil,
+			ttl:       nil,
+			transType: "E",
+			want:      "E",
+		},
+		{
+			name:      "closed-no-bill",
+			ad2:       map[string]string{"RO_CMPDATE": "2026-04-30", "DATE_OUT": "2026-04-30"},
+			ttl:       map[string]string{"G_TTL_AMT": "0.00"},
+			transType: "E",
+			want:      "E",
+		},
+		{
+			name:      "closed-with-bill",
+			ad2:       map[string]string{"RO_CMPDATE": "2026-04-30", "DATE_OUT": "2026-04-30"},
+			ttl:       map[string]string{"G_TTL_AMT": "$1,234.56"},
+			transType: "E",
+			want:      "C",
+		},
+		{
+			name:      "ad2-present-but-blank",
+			ad2:       map[string]string{"RO_CMPDATE": "", "DATE_OUT": ""},
+			ttl:       map[string]string{"G_TTL_AMT": "999.00"},
+			transType: "E",
+			want:      "E",
+		},
+		{
+			name:      "date-out-only-with-bill",
+			ad2:       map[string]string{"RO_CMPDATE": "", "DATE_OUT": "2026-04-30"},
+			ttl:       map[string]string{"G_TTL_AMT": "500.00"},
+			transType: "E",
+			want:      "C",
+		},
+		{
+			name:      "trans-type-EM-passthrough",
+			ad2:       nil,
+			ttl:       nil,
+			transType: "EM",
+			want:      "EM",
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var env map[string]string
+			if tc.transType != "" {
+				env = map[string]string{"TRANS_TYPE": tc.transType}
+			}
+			b := &Bundle{
+				Basename: "test-" + tc.name,
+				AD1:      map[string]string{"OWNR_FN": "x"},
+				VEH:      map[string]string{"V_VIN": "y"},
+				ENV:      env,
+				AD2:      tc.ad2,
+				TTL:      tc.ttl,
+			}
+			got := pickDocumentStatus(b)
+			if got != tc.want {
+				t.Errorf("pickDocumentStatus = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// Test_parseAmount verifies the tolerant currency-string parser.
+func Test_parseAmount(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		input string
+		want  float64
+	}{
+		{"", 0},
+		{"   ", 0},
+		{"0", 0},
+		{"0.00", 0},
+		{"1234.56", 1234.56},
+		{"$1,234.56", 1234.56},
+		{"$0.00", 0},
+		{"1,234", 1234},
+		{"abc", 0},
+		{"$abc", 0},
+		{"  $42.00  ", 42},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.input, func(t *testing.T) {
+			t.Parallel()
+			got := parseAmount(tc.input)
+			if got != tc.want {
+				t.Errorf("parseAmount(%q) = %v, want %v", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
 // firstN returns the first n bytes of b (for error messages).
 func firstN(b []byte, n int) string {
 	if n > len(b) {
