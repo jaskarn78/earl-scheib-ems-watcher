@@ -57,9 +57,9 @@ func Test_RenderBMS_ElementsMatchPython(t *testing.T) {
 	b := &Bundle{
 		Basename: "match-1",
 		AD1: map[string]string{
-			"OWNR_FN":  "A",
-			"OWNR_LN":  "B",
-			"OWNR_PH1": "1234567890",
+			"OWNR_FN":    "A",
+			"OWNR_LN":    "B",
+			"OWNR_PH1":   "1234567890",
 			"OWNR_ADDR1": "123 Main St",
 		},
 		VEH: map[string]string{"V_VIN": "V"},
@@ -151,11 +151,11 @@ func Test_RenderBMS_ENVPriorityOrder(t *testing.T) {
 func Test_pickDocumentStatus_ClosedROOverride(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name       string
-		ad2        map[string]string // nil → .ad2 absent
-		ttl        map[string]string // nil → .ttl absent
-		transType  string
-		want       string
+		name      string
+		ad2       map[string]string // nil → .ad2 absent
+		ttl       map[string]string // nil → .ttl absent
+		transType string
+		want      string
 	}{
 		{
 			name:      "open-estimate",

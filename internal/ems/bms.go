@@ -3,6 +3,8 @@ package ems
 import (
 	"bytes"
 	"encoding/xml"
+	"strconv"
+	"strings"
 )
 
 // BMS namespace. Must match app.py's BMS_NS byte-for-byte — ElementTree does
@@ -33,8 +35,8 @@ type bmsGroup struct {
 }
 
 type bmsTrans struct {
-	DocumentInfo  bmsDocumentInfo  `xml:"DocumentInfo"`
-	EventInfo     bmsEventInfo     `xml:"EventInfo"`
+	DocumentInfo bmsDocumentInfo `xml:"DocumentInfo"`
+	EventInfo    bmsEventInfo    `xml:"EventInfo"`
 	// VehicleInfo (OH4-01) carries VIN / Year / Make / Model / ROId so the
 	// parallel Python parser in app.py can synthesize vehicle_desc for the
 	// admin UI. omitempty on each field keeps blanks out of the wire payload.
@@ -177,11 +179,24 @@ func pickDocumentVerCode(b *Bundle) string {
 	return b.Basename
 }
 
-// pickDocumentStatus returns ENV.TRANS_TYPE verbatim if present, else the
-// default estimate status "E". ENV.TRANS_TYPE ∈ {E, EM, EL, EP, I, C, ...}
-// per CIECA spec and is consumed by app.py's ESTIMATE_STATUSES /
-// CLOSED_STATUSES sets to schedule the right follow-up jobs.
+// pickDocumentStatus returns "C" when AD2 indicates RO completion AND TTL has a
+// non-zero grand total (see parseAmount + lookup), otherwise returns
+// ENV.TRANS_TYPE verbatim if present, else the default estimate status "E".
+// ENV.TRANS_TYPE ∈ {E, EM, EL, EP, I, C, ...} per CIECA spec and is consumed
+// by app.py's ESTIMATE_STATUSES / CLOSED_STATUSES sets to schedule follow-up jobs.
 func pickDocumentStatus(b *Bundle) string {
+	// Closed-RO override (260505-q2t): CCC ONE writes ENV.TRANS_TYPE="E" for
+	// both fresh estimates AND locked/closed ROs. The actual close indicators
+	// live in AD2 (RO_CMPDATE / DATE_OUT) and TTL (G_TTL_AMT). When the RO is
+	// marked complete AND a final bill is present, emit "C" so the server's
+	// CLOSED_STATUSES branch fires the review job instead of the estimate
+	// follow-ups.
+	isClosed := lookup(b.AD2, "RO_CMPDATE") != "" ||
+		lookup(b.AD2, "DATE_OUT") != ""
+	hasFinalBill := parseAmount(lookup(b.TTL, "G_TTL_AMT")) > 0
+	if isClosed && hasFinalBill {
+		return "C"
+	}
 	if v := lookup(b.ENV, "TRANS_TYPE"); v != "" {
 		return v
 	}
@@ -206,4 +221,24 @@ func lookup(m map[string]string, key string) string {
 		return ""
 	}
 	return m[key]
+}
+
+// parseAmount tolerantly converts a CCC ONE-style amount string
+// ("$1,234.56", "1234.56", "1,234", "") to a float64. Returns 0
+// on any parse failure or empty/whitespace input — NEVER errors,
+// NEVER panics. The caller's contract is "is this > 0?", so a
+// zero return is the safe failure mode.
+func parseAmount(s string) float64 {
+	s = strings.TrimSpace(s)
+	s = strings.ReplaceAll(s, "$", "")
+	s = strings.ReplaceAll(s, ",", "")
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0
+	}
+	return v
 }

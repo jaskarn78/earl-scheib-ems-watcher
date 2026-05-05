@@ -25,6 +25,8 @@ var (
 	}
 	vehFields = []string{"V_VIN", "V_MODEL_YR", "V_MAKEDESC", "V_MAKECODE", "V_MODEL", "V_COLOR"}
 	envFields = []string{"UNQFILE_ID", "ESTFILE_ID", "RO_ID", "SUPP_NO", "TRANS_TYPE"}
+	ad2Fields = []string{"RO_CMPDATE", "DATE_OUT", "LOC_NM", "LOC_PH"}
+	ttlFields = []string{"G_TTL_AMT"}
 )
 
 // ParseBundle reads the dBase files in the bundle and returns a populated
@@ -67,6 +69,17 @@ func ParseBundle(basename string, files map[string]string) (*Bundle, error) {
 		// RenderBMS DocumentVerCode fallback to basename handles this cleanly.
 		if env, err := readFields(envPath, envFields); err == nil {
 			b.ENV = env
+		}
+	}
+
+	if ad2Path, ok := files["ad2"]; ok {
+		if ad2, err := readFields(ad2Path, ad2Fields); err == nil {
+			b.AD2 = ad2
+		}
+	}
+	if ttlPath, ok := files["ttl"]; ok {
+		if ttl, err := readFields(ttlPath, ttlFields); err == nil {
+			b.TTL = ttl
 		}
 	}
 

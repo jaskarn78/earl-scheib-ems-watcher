@@ -12,6 +12,8 @@ package ems
 // Bundle is a single CCC ONE EMS 2.01 dBase bundle keyed by the GUID basename.
 //
 // AD1/VEH/ENV are per-file field maps (field-name → trimmed string value).
+// AD2 and TTL are optional per-file field maps populated when the corresponding
+// sibling files are present; they are nil when absent (same nil-tolerance as ENV).
 // Missing files/fields yield empty strings (never panic) — ParseBundle returns
 // an error ONLY when AD1 or VEH is entirely absent, since those two files
 // carry the owner and vehicle data the /estimate handler requires.
@@ -31,6 +33,16 @@ type Bundle struct {
 	VEH map[string]string
 	// ENV: UNQFILE_ID / ESTFILE_ID / RO_ID / SUPP_NO / TRANS_TYPE —
 	//      DocumentVerCode priority chain + RO tag for the admin UI.
-	ENV         map[string]string
+	ENV map[string]string
+	// AD2: RO_CMPDATE / DATE_OUT carry repair-order completion state;
+	//      LOC_NM / LOC_PH are the shop location's name/phone (cheap to
+	//      capture for future multi-shop routing). Optional file — nil
+	//      when the bundle has no .ad2 sibling, same as ENV.
+	AD2 map[string]string
+	// TTL: G_TTL_AMT is the grand total / final bill. Closed-RO
+	//      detection requires G_TTL_AMT > 0 in addition to a non-empty
+	//      RO_CMPDATE/DATE_OUT — guards against estimates that happen
+	//      to carry stale completion dates.
+	TTL         map[string]string
 	SourceFiles []string // sorted ascending by lowercase(filepath.Base)
 }
