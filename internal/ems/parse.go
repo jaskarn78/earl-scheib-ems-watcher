@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Valentin-Kaiser/go-dbase/dbase"
 )
@@ -166,6 +167,19 @@ func readFields(path string, fields []string) (map[string]string, error) {
 		val, ierr := tbl.Interpret(cellBytes, col)
 		if ierr != nil || val == nil {
 			continue
+		}
+		// Empty dBASE date column (raw bytes are 8 spaces or zeros) — go-dbase
+		// normalises both empty representations to time.Time{}. fmt.Sprint on
+		// the zero time would yield "0001-01-01 00:00:00 +0000 UTC" — a
+		// non-empty string that defeats downstream emptiness checks (e.g.
+		// pickDocumentStatus's `lookup(b.AD2,"DATE_OUT") != ""`, which
+		// otherwise misclassifies fresh estimates as closed ROs and emits
+		// DocumentStatus="C"). Leave out[name] at its default "" instead.
+		// 260508-q9c regression test: Test_ParseBundle_EmptyDateColumn_StoresEmptyString.
+		if t, ok := val.(time.Time); ok {
+			if t.IsZero() {
+				continue
+			}
 		}
 		out[name] = strings.TrimSpace(fmt.Sprint(val))
 	}

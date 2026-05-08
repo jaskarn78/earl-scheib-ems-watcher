@@ -5,17 +5,20 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Valentin-Kaiser/go-dbase/dbase"
 	"golang.org/x/text/encoding/charmap"
 )
 
-// columnSpec is a lightweight recipe for a test dBase column. Only Character
-// columns are used by the EMS 2.01 fixtures we need, so we hard-code the type
-// and let the caller pick the length.
+// columnSpec is a lightweight recipe for a test dBase column. Defaults to
+// Character; pass a non-zero DataType (e.g. dbase.Date) for other column
+// kinds. The DataType field is opt-in so existing fixture call sites that
+// only build Character columns continue to compile unchanged.
 type columnSpec struct {
-	Name   string
-	Length uint8
+	Name     string
+	Length   uint8
+	DataType dbase.DataType
 }
 
 // makeTestDBF writes a single-row dBase table and returns the final absolute
@@ -29,7 +32,25 @@ type columnSpec struct {
 //
 // Strategy: create the table as a side-tempdir ".DBF", then os.Rename to the
 // final dir/filename the caller asked for. OpenTable does NOT re-validate ext.
+// makeTestDBFTyped is the typed-value variant of makeTestDBF. It accepts a
+// map[string]interface{} so Date columns can carry time.Time values directly
+// (a zero time.Time{} round-trips as 8 spaces on disk — the dBase empty-date
+// representation CCC ONE writes for unfilled date fields).
+func makeTestDBFTyped(t *testing.T, dir, filename string, cols []columnSpec, row map[string]interface{}) string {
+	t.Helper()
+	return makeTestDBFInner(t, dir, filename, cols, row)
+}
+
 func makeTestDBF(t *testing.T, dir, filename string, cols []columnSpec, row map[string]string) string {
+	t.Helper()
+	r := make(map[string]interface{}, len(row))
+	for k, v := range row {
+		r[k] = v
+	}
+	return makeTestDBFInner(t, dir, filename, cols, r)
+}
+
+func makeTestDBFInner(t *testing.T, dir, filename string, cols []columnSpec, row map[string]interface{}) string {
 	t.Helper()
 	finalPath := filepath.Join(dir, filename)
 
@@ -51,12 +72,18 @@ func makeTestDBF(t *testing.T, dir, filename string, cols []columnSpec, row map[
 	workPath := filepath.Join(baseWork, workName)
 
 	built := make([]*dbase.Column, 0, len(cols))
+	colTypes := make(map[string]dbase.DataType, len(cols))
 	for _, c := range cols {
-		col, err := dbase.NewColumn(c.Name, dbase.Character, c.Length, 0, false)
+		dt := c.DataType
+		if dt == 0 {
+			dt = dbase.Character
+		}
+		col, err := dbase.NewColumn(c.Name, dt, c.Length, 0, false)
 		if err != nil {
 			t.Fatalf("NewColumn(%q): %v", c.Name, err)
 		}
 		built = append(built, col)
+		colTypes[c.Name] = dt
 	}
 
 	tbl, err := dbase.NewTable(
@@ -78,6 +105,7 @@ func makeTestDBF(t *testing.T, dir, filename string, cols []columnSpec, row map[
 		t.Fatalf("NewTable: %v", err)
 	}
 
+	_ = colTypes // colTypes available for future per-column conversion if needed
 	m := make(map[string]interface{}, len(row))
 	for k, v := range row {
 		m[k] = v
@@ -125,7 +153,7 @@ func makeTestDBF(t *testing.T, dir, filename string, cols []columnSpec, row map[
 func Test_ParseBundle_AD1_Only_Errors(t *testing.T) {
 	dir := t.TempDir()
 	ad1 := makeTestDBF(t, dir, "G-123.AD1",
-		[]columnSpec{{"OWNR_FN", 20}, {"OWNR_LN", 20}, {"OWNR_PH1", 20}},
+		[]columnSpec{{Name: "OWNR_FN", Length: 20}, {Name: "OWNR_LN", Length: 20}, {Name: "OWNR_PH1", Length: 20}},
 		map[string]string{"OWNR_FN": "Marco", "OWNR_LN": "Rossi", "OWNR_PH1": "555"},
 	)
 	files := map[string]string{"ad1": ad1}
@@ -141,11 +169,11 @@ func Test_ParseBundle_AD1_Only_Errors(t *testing.T) {
 func Test_ParseBundle_AD1_Plus_VEH_OK(t *testing.T) {
 	dir := t.TempDir()
 	ad1 := makeTestDBF(t, dir, "G-123.AD1",
-		[]columnSpec{{"OWNR_FN", 20}, {"OWNR_LN", 20}, {"OWNR_PH1", 20}},
+		[]columnSpec{{Name: "OWNR_FN", Length: 20}, {Name: "OWNR_LN", Length: 20}, {Name: "OWNR_PH1", Length: 20}},
 		map[string]string{"OWNR_FN": "Marco", "OWNR_LN": "Rossi", "OWNR_PH1": "(925) 555-0199"},
 	)
 	veh := makeTestDBF(t, dir, "G-123.VEH",
-		[]columnSpec{{"V_VIN", 20}, {"V_MODEL_YR", 4}, {"V_MAKEDESC", 20}, {"V_MODEL", 20}},
+		[]columnSpec{{Name: "V_VIN", Length: 20}, {Name: "V_MODEL_YR", Length: 4}, {Name: "V_MAKEDESC", Length: 20}, {Name: "V_MODEL", Length: 20}},
 		map[string]string{"V_VIN": "1HGCM82633A123456", "V_MODEL_YR": "2020", "V_MAKEDESC": "HONDA", "V_MODEL": "ACCORD"},
 	)
 
@@ -175,11 +203,11 @@ func Test_ParseBundle_TrailingSpaces_Stripped(t *testing.T) {
 	// Write value "Marco" (5 chars) into a 20-char field — dBase pads to 20 with spaces.
 	// With TrimSpaces=true in the parser's OpenTable config, we should get "Marco".
 	ad1 := makeTestDBF(t, dir, "G-1.AD1",
-		[]columnSpec{{"OWNR_FN", 20}, {"OWNR_LN", 20}, {"OWNR_PH1", 20}},
+		[]columnSpec{{Name: "OWNR_FN", Length: 20}, {Name: "OWNR_LN", Length: 20}, {Name: "OWNR_PH1", Length: 20}},
 		map[string]string{"OWNR_FN": "Marco", "OWNR_LN": "", "OWNR_PH1": ""},
 	)
 	veh := makeTestDBF(t, dir, "G-1.VEH",
-		[]columnSpec{{"V_VIN", 20}},
+		[]columnSpec{{Name: "V_VIN", Length: 20}},
 		map[string]string{"V_VIN": "VIN-001"},
 	)
 	b, err := ParseBundle("G-1", map[string]string{"ad1": ad1, "veh": veh})
@@ -196,11 +224,11 @@ func Test_ParseBundle_MissingOptionalField_EmptyString(t *testing.T) {
 	dir := t.TempDir()
 	// AD1 intentionally does NOT include OWNR_EA — lookup must return "" without error.
 	ad1 := makeTestDBF(t, dir, "G-2.AD1",
-		[]columnSpec{{"OWNR_FN", 20}},
+		[]columnSpec{{Name: "OWNR_FN", Length: 20}},
 		map[string]string{"OWNR_FN": "Solo"},
 	)
 	veh := makeTestDBF(t, dir, "G-2.VEH",
-		[]columnSpec{{"V_VIN", 20}},
+		[]columnSpec{{Name: "V_VIN", Length: 20}},
 		map[string]string{"V_VIN": "VIN-002"},
 	)
 	b, err := ParseBundle("G-2", map[string]string{"ad1": ad1, "veh": veh})
@@ -218,15 +246,15 @@ func Test_ParseBundle_MissingOptionalField_EmptyString(t *testing.T) {
 func Test_ParseBundle_WithENV_DocNumExtracted(t *testing.T) {
 	dir := t.TempDir()
 	ad1 := makeTestDBF(t, dir, "G-3.AD1",
-		[]columnSpec{{"OWNR_FN", 20}, {"OWNR_LN", 20}},
+		[]columnSpec{{Name: "OWNR_FN", Length: 20}, {Name: "OWNR_LN", Length: 20}},
 		map[string]string{"OWNR_FN": "Al", "OWNR_LN": "Pha"},
 	)
 	veh := makeTestDBF(t, dir, "G-3.VEH",
-		[]columnSpec{{"V_VIN", 20}},
+		[]columnSpec{{Name: "V_VIN", Length: 20}},
 		map[string]string{"V_VIN": "VIN-003"},
 	)
 	env := makeTestDBF(t, dir, "G-3.ENV",
-		[]columnSpec{{"UNQFILE_ID", 20}},
+		[]columnSpec{{Name: "UNQFILE_ID", Length: 20}},
 		map[string]string{"UNQFILE_ID": "EST-00042"},
 	)
 	b, err := ParseBundle("G-3", map[string]string{"ad1": ad1, "veh": veh, "env": env})
@@ -241,11 +269,11 @@ func Test_ParseBundle_WithENV_DocNumExtracted(t *testing.T) {
 func Test_ParseBundle_SourceFilesSorted(t *testing.T) {
 	dir := t.TempDir()
 	ad1 := makeTestDBF(t, dir, "g-9.AD1",
-		[]columnSpec{{"OWNR_FN", 20}},
+		[]columnSpec{{Name: "OWNR_FN", Length: 20}},
 		map[string]string{"OWNR_FN": "z"},
 	)
 	veh := makeTestDBF(t, dir, "G-9.VEH",
-		[]columnSpec{{"V_VIN", 20}},
+		[]columnSpec{{Name: "V_VIN", Length: 20}},
 		map[string]string{"V_VIN": "v"},
 	)
 	b, err := ParseBundle("G-9", map[string]string{"veh": veh, "ad1": ad1})
@@ -267,7 +295,7 @@ func Test_ParseBundle_SourceFilesSorted(t *testing.T) {
 func Test_ParseBundle_MissingAD1_Errors(t *testing.T) {
 	dir := t.TempDir()
 	veh := makeTestDBF(t, dir, "G-X.VEH",
-		[]columnSpec{{"V_VIN", 20}},
+		[]columnSpec{{Name: "V_VIN", Length: 20}},
 		map[string]string{"V_VIN": "v"},
 	)
 	_, err := ParseBundle("G-X", map[string]string{"veh": veh})
@@ -286,11 +314,11 @@ func Test_ParseBundle_MissingAD1_Errors(t *testing.T) {
 func Test_ParseBundle_AD2_TTL_Optional(t *testing.T) {
 	dir := t.TempDir()
 	ad1 := makeTestDBF(t, dir, "G-OPT.AD1",
-		[]columnSpec{{"OWNR_FN", 20}, {"OWNR_LN", 20}},
+		[]columnSpec{{Name: "OWNR_FN", Length: 20}, {Name: "OWNR_LN", Length: 20}},
 		map[string]string{"OWNR_FN": "Opt", "OWNR_LN": "Test"},
 	)
 	veh := makeTestDBF(t, dir, "G-OPT.VEH",
-		[]columnSpec{{"V_VIN", 20}},
+		[]columnSpec{{Name: "V_VIN", Length: 20}},
 		map[string]string{"V_VIN": "VIN-OPT"},
 	)
 	// Deliberately omit "ad2" and "ttl" keys — the optional-file branch must
@@ -304,5 +332,84 @@ func Test_ParseBundle_AD2_TTL_Optional(t *testing.T) {
 	}
 	if b.TTL != nil {
 		t.Errorf("expected b.TTL == nil when ttl file absent, got %v", b.TTL)
+	}
+}
+
+// Test_ParseBundle_EmptyDateColumn_StoresEmptyString is the parse-level
+// regression for 260508-q9c. CCC ONE writes empty dBase Date columns as 8
+// spaces. go-dbase's Interpret normalises that to time.Time{} (the zero
+// value). Before the fix, fmt.Sprint(time.Time{}) yielded the 35-character
+// string "0001-01-01 00:00:00 +0000 UTC" — non-empty — so downstream
+// emptiness checks (pickDocumentStatus's `lookup(b.AD2,"DATE_OUT") != ""`)
+// misclassified every fresh estimate as a closed RO and emitted "C".
+//
+// Contract pinned by this test: an empty Date column round-trips through
+// ParseBundle as "" in the AD2 map, and pickDocumentStatus consequently
+// returns "E" (not "C") even when TTL.G_TTL_AMT > 0.
+func Test_ParseBundle_EmptyDateColumn_StoresEmptyString(t *testing.T) {
+	dir := t.TempDir()
+	ad1 := makeTestDBF(t, dir, "G-Q9C.AD1",
+		[]columnSpec{{Name: "OWNR_FN", Length: 20}, {Name: "OWNR_LN", Length: 20}},
+		map[string]string{"OWNR_FN": "Russell", "OWNR_LN": "Rosete"},
+	)
+	veh := makeTestDBF(t, dir, "G-Q9C.VEH",
+		[]columnSpec{{Name: "V_VIN", Length: 20}},
+		map[string]string{"V_VIN": "VIN-Q9C"},
+	)
+	// AD2 with a Date column whose row value is the zero time.Time{}. On disk,
+	// go-dbase serialises that as 8 spaces — exactly what CCC ONE writes for
+	// an unfilled DATE_OUT field on a fresh estimate.
+	ad2 := makeTestDBFTyped(t, dir, "G-Q9C.AD2",
+		[]columnSpec{{Name: "DATE_OUT", Length: 8, DataType: dbase.Date}},
+		map[string]interface{}{"DATE_OUT": time.Time{}},
+	)
+	ttl := makeTestDBF(t, dir, "G-Q9C.TTL",
+		[]columnSpec{{Name: "G_TTL_AMT", Length: 16}},
+		map[string]string{"G_TTL_AMT": "1500.00"},
+	)
+
+	b, err := ParseBundle("G-Q9C", map[string]string{
+		"ad1": ad1, "veh": veh, "ad2": ad2, "ttl": ttl,
+	})
+	if err != nil {
+		t.Fatalf("ParseBundle: %v", err)
+	}
+	if got := b.AD2["DATE_OUT"]; got != "" {
+		t.Errorf("AD2[DATE_OUT]=%q want \"\" (empty Date column must NOT serialize as zero-time string)", got)
+	}
+	// Belt-and-suspenders: prove the fix closes the loop with bms.go. With
+	// DATE_OUT empty, pickDocumentStatus must return "E" regardless of TTL.
+	if got := pickDocumentStatus(b); got != "E" {
+		t.Errorf("pickDocumentStatus=%q want \"E\" (empty DATE_OUT must NOT trigger closed-RO override)", got)
+	}
+}
+
+// Test_ParseBundle_PopulatedDateColumn_NonEmpty is the companion positive-path
+// case: a populated date round-trips as a non-empty string. We don't pin a
+// specific format here — downstream code only checks emptiness — but verify
+// the value is non-empty so a future regression that swallows ALL date columns
+// would fail loudly.
+func Test_ParseBundle_PopulatedDateColumn_NonEmpty(t *testing.T) {
+	dir := t.TempDir()
+	ad1 := makeTestDBF(t, dir, "G-Q9D.AD1",
+		[]columnSpec{{Name: "OWNR_FN", Length: 20}},
+		map[string]string{"OWNR_FN": "Pop"},
+	)
+	veh := makeTestDBF(t, dir, "G-Q9D.VEH",
+		[]columnSpec{{Name: "V_VIN", Length: 20}},
+		map[string]string{"V_VIN": "VIN-Q9D"},
+	)
+	ad2 := makeTestDBFTyped(t, dir, "G-Q9D.AD2",
+		[]columnSpec{{Name: "DATE_OUT", Length: 8, DataType: dbase.Date}},
+		map[string]interface{}{"DATE_OUT": time.Date(2026, 5, 8, 0, 0, 0, 0, time.UTC)},
+	)
+	b, err := ParseBundle("G-Q9D", map[string]string{
+		"ad1": ad1, "veh": veh, "ad2": ad2,
+	})
+	if err != nil {
+		t.Fatalf("ParseBundle: %v", err)
+	}
+	if got := b.AD2["DATE_OUT"]; got == "" {
+		t.Errorf("AD2[DATE_OUT] for populated 2026-05-08 = \"\"; expected non-empty")
 	}
 }

@@ -187,12 +187,14 @@ func pickDocumentVerCode(b *Bundle) string {
 func pickDocumentStatus(b *Bundle) string {
 	// Closed-RO override (260505-q2t): CCC ONE writes ENV.TRANS_TYPE="E" for
 	// both fresh estimates AND locked/closed ROs. The actual close indicators
-	// live in AD2 (RO_CMPDATE / DATE_OUT) and TTL (G_TTL_AMT). When the RO is
-	// marked complete AND a final bill is present, emit "C" so the server's
-	// CLOSED_STATUSES branch fires the review job instead of the estimate
-	// follow-ups.
-	isClosed := lookup(b.AD2, "RO_CMPDATE") != "" ||
-		lookup(b.AD2, "DATE_OUT") != ""
+	// live in AD2 and TTL (G_TTL_AMT). When the RO is marked complete AND a
+	// final bill is present, emit "C" so the server's CLOSED_STATUSES branch
+	// fires the review job instead of the estimate follow-ups.
+	//
+	// DATE_OUT (car physically released to customer) is the sole close signal.
+	// RO_CMPDATE is intentionally excluded — CCC ONE populates it on fresh
+	// estimates (likely the document creation date), causing false positives.
+	isClosed := lookup(b.AD2, "DATE_OUT") != ""
 	hasFinalBill := parseAmount(lookup(b.TTL, "G_TTL_AMT")) > 0
 	if isClosed && hasFinalBill {
 		return "C"

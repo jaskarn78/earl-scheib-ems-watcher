@@ -146,8 +146,9 @@ func Test_RenderBMS_ENVPriorityOrder(t *testing.T) {
 }
 
 // Test_pickDocumentStatus_ClosedROOverride verifies that pickDocumentStatus
-// returns "C" when AD2 has a non-empty RO_CMPDATE or DATE_OUT AND TTL has a
-// positive G_TTL_AMT, and falls through to TRANS_TYPE / "E" otherwise.
+// returns "C" only when AD2.DATE_OUT is non-empty AND TTL.G_TTL_AMT > 0.
+// RO_CMPDATE alone must NOT trigger "C" — CCC ONE populates it on fresh
+// estimates (likely the document creation date), causing false positives.
 func Test_pickDocumentStatus_ClosedROOverride(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -193,11 +194,34 @@ func Test_pickDocumentStatus_ClosedROOverride(t *testing.T) {
 			want:      "C",
 		},
 		{
+			// Regression: CCC ONE sets RO_CMPDATE on fresh estimates (creation
+			// date), so RO_CMPDATE alone with a non-zero estimate total must
+			// NOT trigger the closed-RO override.
+			name:      "ro-cmpdate-only-no-date-out",
+			ad2:       map[string]string{"RO_CMPDATE": "2026-05-07", "DATE_OUT": ""},
+			ttl:       map[string]string{"G_TTL_AMT": "$3,500.00"},
+			transType: "E",
+			want:      "E",
+		},
+		{
 			name:      "trans-type-EM-passthrough",
 			ad2:       nil,
 			ttl:       nil,
 			transType: "EM",
 			want:      "EM",
+		},
+		{
+			// Regression (260508-q9c): parse.go used to store the zero-time
+			// string "0001-01-01 00:00:00 +0000 UTC" for empty dBASE date
+			// columns, which tripped lookup(b.AD2, "DATE_OUT") != "" and
+			// misclassified fresh estimates (with any non-zero G_TTL_AMT) as
+			// closed ROs. This case pins the downstream contract: an empty
+			// DATE_OUT must always return "E", regardless of TTL grand total.
+			name:      "empty-date-out-with-bill-regression-q9c",
+			ad2:       map[string]string{"DATE_OUT": ""},
+			ttl:       map[string]string{"G_TTL_AMT": "1500.00"},
+			transType: "E",
+			want:      "E",
 		},
 	}
 	for _, tc := range cases {
