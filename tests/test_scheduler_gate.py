@@ -228,3 +228,142 @@ def test_send_now_fires_with_gate_off(reload_app_with_gate, monkeypatch):
     ).fetchone()[0]
     con.close()
     assert sent_val == 1
+
+
+# ---------- UKK-05: ems_bundle skips schedule_job for disabled job_types ----------
+
+def _bms_xml(doc_id: str, doc_status: str, doc_ver: str = None) -> bytes:
+    """Build a minimal BMS XML payload for parse_bms() that exercises the
+    estimate / closed branches. Returns bytes ready for POST.
+    """
+    ver = doc_ver or doc_id
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<BMSEnvelope xmlns="http://www.cieca.com/BMS">'
+          '<BMSTrans>'
+            f'<DocumentID>{doc_id}</DocumentID>'
+            f'<DocumentVerCode>{ver}</DocumentVerCode>'
+            f'<DocumentStatus>{doc_status}</DocumentStatus>'
+            '<EventInfo><RepairEvent>'
+              '<CloseDateTime>2026-05-08T10:00:00</CloseDateTime>'
+            '</RepairEvent></EventInfo>'
+            '<Owner>'
+              '<GivenName>Test</GivenName>'
+              '<OtherOrSurName>Customer</OtherOrSurName>'
+              '<CommPhone>+15308450190</CommPhone>'
+            '</Owner>'
+            '<VehicleInfo>'
+              '<VIN>UKKVIN0123456789</VIN>'
+              '<Year>2024</Year>'
+              '<Make>Toyota</Make>'
+              '<Model>Camry</Model>'
+              '<ROId>RO-UKK</ROId>'
+            '</VehicleInfo>'
+          '</BMSTrans>'
+        '</BMSEnvelope>'
+    ).encode("utf-8")
+
+
+def _post_ems_bundle(base_url: str, secret: str, xml: bytes):
+    req = Request(
+        f"{base_url}/earlscheibconcord/?trigger=ems_bundle",
+        data=xml, method="POST",
+        headers={
+            "X-EMS-Signature": sign(secret, xml),
+            "Content-Type": "application/xml",
+        },
+    )
+    return urlopen(req, timeout=3)
+
+
+def _spin_server(app_mod):
+    """Helper: start a WebhookHandler on an ephemeral port. Returns
+    (base_url, stop_callable)."""
+    import threading
+    from http.server import HTTPServer
+    server = HTTPServer(("127.0.0.1", 0), app_mod.WebhookHandler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    def stop():
+        server.shutdown()
+        server.server_close()
+    return f"http://127.0.0.1:{port}", stop
+
+
+def _disable_jt_directly(db_path: str, job_type: str):
+    """Bypass the PUT path: insert a schedules row with enabled=0."""
+    con = sqlite3.connect(db_path)
+    con.execute(
+        "INSERT OR REPLACE INTO schedules(job_type, delay_hours, updated_at, enabled) "
+        "VALUES (?, ?, ?, 0)",
+        (job_type, 24, int(time.time())),
+    )
+    con.commit()
+    con.close()
+
+
+def _count_jobs_for_doc(db_path: str, doc_id: str):
+    con = sqlite3.connect(db_path)
+    rows = con.execute(
+        "SELECT job_type, COUNT(*) FROM jobs WHERE doc_id = ? GROUP BY job_type",
+        (doc_id,),
+    ).fetchall()
+    con.close()
+    return {jt: n for jt, n in rows}
+
+
+def test_ems_bundle_skips_disabled_24h(reload_app_with_gate):
+    app_mod, db_path, secret = reload_app_with_gate("0")
+    _disable_jt_directly(db_path, "24h")
+
+    base_url, stop = _spin_server(app_mod)
+    try:
+        xml = _bms_xml("UKK-EST-1", "E")
+        with _post_ems_bundle(base_url, secret, xml) as resp:
+            assert resp.status == 200
+    finally:
+        stop()
+
+    counts = _count_jobs_for_doc(db_path, "UKK-EST-1")
+    assert counts.get("24h", 0) == 0, "24h should be skipped"
+    assert counts.get("3day", 0) == 1, "3day must still schedule"
+
+
+def test_ems_bundle_skips_disabled_review(reload_app_with_gate):
+    app_mod, db_path, secret = reload_app_with_gate("0")
+    _disable_jt_directly(db_path, "review")
+
+    base_url, stop = _spin_server(app_mod)
+    try:
+        xml = _bms_xml("UKK-CLO-1", "C")
+        with _post_ems_bundle(base_url, secret, xml) as resp:
+            assert resp.status == 200
+    finally:
+        stop()
+
+    counts = _count_jobs_for_doc(db_path, "UKK-CLO-1")
+    assert counts.get("review", 0) == 0
+
+
+def test_ems_bundle_default_enabled_schedules_all(reload_app_with_gate):
+    """Regression guard: with no schedules-table override, defaults must
+    schedule the full set (24h + 3day for estimate; review for closed)."""
+    app_mod, db_path, secret = reload_app_with_gate("0")
+
+    base_url, stop = _spin_server(app_mod)
+    try:
+        with _post_ems_bundle(base_url, secret, _bms_xml("UKK-DEF-EST", "E")) as resp:
+            assert resp.status == 200
+        with _post_ems_bundle(base_url, secret, _bms_xml("UKK-DEF-CLO", "C")) as resp:
+            assert resp.status == 200
+    finally:
+        stop()
+
+    est_counts = _count_jobs_for_doc(db_path, "UKK-DEF-EST")
+    assert est_counts.get("24h", 0) == 1
+    assert est_counts.get("3day", 0) == 1
+
+    clo_counts = _count_jobs_for_doc(db_path, "UKK-DEF-CLO")
+    assert clo_counts.get("review", 0) == 1

@@ -377,6 +377,19 @@ def init_db():
     )
     con.commit()
 
+    # UKK-01: enabled column added via idempotent ALTER so existing rows
+    # (created by 260508-spn before this column existed) get DEFAULT 1
+    # backfilled. PRAGMA table_info() is the SQLite-portable way to detect
+    # column presence (CREATE IF NOT EXISTS only checks table existence).
+    cur.execute("PRAGMA table_info(schedules)")
+    _sched_cols = {r[1] for r in cur.fetchall()}
+    if "enabled" not in _sched_cols:
+        cur.execute(
+            "ALTER TABLE schedules ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1"
+        )
+        log.info("schedules: added enabled column (default 1)")
+        con.commit()
+
     _seed_test_jobs_if_missing(con)
     con.close()
     log.info("DB initialised at %s", DB_PATH)
@@ -453,6 +466,41 @@ def get_effective_schedule(job_type: str) -> int:
         except (TypeError, ValueError):
             pass
     return DEFAULT_SCHEDULES.get(job_type, 24)
+
+
+def get_schedule_enabled(job_type: str) -> bool:
+    """UKK-04: return True iff this job_type is currently enabled.
+
+    Defaults to True (enabled) when:
+      - No override row in `schedules` for this job_type
+      - Table or `enabled` column is missing (test bypass paths)
+      - Row exists but enabled column is NULL (defensive)
+
+    Mirrors get_effective_schedule's defensive shape.
+    """
+    try:
+        con = get_db()
+        try:
+            cur = con.cursor()
+            cur.execute(
+                "SELECT enabled FROM schedules WHERE job_type = ?",
+                (job_type,),
+            )
+            row = cur.fetchone()
+        finally:
+            con.close()
+    except sqlite3.OperationalError as exc:
+        log.warning("get_schedule_enabled: %s", exc)
+        return True
+    if row is None:
+        return True
+    val = row["enabled"] if "enabled" in row.keys() else None
+    if val is None:
+        return True
+    try:
+        return bool(int(val))
+    except (TypeError, ValueError):
+        return True
 
 
 def _get_template_override(job_type: str) -> str:
@@ -2544,12 +2592,15 @@ class WebhookHandler(BaseHTTPRequestHandler):
             try:
                 cur = con.cursor()
                 cur.execute(
-                    "SELECT job_type, delay_hours, updated_at FROM schedules"
+                    "SELECT job_type, delay_hours, updated_at, enabled FROM schedules"
                 )
                 for r in cur.fetchall():
+                    en_raw = r["enabled"] if "enabled" in r.keys() else None
+                    en = bool(int(en_raw)) if en_raw is not None else True
                     overrides[r["job_type"]] = (
                         int(r["delay_hours"]),
                         int(r["updated_at"]),
+                        en,
                     )
             finally:
                 con.close()
@@ -2558,7 +2609,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
             for meta in JOB_TYPE_META:
                 jt = meta["job_type"]
                 if jt in overrides:
-                    delay_h, updated = overrides[jt]
+                    delay_h, updated, enabled = overrides[jt]
                     job_types_out.append({
                         "job_type":    jt,
                         "label":       meta["label"],
@@ -2566,6 +2617,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
                         "delay_hours": delay_h,
                         "is_override": True,
                         "updated_at":  updated,
+                        "enabled":     enabled,
                     })
                 else:
                     job_types_out.append({
@@ -2575,6 +2627,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
                         "delay_hours": int(DEFAULT_SCHEDULES[jt]),
                         "is_override": False,
                         "updated_at":  0,
+                        "enabled":     True,
                     })
 
             self._send_json(200, {
@@ -3046,26 +3099,40 @@ class WebhookHandler(BaseHTTPRequestHandler):
             log.info("Estimate status %s for doc_id=%s", doc_status, doc_id)
             # SPN-01: pull the effective per-job-type delay from the schedules
             # table (override) or DEFAULT_SCHEDULES (fallback). Hours → seconds.
+            # UKK-05: each schedule_job call is gated by get_schedule_enabled.
+            # Disabling 24h must NOT block 3day on the same estimate.
             h_24h  = get_effective_schedule("24h")
             h_3day = get_effective_schedule("3day")
-            schedule_job(doc_id, "24h", phone, name,
-                         next_send_window(now + h_24h * 3600),
-                         vin=vin, vehicle_desc=vehicle_desc, ro_id=ro_id,
-                         email=email, address=address,
-                         year=year, make=make, model=model)
-            schedule_job(doc_id, "3day", phone, name,
-                         next_send_window(now + h_3day * 3600),
-                         vin=vin, vehicle_desc=vehicle_desc, ro_id=ro_id,
-                         email=email, address=address,
-                         year=year, make=make, model=model)
+            if get_schedule_enabled("24h"):
+                schedule_job(doc_id, "24h", phone, name,
+                             next_send_window(now + h_24h * 3600),
+                             vin=vin, vehicle_desc=vehicle_desc, ro_id=ro_id,
+                             email=email, address=address,
+                             year=year, make=make, model=model)
+            else:
+                log.info("schedules: 24h disabled — skipping schedule_job for doc_id=%s",
+                         doc_id)
+            if get_schedule_enabled("3day"):
+                schedule_job(doc_id, "3day", phone, name,
+                             next_send_window(now + h_3day * 3600),
+                             vin=vin, vehicle_desc=vehicle_desc, ro_id=ro_id,
+                             email=email, address=address,
+                             year=year, make=make, model=model)
+            else:
+                log.info("schedules: 3day disabled — skipping schedule_job for doc_id=%s",
+                         doc_id)
         elif doc_status in CLOSED_STATUSES:
             log.info("Closed status %s for doc_id=%s", doc_status, doc_id)
             h_review = get_effective_schedule("review")
-            schedule_job(doc_id, "review", phone, name,
-                         next_send_window(now + h_review * 3600),
-                         vin=vin, vehicle_desc=vehicle_desc, ro_id=ro_id,
-                         email=email, address=address,
-                         year=year, make=make, model=model)
+            if get_schedule_enabled("review"):
+                schedule_job(doc_id, "review", phone, name,
+                             next_send_window(now + h_review * 3600),
+                             vin=vin, vehicle_desc=vehicle_desc, ro_id=ro_id,
+                             email=email, address=address,
+                             year=year, make=make, model=model)
+            else:
+                log.info("schedules: review disabled — skipping schedule_job for doc_id=%s",
+                         doc_id)
         else:
             log.info("Unhandled doc_status=%s for doc_id=%s, no jobs scheduled", doc_status, doc_id)
 
@@ -3268,12 +3335,14 @@ class WebhookHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "unknown job_type"})
             return
 
-        # Parse body. Empty body / empty JSON / null delay_hours / missing
-        # field all map to "revert to default".
-        revert = False
-        delay_hours = None
+        # UKK-03: parse both fields independently. Each is optional.
+        # Empty body / `{}` → full revert. Otherwise, partial UPSERT.
+        full_revert = False
+        new_delay_hours = None    # None == "do not change"
+        new_enabled = None        # None == "do not change"
+
         if not raw:
-            revert = True
+            full_revert = True
         else:
             try:
                 parsed = json.loads(raw.decode("utf-8"))
@@ -3283,89 +3352,149 @@ class WebhookHandler(BaseHTTPRequestHandler):
             if not isinstance(parsed, dict):
                 self._send_json(400, {"error": "body must be a JSON object"})
                 return
-            if "delay_hours" not in parsed or parsed["delay_hours"] is None:
-                revert = True
+
+            # Empty dict still means full revert.
+            if not parsed:
+                full_revert = True
             else:
-                val = parsed["delay_hours"]
-                # Reject booleans (bool is a subclass of int in Python — must
-                # check first), floats, strings, and other non-int types.
-                if isinstance(val, bool) or not isinstance(val, int):
-                    self._send_json(400, {
-                        "error": "delay_hours must be an integer",
-                    })
-                    return
-                if val < SCHEDULE_MIN_HOURS or val > SCHEDULE_MAX_HOURS:
-                    self._send_json(400, {
-                        "error": (
-                            f"delay_hours must be between {SCHEDULE_MIN_HOURS} "
-                            f"and {SCHEDULE_MAX_HOURS}"
-                        ),
-                    })
-                    return
-                delay_hours = val
+                # delay_hours: explicit-null and missing both mean "no change".
+                if "delay_hours" in parsed and parsed["delay_hours"] is not None:
+                    val = parsed["delay_hours"]
+                    if isinstance(val, bool) or not isinstance(val, int):
+                        self._send_json(400, {
+                            "error": "delay_hours must be an integer",
+                        })
+                        return
+                    if val < SCHEDULE_MIN_HOURS or val > SCHEDULE_MAX_HOURS:
+                        self._send_json(400, {
+                            "error": (
+                                f"delay_hours must be between "
+                                f"{SCHEDULE_MIN_HOURS} and {SCHEDULE_MAX_HOURS}"
+                            ),
+                        })
+                        return
+                    new_delay_hours = val
+
+                # enabled: explicit-null and missing both mean "no change".
+                # Bool-only validation; reject 0/1/"false"/etc.
+                if "enabled" in parsed and parsed["enabled"] is not None:
+                    eval_ = parsed["enabled"]
+                    if not isinstance(eval_, bool):
+                        self._send_json(400, {
+                            "error": "enabled must be a boolean",
+                        })
+                        return
+                    new_enabled = eval_
 
         now_ts = int(time.time())
-        effective_delay: int
+        cancelled = 0
+        rebased = 0
 
         con = get_db()
         try:
             cur = con.cursor()
-            if revert:
+
+            if full_revert:
                 cur.execute(
                     "DELETE FROM schedules WHERE job_type = ?", (job_type,)
                 )
                 con.commit()
                 effective_delay = int(DEFAULT_SCHEDULES[job_type])
+                effective_enabled = True
                 response_updated_at = 0
                 response_is_override = False
-                log.info("schedules: %s reverted to default (%dh)",
-                         job_type, effective_delay)
+                log.info(
+                    "schedules: %s reverted to defaults (delay=%dh, enabled=True)",
+                    job_type, effective_delay,
+                )
             else:
-                assert delay_hours is not None
+                # Read current row state (for unchanged-field fall-through).
                 cur.execute(
-                    "INSERT OR REPLACE INTO schedules(job_type, delay_hours, updated_at) "
-                    "VALUES (?, ?, ?)",
-                    (job_type, delay_hours, now_ts),
+                    "SELECT delay_hours, enabled FROM schedules WHERE job_type = ?",
+                    (job_type,),
+                )
+                existing = cur.fetchone()
+                if existing is None:
+                    prev_delay = int(DEFAULT_SCHEDULES[job_type])
+                    prev_enabled = True
+                else:
+                    prev_delay = int(existing["delay_hours"])
+                    en_raw = existing["enabled"] if "enabled" in existing.keys() else None
+                    prev_enabled = bool(int(en_raw)) if en_raw is not None else True
+
+                effective_delay = (
+                    new_delay_hours if new_delay_hours is not None else prev_delay
+                )
+                effective_enabled = (
+                    new_enabled if new_enabled is not None else prev_enabled
+                )
+
+                cur.execute(
+                    "INSERT OR REPLACE INTO schedules"
+                    "(job_type, delay_hours, updated_at, enabled) "
+                    "VALUES (?, ?, ?, ?)",
+                    (job_type, effective_delay, now_ts,
+                     1 if effective_enabled else 0),
                 )
                 con.commit()
-                effective_delay = int(delay_hours)
                 response_updated_at = now_ts
                 response_is_override = True
-                log.info("schedules: %s override saved (%dh)",
-                         job_type, effective_delay)
+                log.info(
+                    "schedules: %s upsert (delay=%dh, enabled=%s)",
+                    job_type, effective_delay, effective_enabled,
+                )
 
-            # SPN-02: rebase pending jobs of this job_type.
-            # next_send_window encodes business-hours/weekend rules in Python,
-            # so we cannot express the rebase in pure SQL — fetch, compute,
-            # then executemany the updates.
-            cur.execute(
-                "SELECT id, created_at FROM jobs "
-                "WHERE job_type = ? AND sent = 0",
-                (job_type,),
-            )
-            pending = cur.fetchall()
-            updates = []
-            for r in pending:
-                new_send_at = next_send_window(
-                    int(r["created_at"]) + effective_delay * 3600
+            # UKK-04: branch on the resulting enabled state.
+            if not effective_enabled:
+                # Toggle-off (or upsert that ends with enabled=False):
+                # cancel ALL pending sent=0 jobs of this job_type.
+                cur.execute(
+                    "UPDATE jobs SET sent=1, sent_at=? "
+                    "WHERE job_type=? AND sent=0",
+                    (now_ts, job_type),
                 )
-                updates.append((int(new_send_at), int(r["id"])))
-            if updates:
-                cur.executemany(
-                    "UPDATE jobs SET send_at = ? WHERE id = ?",
-                    updates,
-                )
+                cancelled = cur.rowcount or 0
                 con.commit()
-            rebased = len(updates)
+                log.info(
+                    "schedules: %s disabled — cancelled %d pending job(s)",
+                    job_type, cancelled,
+                )
+                # Skip rebase: there are no pending rows after cancel.
+            else:
+                # enabled=True (or unchanged-True): run rebase. Touches sent=0
+                # rows only — idempotent for unchanged delays since
+                # next_send_window(created_at + delay*3600) is deterministic.
+                cur.execute(
+                    "SELECT id, created_at FROM jobs "
+                    "WHERE job_type = ? AND sent = 0",
+                    (job_type,),
+                )
+                pending = cur.fetchall()
+                updates = []
+                for r in pending:
+                    new_send_at = next_send_window(
+                        int(r["created_at"]) + effective_delay * 3600
+                    )
+                    updates.append((int(new_send_at), int(r["id"])))
+                if updates:
+                    cur.executemany(
+                        "UPDATE jobs SET send_at = ? WHERE id = ?",
+                        updates,
+                    )
+                    con.commit()
+                rebased = len(updates)
+                log.info("schedules: %s rebased %d pending job(s)",
+                         job_type, rebased)
         finally:
             con.close()
 
-        log.info("schedules: %s rebased %d pending job(s)", job_type, rebased)
         self._send_json(200, {
-            "is_override":  response_is_override,
-            "delay_hours":  effective_delay,
-            "updated_at":   response_updated_at,
-            "rebased_jobs": rebased,
+            "is_override":    response_is_override,
+            "delay_hours":    effective_delay,
+            "enabled":        effective_enabled,
+            "updated_at":     response_updated_at,
+            "rebased_jobs":   rebased,
+            "cancelled_jobs": cancelled,
         })
 
 

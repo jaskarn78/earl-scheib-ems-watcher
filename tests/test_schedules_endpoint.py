@@ -131,15 +131,23 @@ def test_put_schedule_empty_body_reverts_to_default(queue_server):
     assert count == 0
 
 
-def test_put_schedule_null_delay_reverts(queue_server):
+def test_put_schedule_null_delay_no_change(queue_server):
+    """UKK-03 supersedes legacy null-as-revert: explicit null on a partial
+    body now means 'do not change this field'. Only empty body / `{}` is a
+    full revert."""
     _put_schedule(queue_server, "review", {"delay_hours": 36}).close()
     with _put_schedule(queue_server, "review", {"delay_hours": None}) as resp:
         parsed = json.loads(resp.read().decode("utf-8"))
-    assert parsed["is_override"] is False
-    assert parsed["delay_hours"] == 24  # default for review
+    # delay_hours absent-but-null → row stays at the existing override value.
+    # However when no other field is provided either, an explicit-null body
+    # like {"delay_hours": null} carries zero changes; the server still
+    # writes back the row (idempotent UPSERT). Either way: override persists.
+    assert parsed["is_override"] is True
+    assert parsed["delay_hours"] == 36
 
 
-def test_put_schedule_missing_field_reverts(queue_server):
+def test_put_schedule_empty_dict_reverts(queue_server):
+    """Empty `{}` body fully reverts the row (delete)."""
     _put_schedule(queue_server, "24h", {"delay_hours": 36}).close()
     with _put_schedule(queue_server, "24h", {}) as resp:
         parsed = json.loads(resp.read().decode("utf-8"))
@@ -357,3 +365,199 @@ def test_override_flows_through_get_effective_schedule(queue_server):
     # Other types still default.
     assert app_mod.get_effective_schedule("24h") == 24
     assert app_mod.get_effective_schedule("3day") == 72
+
+
+# ---------- UKK-01..04: enabled toggle ----------
+
+def _seed_jobs(db_path, rows):
+    """Helper: rows is a list of (doc_id, job_type, sent, sent_at, created_at)."""
+    con = sqlite3.connect(db_path)
+    con.executemany(
+        "INSERT INTO jobs (doc_id, job_type, phone, name, send_at, sent, sent_at, created_at) "
+        "VALUES (?, ?, '+15551112299', 'Tester', ?, ?, ?, ?)",
+        [(d, jt, c + 3600, s, sa, c) for (d, jt, s, sa, c) in rows],
+    )
+    con.commit()
+    con.close()
+
+
+def test_get_schedules_includes_enabled_default_true(queue_server):
+    body = _get_schedules(queue_server)
+    for jt in body["job_types"]:
+        assert jt["enabled"] is True
+        assert jt["is_override"] is False
+
+
+def test_put_schedule_toggle_off_persists(queue_server):
+    with _put_schedule(queue_server, "24h", {"enabled": False}) as resp:
+        parsed = json.loads(resp.read().decode("utf-8"))
+    assert parsed["enabled"] is False
+    assert parsed["is_override"] is True
+
+    body = _get_schedules(queue_server)
+    by_type = {jt["job_type"]: jt for jt in body["job_types"]}
+    assert by_type["24h"]["enabled"] is False
+    assert by_type["24h"]["is_override"] is True
+    assert by_type["3day"]["enabled"] is True
+    assert by_type["review"]["enabled"] is True
+
+
+def test_put_schedule_toggle_off_cancels_pending(queue_server):
+    db_path = queue_server["db_path"]
+    # Pre-clean any pre-existing 24h rows the conftest fixture seeded
+    # (DOC-A is 24h sent=0; _seed_test_jobs_if_missing adds Carlos 24h).
+    con = sqlite3.connect(db_path)
+    con.execute("DELETE FROM jobs WHERE job_type = '24h'")
+    con.commit()
+    con.close()
+
+    base = 1700000000
+    _seed_jobs(db_path, [
+        ("UKK-1", "24h",  0, 0,        base),
+        ("UKK-2", "24h",  0, 0,        base + 10),
+        ("UKK-3", "24h",  0, 0,        base + 20),
+        ("UKK-4", "3day", 0, 0,        base + 30),
+        ("UKK-5", "24h",  1, base + 5, base + 40),  # already-sent, sent_at preserved
+    ])
+
+    before = int(time.time())
+    with _put_schedule(queue_server, "24h", {"enabled": False}) as resp:
+        parsed = json.loads(resp.read().decode("utf-8"))
+    after = int(time.time())
+
+    assert parsed["cancelled_jobs"] == 3
+    assert parsed["enabled"] is False
+    assert parsed.get("rebased_jobs", 0) == 0
+
+    con = sqlite3.connect(db_path)
+    con.row_factory = sqlite3.Row
+    rows = {
+        r["doc_id"]: r
+        for r in con.execute(
+            "SELECT doc_id, sent, sent_at, job_type FROM jobs WHERE doc_id LIKE 'UKK-%'"
+        ).fetchall()
+    }
+    con.close()
+
+    for k in ("UKK-1", "UKK-2", "UKK-3"):
+        assert rows[k]["sent"] == 1, f"{k} should be cancelled"
+        assert before <= rows[k]["sent_at"] <= after, f"{k} sent_at must be ~now"
+    # 3day pending row untouched.
+    assert rows["UKK-4"]["sent"] == 0
+    # Already-sent 24h row keeps its original sent_at (= base + 5).
+    assert rows["UKK-5"]["sent"] == 1
+    assert rows["UKK-5"]["sent_at"] == base + 5
+
+
+def test_put_schedule_toggle_on_does_not_resurrect(queue_server):
+    db_path = queue_server["db_path"]
+    con = sqlite3.connect(db_path)
+    con.execute("DELETE FROM jobs WHERE job_type = '24h'")
+    con.commit()
+    con.close()
+
+    base = 1700000000
+    _seed_jobs(db_path, [("UKK-RES", "24h", 0, 0, base)])
+
+    # Toggle off → cancels.
+    with _put_schedule(queue_server, "24h", {"enabled": False}) as resp:
+        parsed_off = json.loads(resp.read().decode("utf-8"))
+    assert parsed_off["cancelled_jobs"] == 1
+
+    # Toggle on → does NOT resurrect.
+    with _put_schedule(queue_server, "24h", {"enabled": True}) as resp:
+        parsed_on = json.loads(resp.read().decode("utf-8"))
+    assert parsed_on["cancelled_jobs"] == 0
+    assert parsed_on["enabled"] is True
+
+    con = sqlite3.connect(db_path)
+    sent_val = con.execute(
+        "SELECT sent FROM jobs WHERE doc_id='UKK-RES'"
+    ).fetchone()[0]
+    con.close()
+    assert sent_val == 1  # still cancelled
+
+
+def test_put_schedule_enabled_only_does_not_change_delay(queue_server):
+    _put_schedule(queue_server, "24h", {"delay_hours": 48}).close()
+    _put_schedule(queue_server, "24h", {"enabled": False}).close()
+
+    body = _get_schedules(queue_server)
+    by_type = {jt["job_type"]: jt for jt in body["job_types"]}
+    assert by_type["24h"]["delay_hours"] == 48
+    assert by_type["24h"]["enabled"] is False
+
+
+def test_put_schedule_delay_only_does_not_change_enabled(queue_server):
+    _put_schedule(queue_server, "24h", {"enabled": False}).close()
+    _put_schedule(queue_server, "24h", {"delay_hours": 48}).close()
+
+    body = _get_schedules(queue_server)
+    by_type = {jt["job_type"]: jt for jt in body["job_types"]}
+    assert by_type["24h"]["delay_hours"] == 48
+    assert by_type["24h"]["enabled"] is False
+
+
+def test_put_schedule_both_fields_together(queue_server):
+    with _put_schedule(queue_server, "24h",
+                      {"delay_hours": 48, "enabled": False}) as resp:
+        parsed = json.loads(resp.read().decode("utf-8"))
+    assert parsed["delay_hours"] == 48
+    assert parsed["enabled"] is False
+    assert parsed["rebased_jobs"] == 0
+    assert "cancelled_jobs" in parsed
+
+
+def test_put_schedule_empty_body_reverts_both(queue_server):
+    _put_schedule(queue_server, "24h",
+                 {"delay_hours": 48, "enabled": False}).close()
+    with _put_schedule(queue_server, "24h", {}) as resp:
+        parsed = json.loads(resp.read().decode("utf-8"))
+    assert parsed["delay_hours"] == 24
+    assert parsed["enabled"] is True
+    assert parsed["is_override"] is False
+
+
+def test_put_schedule_enabled_string_rejected(queue_server):
+    try:
+        _put_schedule(queue_server, "24h", {"enabled": "false"})
+        assert False, "expected 400"
+    except HTTPError as e:
+        assert e.code == 400
+
+
+def test_put_schedule_enabled_int_rejected(queue_server):
+    try:
+        _put_schedule(queue_server, "24h", {"enabled": 0})
+        assert False, "expected 400"
+    except HTTPError as e:
+        assert e.code == 400
+
+
+def test_put_schedule_enabled_null_treated_as_absent(queue_server):
+    _put_schedule(queue_server, "24h", {"enabled": False}).close()
+    # delay_hours change with enabled=null → enabled stays False.
+    _put_schedule(queue_server, "24h",
+                 {"delay_hours": 48, "enabled": None}).close()
+
+    body = _get_schedules(queue_server)
+    by_type = {jt["job_type"]: jt for jt in body["job_types"]}
+    assert by_type["24h"]["delay_hours"] == 48
+    assert by_type["24h"]["enabled"] is False
+
+
+def test_put_schedule_toggle_off_then_delay_change_does_not_rebase(queue_server):
+    db_path = queue_server["db_path"]
+    con = sqlite3.connect(db_path)
+    con.execute("DELETE FROM jobs WHERE job_type = '24h'")
+    con.commit()
+    con.close()
+
+    base = 1700000000
+    _seed_jobs(db_path, [("UKK-CR", "24h", 0, 0, base)])
+
+    with _put_schedule(queue_server, "24h",
+                      {"enabled": False, "delay_hours": 48}) as resp:
+        parsed = json.loads(resp.read().decode("utf-8"))
+    assert parsed["cancelled_jobs"] == 1
+    assert parsed["rebased_jobs"] == 0
