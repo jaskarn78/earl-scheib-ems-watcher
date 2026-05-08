@@ -615,3 +615,192 @@ func TestAdminProxy_TemplatePut_PropagatesUpstream400(t *testing.T) {
 		t.Errorf("body: got %s, want %s", body, syntaxErr)
 	}
 }
+
+// ---- SPN-01: Schedule proxy tests ----
+
+func TestAdminProxy_SchedulesList_Forwards(t *testing.T) {
+	secret := "test-secret-SPN-schedules-list"
+	captured := &atomic.Pointer[capturedRequest]{}
+	canned := []byte(`{"job_types":[{"job_type":"24h","delay_hours":24,"is_override":false,"updated_at":0}],"min_hours":1,"max_hours":720}`)
+	remote := newFakeRemote(t, 200, canned, captured)
+	defer remote.Close()
+
+	adminURL, stop := startAdminWithURLCh(t, remote.URL, secret, 5*time.Second)
+	defer stop()
+
+	resp, body := getJSON(t, adminURL+"/api/schedules")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: got %d, want 200", resp.StatusCode)
+	}
+	if !bytes.Equal(body, canned) {
+		t.Errorf("body not forwarded verbatim:\n got: %s\nwant: %s", body, canned)
+	}
+
+	cr := captured.Load()
+	if cr == nil {
+		t.Fatal("fake remote never captured a request")
+	}
+	if cr.method != http.MethodGet {
+		t.Errorf("upstream method: got %s, want GET", cr.method)
+	}
+	wantSig := webhook.Sign(secret, []byte(""))
+	if cr.sig != wantSig {
+		t.Errorf("upstream X-EMS-Signature: got %q, want %q", cr.sig, wantSig)
+	}
+	if !strings.HasSuffix(cr.path, "/earlscheibconcord/schedules") {
+		t.Errorf("upstream path: got %q, want suffix /earlscheibconcord/schedules", cr.path)
+	}
+}
+
+func TestAdminProxy_ScheduleUpsert_Forwards(t *testing.T) {
+	secret := "test-secret-SPN-upsert"
+	captured := &atomic.Pointer[capturedRequest]{}
+	remote := newFakeRemote(t, 200, []byte(`{"is_override":true,"delay_hours":48,"updated_at":12345,"rebased_jobs":3}`), captured)
+	defer remote.Close()
+
+	adminURL, stop := startAdminWithURLCh(t, remote.URL, secret, 5*time.Second)
+	defer stop()
+
+	resp, body := putJSON(t, adminURL+"/api/schedules/24h", `{"delay_hours": 48}`)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: got %d, want 200; body=%s", resp.StatusCode, body)
+	}
+
+	cr := captured.Load()
+	if cr == nil {
+		t.Fatal("fake remote never captured a request")
+	}
+	if cr.method != http.MethodPut {
+		t.Errorf("upstream method: got %s, want PUT", cr.method)
+	}
+	if !strings.HasSuffix(cr.path, "/earlscheibconcord/schedules/24h") {
+		t.Errorf("upstream path: got %q, want suffix /earlscheibconcord/schedules/24h", cr.path)
+	}
+	// Canonical JSON: compact, no whitespace.
+	wantBody := `{"delay_hours":48}`
+	if string(cr.body) != wantBody {
+		t.Errorf("upstream body: got %q, want %q", cr.body, wantBody)
+	}
+	wantSig := webhook.Sign(secret, []byte(wantBody))
+	if cr.sig != wantSig {
+		t.Errorf("upstream X-EMS-Signature: got %q, want %q", cr.sig, wantSig)
+	}
+}
+
+func TestAdminProxy_ScheduleUpsert_RevertForwardsVerbatim(t *testing.T) {
+	secret := "test-secret-SPN-revert"
+	captured := &atomic.Pointer[capturedRequest]{}
+	remote := newFakeRemote(t, 200, []byte(`{"is_override":false,"delay_hours":24,"updated_at":0,"rebased_jobs":0}`), captured)
+	defer remote.Close()
+
+	adminURL, stop := startAdminWithURLCh(t, remote.URL, secret, 5*time.Second)
+	defer stop()
+
+	// Empty JSON body — DelayHours is nil so canonical form is {"delay_hours":null}.
+	resp, _ := putJSON(t, adminURL+"/api/schedules/3day", `{}`)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: got %d, want 200", resp.StatusCode)
+	}
+
+	cr := captured.Load()
+	if cr == nil {
+		t.Fatal("fake remote never captured a request")
+	}
+	wantBody := `{"delay_hours":null}`
+	if string(cr.body) != wantBody {
+		t.Errorf("upstream body: got %q, want %q", cr.body, wantBody)
+	}
+	if !strings.HasSuffix(cr.path, "/earlscheibconcord/schedules/3day") {
+		t.Errorf("upstream path: got %q", cr.path)
+	}
+}
+
+func TestAdminProxy_ScheduleUpsert_UnknownJobType(t *testing.T) {
+	captured := &atomic.Pointer[capturedRequest]{}
+	remote := newFakeRemote(t, 200, []byte(`{}`), captured)
+	defer remote.Close()
+
+	adminURL, stop := startAdminWithURLCh(t, remote.URL, "secret", 5*time.Second)
+	defer stop()
+
+	resp, body := putJSON(t, adminURL+"/api/schedules/foo", `{"delay_hours":24}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want 400; body=%s", resp.StatusCode, body)
+	}
+	if captured.Load() != nil {
+		t.Error("upstream must not be called on unknown job_type")
+	}
+}
+
+func TestAdminProxy_ScheduleUpsert_EmptyJobType(t *testing.T) {
+	captured := &atomic.Pointer[capturedRequest]{}
+	remote := newFakeRemote(t, 200, []byte(`{}`), captured)
+	defer remote.Close()
+
+	adminURL, stop := startAdminWithURLCh(t, remote.URL, "secret", 5*time.Second)
+	defer stop()
+
+	// trailing slash → empty job_type segment
+	resp, _ := putJSON(t, adminURL+"/api/schedules/", `{"delay_hours":24}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want 400", resp.StatusCode)
+	}
+	if captured.Load() != nil {
+		t.Error("upstream must not be called on empty job_type")
+	}
+}
+
+func TestAdminProxy_ScheduleUpsert_BadMethod(t *testing.T) {
+	captured := &atomic.Pointer[capturedRequest]{}
+	remote := newFakeRemote(t, 200, []byte(`{}`), captured)
+	defer remote.Close()
+
+	adminURL, stop := startAdminWithURLCh(t, remote.URL, "secret", 5*time.Second)
+	defer stop()
+
+	// POST not allowed on /api/schedules/{job_type} — only PUT.
+	resp, _ := postJSON(t, adminURL+"/api/schedules/24h", `{"delay_hours":24}`)
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("status: got %d, want 405", resp.StatusCode)
+	}
+	if captured.Load() != nil {
+		t.Error("upstream must not be called on wrong method")
+	}
+}
+
+func TestAdminProxy_SchedulesList_BadMethod(t *testing.T) {
+	captured := &atomic.Pointer[capturedRequest]{}
+	remote := newFakeRemote(t, 200, []byte(`{}`), captured)
+	defer remote.Close()
+
+	adminURL, stop := startAdminWithURLCh(t, remote.URL, "secret", 5*time.Second)
+	defer stop()
+
+	req, _ := http.NewRequest(http.MethodPut, adminURL+"/api/schedules", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("status: got %d, want 405", resp.StatusCode)
+	}
+}
+
+func TestAdminProxy_ScheduleUpsert_PropagatesUpstream400(t *testing.T) {
+	captured := &atomic.Pointer[capturedRequest]{}
+	upstreamErr := []byte(`{"error":"delay_hours must be between 1 and 720"}`)
+	remote := newFakeRemote(t, 400, upstreamErr, captured)
+	defer remote.Close()
+
+	adminURL, stop := startAdminWithURLCh(t, remote.URL, "secret", 5*time.Second)
+	defer stop()
+
+	resp, body := putJSON(t, adminURL+"/api/schedules/24h", `{"delay_hours":9999}`)
+	if resp.StatusCode != 400 {
+		t.Errorf("status: got %d, want 400", resp.StatusCode)
+	}
+	if !bytes.Equal(body, upstreamErr) {
+		t.Errorf("body: got %s, want %s", body, upstreamErr)
+	}
+}

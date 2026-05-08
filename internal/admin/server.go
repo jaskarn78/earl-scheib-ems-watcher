@@ -158,6 +158,10 @@ func Run(ctx context.Context, cfg Config) error {
 	// to the single handler.
 	mux.HandleFunc("/api/templates", s.handleTemplatesList)
 	mux.HandleFunc("/api/templates/", s.handleTemplateUpsert)
+	// SPN-01: Marco-editable per-job-type send delays. Mirrors the templates
+	// route pair (list at the bare path, upsert at the trailing-slash subtree).
+	mux.HandleFunc("/api/schedules", s.handleSchedulesList)
+	mux.HandleFunc("/api/schedules/", s.handleScheduleUpsert)
 	mux.HandleFunc("/alive", s.handleAlive)
 
 	httpServer := &http.Server{
@@ -321,6 +325,18 @@ func (s *server) remoteTemplatesURL() string {
 // remoteTemplateURL returns the remote /templates/{job_type} endpoint (PUT).
 func (s *server) remoteTemplateURL(jobType string) string {
 	return s.remoteTemplatesURL() + "/" + jobType
+}
+
+// remoteSchedulesURL returns the remote /schedules endpoint (GET listing).
+// SPN-01: Same prefix convention as remoteTemplatesURL — WebhookURL already
+// ends in /earlscheibconcord, so we just append /schedules.
+func (s *server) remoteSchedulesURL() string {
+	return strings.TrimRight(s.cfg.WebhookURL, "/") + "/schedules"
+}
+
+// remoteScheduleURL returns the remote /schedules/{job_type} endpoint (PUT).
+func (s *server) remoteScheduleURL(jobType string) string {
+	return s.remoteSchedulesURL() + "/" + jobType
 }
 
 // handleAlive is the browser heartbeat endpoint. Resets the last-alive timer.
