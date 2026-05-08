@@ -676,8 +676,8 @@ func TestAdminProxy_ScheduleUpsert_Forwards(t *testing.T) {
 	if !strings.HasSuffix(cr.path, "/earlscheibconcord/schedules/24h") {
 		t.Errorf("upstream path: got %q, want suffix /earlscheibconcord/schedules/24h", cr.path)
 	}
-	// Canonical JSON: compact, no whitespace.
-	wantBody := `{"delay_hours":48}`
+	// UKK-06: canonical JSON now includes both fields (declaration order).
+	wantBody := `{"delay_hours":48,"enabled":null}`
 	if string(cr.body) != wantBody {
 		t.Errorf("upstream body: got %q, want %q", cr.body, wantBody)
 	}
@@ -706,12 +706,165 @@ func TestAdminProxy_ScheduleUpsert_RevertForwardsVerbatim(t *testing.T) {
 	if cr == nil {
 		t.Fatal("fake remote never captured a request")
 	}
-	wantBody := `{"delay_hours":null}`
+	// UKK-06: canonical JSON for empty body now includes both null fields.
+	wantBody := `{"delay_hours":null,"enabled":null}`
 	if string(cr.body) != wantBody {
 		t.Errorf("upstream body: got %q, want %q", cr.body, wantBody)
 	}
 	if !strings.HasSuffix(cr.path, "/earlscheibconcord/schedules/3day") {
 		t.Errorf("upstream path: got %q", cr.path)
+	}
+}
+
+// ---------- UKK-06: enabled field round-trip ----------
+
+func TestAdminProxy_ScheduleUpsert_EnabledRoundTrip(t *testing.T) {
+	secret := "test-secret-UKK-enabled"
+	captured := &atomic.Pointer[capturedRequest]{}
+	remote := newFakeRemote(t, 200, []byte(`{"is_override":true,"delay_hours":24,"enabled":false,"updated_at":12345,"rebased_jobs":0,"cancelled_jobs":3}`), captured)
+	defer remote.Close()
+
+	adminURL, stop := startAdminWithURLCh(t, remote.URL, secret, 5*time.Second)
+	defer stop()
+
+	resp, body := putJSON(t, adminURL+"/api/schedules/24h", `{"enabled": false}`)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: got %d, want 200; body=%s", resp.StatusCode, body)
+	}
+
+	cr := captured.Load()
+	if cr == nil {
+		t.Fatal("fake remote never captured a request")
+	}
+
+	// Parse upstream body to assert pointer values (avoids fragile byte-order).
+	var upstream struct {
+		DelayHours *int  `json:"delay_hours"`
+		Enabled    *bool `json:"enabled"`
+	}
+	if err := json.Unmarshal(cr.body, &upstream); err != nil {
+		t.Fatalf("parse upstream body: %v (body=%s)", err, cr.body)
+	}
+	if upstream.DelayHours != nil {
+		t.Errorf("DelayHours: got %v, want nil", *upstream.DelayHours)
+	}
+	if upstream.Enabled == nil || *upstream.Enabled != false {
+		t.Errorf("Enabled: got %v, want pointer to false", upstream.Enabled)
+	}
+
+	// HMAC must be over the exact bytes the proxy sent.
+	wantSig := webhook.Sign(secret, cr.body)
+	if cr.sig != wantSig {
+		t.Errorf("upstream X-EMS-Signature: got %q, want %q", cr.sig, wantSig)
+	}
+}
+
+func TestAdminProxy_ScheduleUpsert_BothFieldsRoundTrip(t *testing.T) {
+	captured := &atomic.Pointer[capturedRequest]{}
+	remote := newFakeRemote(t, 200, []byte(`{}`), captured)
+	defer remote.Close()
+
+	adminURL, stop := startAdminWithURLCh(t, remote.URL, "secret", 5*time.Second)
+	defer stop()
+
+	resp, _ := putJSON(t, adminURL+"/api/schedules/24h", `{"delay_hours": 48, "enabled": true}`)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: got %d, want 200", resp.StatusCode)
+	}
+
+	cr := captured.Load()
+	if cr == nil {
+		t.Fatal("upstream never captured")
+	}
+	var up struct {
+		DelayHours *int  `json:"delay_hours"`
+		Enabled    *bool `json:"enabled"`
+	}
+	if err := json.Unmarshal(cr.body, &up); err != nil {
+		t.Fatalf("parse upstream: %v", err)
+	}
+	if up.DelayHours == nil || *up.DelayHours != 48 {
+		t.Errorf("DelayHours: got %v, want 48", up.DelayHours)
+	}
+	if up.Enabled == nil || *up.Enabled != true {
+		t.Errorf("Enabled: got %v, want pointer to true", up.Enabled)
+	}
+}
+
+func TestAdminProxy_ScheduleUpsert_DelayOnlyPreservesNullEnabled(t *testing.T) {
+	captured := &atomic.Pointer[capturedRequest]{}
+	remote := newFakeRemote(t, 200, []byte(`{}`), captured)
+	defer remote.Close()
+
+	adminURL, stop := startAdminWithURLCh(t, remote.URL, "secret", 5*time.Second)
+	defer stop()
+
+	resp, _ := putJSON(t, adminURL+"/api/schedules/24h", `{"delay_hours": 48}`)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: got %d, want 200", resp.StatusCode)
+	}
+
+	cr := captured.Load()
+	if cr == nil {
+		t.Fatal("upstream never captured")
+	}
+	var up struct {
+		DelayHours *int  `json:"delay_hours"`
+		Enabled    *bool `json:"enabled"`
+	}
+	if err := json.Unmarshal(cr.body, &up); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if up.DelayHours == nil || *up.DelayHours != 48 {
+		t.Errorf("DelayHours: got %v, want 48", up.DelayHours)
+	}
+	if up.Enabled != nil {
+		t.Errorf("Enabled: got %v, want nil (unset)", *up.Enabled)
+	}
+}
+
+func TestAdminProxy_ScheduleUpsert_EmptyBodyForwardsBothNulls(t *testing.T) {
+	captured := &atomic.Pointer[capturedRequest]{}
+	remote := newFakeRemote(t, 200, []byte(`{}`), captured)
+	defer remote.Close()
+
+	adminURL, stop := startAdminWithURLCh(t, remote.URL, "secret", 5*time.Second)
+	defer stop()
+
+	resp, _ := putJSON(t, adminURL+"/api/schedules/24h", `{}`)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: got %d, want 200", resp.StatusCode)
+	}
+
+	cr := captured.Load()
+	if cr == nil {
+		t.Fatal("upstream never captured")
+	}
+	wantBody := `{"delay_hours":null,"enabled":null}`
+	if string(cr.body) != wantBody {
+		t.Errorf("body: got %q, want %q", cr.body, wantBody)
+	}
+}
+
+func TestAdminProxy_ScheduleUpsert_BadEnabledType(t *testing.T) {
+	// `enabled` typed as *bool in the proxy parser struct — a non-bool JSON
+	// value (string/int/etc.) fails Go's strict json.Unmarshal at the proxy
+	// boundary, so it 400s WITHOUT round-tripping to upstream. This is
+	// stricter than the equivalent app.py validation (which would also 400)
+	// but the upshot for clients is identical: bad-type → 400.
+	captured := &atomic.Pointer[capturedRequest]{}
+	remote := newFakeRemote(t, 200, []byte(`{}`), captured)
+	defer remote.Close()
+
+	adminURL, stop := startAdminWithURLCh(t, remote.URL, "secret", 5*time.Second)
+	defer stop()
+
+	resp, _ := putJSON(t, adminURL+"/api/schedules/24h", `{"enabled":"true"}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want 400", resp.StatusCode)
+	}
+	if captured.Load() != nil {
+		t.Error("upstream must not be called when proxy parser rejects the body")
 	}
 }
 

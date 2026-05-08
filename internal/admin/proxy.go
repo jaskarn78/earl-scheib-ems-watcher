@@ -396,10 +396,13 @@ func (s *server) handleSchedulesList(w http.ResponseWriter, r *http.Request) {
 //
 //	PUT {webhookURL}/earlscheibconcord/schedules/{job_type}.
 //
-// Canonical-rewrites the body to {"delay_hours":N} before signing + forwarding.
-// DelayHours is *int (pointer) so a missing field or explicit null is
-// preserved — server-side this triggers the "revert to default" path.
+// Canonical-rewrites the body to {"delay_hours":N,"enabled":B} before
+// signing + forwarding. Both fields are *pointer (nil → null on the wire).
+// Per UKK-03 server semantics: empty body / `{}` triggers full-revert;
+// partial fields with a null sibling mean "no change to that field".
 // job_type is whitelisted so the proxy never fans out to arbitrary paths.
+// Type validation (enabled-must-be-bool, delay_hours-bounds) happens
+// upstream in app.py — the proxy is a JSON pass-through with HMAC.
 func (s *server) handleScheduleUpsert(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -423,24 +426,29 @@ func (s *server) handleScheduleUpsert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var parsed struct {
-		DelayHours *int `json:"delay_hours"`
+		DelayHours *int  `json:"delay_hours"`
+		Enabled    *bool `json:"enabled"`
 	}
 	// Empty body is allowed — mirrors PUT /templates/{jt} with empty body
 	// for the revert-to-default code path. Only error on explicit malformed
 	// JSON (non-empty body that fails to parse).
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &parsed); err != nil {
-			s.jsonError(w, http.StatusBadRequest, "body must be {\"delay_hours\": N} or empty")
+			s.jsonError(w, http.StatusBadRequest, "body must be {\"delay_hours\": N, \"enabled\": B} or empty")
 			return
 		}
 	}
 
-	// Re-marshal canonically. If DelayHours is nil (missing or null) we send
-	// {"delay_hours":null} explicitly so the server can distinguish a revert
-	// request from a malformed body.
+	// Re-marshal canonically. Both fields are *pointer so nil → null on the
+	// wire. The server distinguishes:
+	//   {"delay_hours":null,"enabled":null} → full revert (delete row)
+	//   {"delay_hours":N,    "enabled":null} → upsert delay, leave enabled
+	//   {"delay_hours":null, "enabled":B}    → upsert enabled, leave delay
+	//   {"delay_hours":N,    "enabled":B}    → upsert both
 	outBody, err := json.Marshal(struct {
-		DelayHours *int `json:"delay_hours"`
-	}{DelayHours: parsed.DelayHours})
+		DelayHours *int  `json:"delay_hours"`
+		Enabled    *bool `json:"enabled"`
+	}{DelayHours: parsed.DelayHours, Enabled: parsed.Enabled})
 	if err != nil {
 		s.jsonError(w, http.StatusInternalServerError, "marshal: "+err.Error())
 		return
