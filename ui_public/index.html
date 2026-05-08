@@ -5,29 +5,35 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Earl Scheib Concord — Queue</title>
 
-  <!-- Warm cream ES monogram favicon; matches the light admin palette. -->
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%23faf7f2'/><text x='16' y='22' text-anchor='middle' font-family='Georgia,serif' font-weight='700' font-size='18' fill='%238b2a2a'>ES</text></svg>">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%231a2d4d'/><text x='16' y='22' text-anchor='middle' font-family='Arial,sans-serif' font-weight='800' font-size='14' fill='%23c8202f'>ES</text></svg>">
 
-  <!-- Google Fonts: Fraunces (display serif) + Work Sans (body) + IBM Plex Mono (data). -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Work+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
 
   <link rel="stylesheet" href="/main.css">
 </head>
 <body>
+  <!-- SPN-04: DEV-mode banner — visible only when /diagnostic.scheduler_enabled === false.
+       Toggled by main.js on every diagnostic poll. -->
+  <div id="dev-banner" class="dev-banner" hidden role="status" aria-live="polite">
+    <strong>DEV MODE</strong> &nbsp;·&nbsp; auto-send scheduler is paused
+    (set <code>SCHEDULER_ENABLED=1</code> on the server to enable).
+    Manual <em>Send now</em> still works.
+  </div>
+
   <header class="topbar" role="banner">
     <div class="brand">
-      <span class="brand-mark" aria-hidden="true">ES</span>
-      <span class="brand-name">Earl Scheib</span>
-      <span class="brand-sep" aria-hidden="true">·</span>
-      <span class="brand-mode">Queue</span>
+      <a class="brand-link" href="https://earlscheibconcord.com" target="_blank" rel="noopener" aria-label="Earl Scheib Concord website">
+        <img class="brand-logo" src="/logo.png" alt="Earl Scheib Concord" height="32">
+      </a>
     </div>
 
-    <!-- WMH-04: view switcher. Queue (default) + Templates editor. -->
+    <!-- WMH-04 + SPN-05: view switcher. Queue (default) + Templates + Schedules. -->
     <nav class="topnav" role="tablist" aria-label="Views">
       <a class="topnav-link is-active" data-view="queue"     href="#queue"     role="tab" aria-selected="true">Queue</a>
       <a class="topnav-link"           data-view="templates" href="#templates" role="tab" aria-selected="false">Templates</a>
+      <a class="topnav-link"           data-view="schedules" href="#schedules" role="tab" aria-selected="false">Schedules</a>
     </nav>
 
     <div class="stats" aria-label="Queue statistics">
@@ -60,10 +66,14 @@
          state. Search uses canvas bg + oxblood focus accent. -->
     <section class="controls" aria-label="Queue filters">
       <nav class="filters" role="tablist" aria-label="Filter jobs">
-        <button class="filter" type="button" data-filter="all" role="tab" aria-selected="true">All</button>
-        <button class="filter" type="button" data-filter="estimates" role="tab" aria-selected="false">Estimates</button>
+        <button class="filter" type="button" data-filter="estimates" role="tab" aria-selected="true">Estimates</button>
         <button class="filter" type="button" data-filter="completed" role="tab" aria-selected="false">Work Completed</button>
         <button class="filter" type="button" data-filter="sent" role="tab" aria-selected="false">Sent</button>
+        <button class="filter" type="button" data-filter="all" role="tab" aria-selected="false">All</button>
+        <span class="filter-sep" aria-hidden="true"></span>
+        <button class="filter filter--test" type="button" data-filter="test-estimates" role="tab" aria-selected="false">Test Est.</button>
+        <button class="filter filter--test" type="button" data-filter="test-completed" role="tab" aria-selected="false">Test Work Compl.</button>
+        <button class="test-reset-btn" type="button" title="Reset test jobs (re-seed fresh)" aria-label="Reset test jobs">↺</button>
       </nav>
       <div class="search-wrap">
         <svg class="search-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -104,6 +114,21 @@
     </section>
   </div>
 
+  <!-- SPN-05: Schedules tab — three numeric inputs (24h / 3day / review)
+       with live "(X days)" helper text + dirty-dot + Save + Reset-to-default.
+       Mirrors the Templates editor pattern. -->
+  <div id="view-schedules" data-view="schedules" hidden>
+    <section class="schedules" aria-label="Send schedules">
+      <header class="schedules-header">
+        <h1 class="schedules-title">Send schedules</h1>
+        <p class="schedules-sub">Delay (in hours) between event and SMS. Saved instantly. Pending jobs are rebased to the new delay.</p>
+      </header>
+      <div id="schedules-list" class="schedules-list" aria-live="polite">
+        <!-- One .sched-card per job_type, injected by main.js. -->
+      </div>
+    </section>
+  </div>
+
   <!-- Estimate card = one customer + one vehicle with ALL their pending/sent
        follow-ups rendered as a vertical timeline. Preserves the OH4 aesthetic
        (Fraunces name, soft cream card, oxblood accents) while adding timeline
@@ -120,6 +145,9 @@
           <span class="estimate-vehicle-desc"></span>
           <span class="estimate-vin mono" title=""></span>
           <span class="estimate-ro"></span>
+        </p>
+        <p class="estimate-card__meta">
+          <span class="estimate-date"></span>
         </p>
       </header>
       <ol class="timeline"></ol>
@@ -198,6 +226,30 @@
         <button type="button" class="btn btn-primary tpl-save" disabled>Save</button>
         <button type="button" class="btn btn-ghost   tpl-reset" disabled>Reset to default</button>
         <span class="tpl-card__status" role="status" aria-live="polite"></span>
+      </footer>
+    </article>
+  </template>
+
+  <!-- SPN-05: one editable schedule per job_type. Numeric input + live (X days)
+       helper, dirty-dot, Save + Reset-to-default. Mirrors .tpl-card. -->
+  <template id="schedule-card-template">
+    <article class="sched-card" data-job-type="">
+      <header class="sched-card__head">
+        <h2 class="sched-card__title"></h2>
+        <span class="sched-card__when"></span>
+        <span class="sched-card__badge" hidden>Custom</span>
+        <span class="sched-card__dirty-dot" hidden aria-label="Unsaved changes"></span>
+      </header>
+      <div class="sched-card__row">
+        <label class="sched-card__label">Delay</label>
+        <input type="number" class="sched-card__input mono" min="1" max="720" step="1" inputmode="numeric" />
+        <span class="sched-card__unit">hours</span>
+        <span class="sched-card__days mono"></span>
+      </div>
+      <footer class="sched-card__actions">
+        <button type="button" class="btn btn-primary sched-save" disabled>Save</button>
+        <button type="button" class="btn btn-ghost   sched-reset" disabled>Reset to default</button>
+        <span class="sched-card__status" role="status" aria-live="polite"></span>
       </footer>
     </article>
   </template>

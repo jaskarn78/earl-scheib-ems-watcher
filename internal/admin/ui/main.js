@@ -72,6 +72,16 @@
       bag.first_name = String(bag.name).split(/\s+/)[0];
     }
     if (!bag.first_name) bag.first_name = 'there';
+    if (!bag.short_model && bag.model) {
+      bag.short_model = String(bag.model).split(/\s+/).slice(0, 2).join(' ');
+    }
+    // Expand 2-digit year → 4-digit ("22" → "2022", "96" → "1996").
+    if (bag.year) {
+      const yr = String(bag.year).trim();
+      if (/^\d{2}$/.test(yr)) {
+        bag.year = (parseInt(yr, 10) <= 30 ? '20' : '19') + yr;
+      }
+    }
     return tpl.replace(/\{(\w+)\}/g, (_, key) => {
       const v = bag[key];
       return (v === undefined || v === null) ? '' : String(v);
@@ -83,6 +93,17 @@
   // Save/Reset. Used by the queue-page SMS preview bubble so the preview
   // matches Marco's edits without a second round-trip.
   const effectiveTemplates = {};
+
+  // SPN-05: format hours → "(X day[s])" helper text, e.g. 24 → "(1 day)",
+  // 36 → "(1.5 days)", 72 → "(3 days)". One decimal max so the label stays
+  // readable. Returns "" for non-positive / non-numeric input.
+  function hoursToDaysLabel(h) {
+    const n = Number(h);
+    if (!Number.isFinite(n) || n <= 0) return '';
+    const days = Math.round((n / 24) * 10) / 10;
+    const word = days === 1 ? 'day' : 'days';
+    return `(${days} ${word})`;
+  }
 
   function previewSMS(jobType, job) {
     // Legacy call-sites pass a bare name string. Normalise to an object.
@@ -136,7 +157,7 @@
 
   // QAJ-02 filter + search state. Re-applied against the cached `lastJobs`
   // array on chip click or search keystroke — avoids a network round-trip.
-  let currentFilter = 'all';
+  let currentFilter = 'estimates';
   let currentSearch = '';
   let lastJobs      = [];
   let searchTimerId = null;
@@ -198,20 +219,21 @@
 
   // Returns true if a single job matches the active filter chip.
   function jobMatchesFilter(job, filter) {
+    const isTest = job.is_test === 1;
     switch (filter) {
       case 'all':
-        return true;
+        return !isTest;
       case 'estimates':
-        return (job.job_type === '24h' || job.job_type === '3day')
+        return !isTest && (job.job_type === '24h' || job.job_type === '3day')
           && (job.sent === 0 || job.sent === undefined);
       case 'completed':
-        // Scope to review messages only (any state). Work Completed becomes
-        // "the review-request lifecycle for jobs that finished" — pending
-        // reviews stay actionable (Send Now), sent ones display as history.
-        // Past 24h/3day sends moved to the Sent tab where they belong.
-        return job.job_type === 'review';
+        return !isTest && job.job_type === 'review';
       case 'sent':
-        return job.sent === 1;
+        return !isTest && job.sent === 1;
+      case 'test-estimates':
+        return isTest && (job.job_type === '24h' || job.job_type === '3day');
+      case 'test-completed':
+        return isTest && job.job_type === 'review';
       default:
         return true;
     }
@@ -250,6 +272,7 @@
           vehicle_desc: job.vehicle_desc || '',
           vin:          job.vin || '',
           ro_id:        job.ro_id || '',
+          created_at:   job.created_at || 0,
           jobs:         [],
         });
       }
@@ -339,6 +362,12 @@
       frag.querySelector('.estimate-card__vehicle').remove();
     }
 
+    const dateEl = frag.querySelector('.estimate-date');
+    if (dateEl && group.created_at) {
+      const d = new Date(group.created_at * 1000);
+      dateEl.textContent = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+
     const timeline = frag.querySelector('.timeline');
     // Sort DESC by most-recent activity so freshly sent / soonest-scheduled
     // entries surface at the top of each estimate card. Uses sent_at when
@@ -398,9 +427,10 @@
   // ---------- Send-now flow -------------------------------------------
 
   async function handleSendNow(job, entryEl, btnEl, errEl) {
-    const name = job.name || 'this customer';
     const type = JOB_TYPE_LABELS[job.job_type] || job.job_type;
-    const confirmMsg = `Send "${type}" SMS to ${name} right now?`;
+    const confirmMsg = job.is_test === 1
+      ? `Send "${type}" SMS to test recipients (+15308450190 Jaskarn, +19254215772 Marco) right now?`
+      : `Send "${type}" SMS to ${job.name || 'this customer'} right now?`;
     if (!window.confirm(confirmMsg)) return;
 
     btnEl.disabled = true;
@@ -618,6 +648,15 @@
       } else {
         renderServerDiagnostic(d);
       }
+
+      // SPN-04: dev-mode banner. Show only when scheduler_enabled === false.
+      // Hide on undefined so we don't flash the banner during the brief
+      // moment before the first /diagnostic poll resolves on a UI version
+      // that pre-dates SPN.
+      const banner = document.getElementById('dev-banner');
+      if (banner) {
+        banner.hidden = d.scheduler_enabled !== false;
+      }
     } catch (_) {
       // Transient errors at 5s poll cadence — silent by design.
     }
@@ -764,6 +803,29 @@
         renderQueue(lastJobs);
       });
     });
+
+    const resetBtn = document.querySelector('.test-reset-btn');
+    if (resetBtn) {
+      resetBtn.addEventListener('click', async () => {
+        resetBtn.disabled = true;
+        resetBtn.textContent = '…';
+        try {
+          const res = await fetch(`${window.API_BASE_PATH || ''}/reset-test-jobs`, { method: 'POST' });
+          if (res.ok) {
+            resetBtn.textContent = '✓';
+            setTimeout(() => { resetBtn.textContent = '↺'; resetBtn.disabled = false; }, 1200);
+            lastJobs = [];
+            await fetchQueue();
+          } else {
+            resetBtn.textContent = '!';
+            setTimeout(() => { resetBtn.textContent = '↺'; resetBtn.disabled = false; }, 2000);
+          }
+        } catch {
+          resetBtn.textContent = '!';
+          setTimeout(() => { resetBtn.textContent = '↺'; resetBtn.disabled = false; }, 2000);
+        }
+      });
+    }
   }
 
   function wireSearch() {
@@ -1065,10 +1127,227 @@
     return depth === 0;
   }
 
+  // ---------- Schedules page (SPN-05) ---------------------------------
+  //
+  // URL paths (respect API_BASE_PATH):
+  //   Go admin  : GET /api/schedules            PUT /api/schedules/{jt}
+  //   Public UI : GET /earlscheibconcord/schedules PUT /earlscheibconcord/schedules/{jt}
+  //
+  // Mirrors the Templates editor (loadTemplates / buildTemplateCard) — same
+  // dirty-dot, Save + Reset, status echo. Numeric input + "(X days)" helper
+  // is the only structural difference.
+
+  const schedListURL   = IS_LOCAL_ADMIN
+    ? '/api/schedules'
+    : `${API_BASE}/schedules`;
+  const schedUpsertURL = (jt) => IS_LOCAL_ADMIN
+    ? `/api/schedules/${encodeURIComponent(jt)}`
+    : `${API_BASE}/schedules/${encodeURIComponent(jt)}`;
+
+  const scheduleState = {
+    cards:     {},   // job_type -> { delay_hours, is_override, label, when }
+    bounds:    { min: 1, max: 720 },
+    loaded:    false,
+  };
+
+  function getSchedulesListEl() {
+    return document.getElementById('schedules-list');
+  }
+
+  async function loadSchedules(force) {
+    const listEl = getSchedulesListEl();
+    if (!listEl) return;
+    if (scheduleState.loaded && !force) return;
+
+    listEl.innerHTML = '';
+    const loading = document.createElement('p');
+    loading.className = 'schedules-loading';
+    loading.textContent = 'Loading schedules…';
+    listEl.appendChild(loading);
+
+    try {
+      const resp = await fetch(schedListURL, { cache: 'no-store' });
+      if (!resp.ok) {
+        listEl.innerHTML = '';
+        const err = document.createElement('p');
+        err.className = 'schedules-error';
+        err.textContent = `Couldn't load schedules (${resp.status}).`;
+        listEl.appendChild(err);
+        return;
+      }
+      const data = await resp.json();
+      scheduleState.bounds = {
+        min: typeof data.min_hours === 'number' ? data.min_hours : 1,
+        max: typeof data.max_hours === 'number' ? data.max_hours : 720,
+      };
+      scheduleState.cards = {};
+      listEl.innerHTML = '';
+      (data.job_types || []).forEach((jt) => {
+        scheduleState.cards[jt.job_type] = {
+          delay_hours: jt.delay_hours,
+          is_override: !!jt.is_override,
+          label:       jt.label,
+          when:        jt.when,
+        };
+        listEl.appendChild(buildScheduleCard(jt));
+      });
+      scheduleState.loaded = true;
+    } catch (_) {
+      listEl.innerHTML = '';
+      const err = document.createElement('p');
+      err.className = 'schedules-error';
+      err.textContent = "Couldn't reach the server. Please retry.";
+      listEl.appendChild(err);
+    }
+  }
+
+  function buildScheduleCard(jt) {
+    const tpl = document.getElementById('schedule-card-template');
+    const frag = tpl.content.cloneNode(true);
+    const article = frag.querySelector('.sched-card');
+    article.dataset.jobType = jt.job_type;
+
+    frag.querySelector('.sched-card__title').textContent = jt.label;
+    frag.querySelector('.sched-card__when').textContent  = jt.when;
+
+    const badge = frag.querySelector('.sched-card__badge');
+    badge.hidden = !jt.is_override;
+
+    const input    = frag.querySelector('.sched-card__input');
+    const daysEl   = frag.querySelector('.sched-card__days');
+    const saveBtn  = frag.querySelector('.sched-save');
+    const resetBtn = frag.querySelector('.sched-reset');
+    const dirtyDot = frag.querySelector('.sched-card__dirty-dot');
+    const statusEl = frag.querySelector('.sched-card__status');
+
+    input.min  = String(scheduleState.bounds.min);
+    input.max  = String(scheduleState.bounds.max);
+    input.value = String(jt.delay_hours);
+    daysEl.textContent = hoursToDaysLabel(jt.delay_hours);
+    resetBtn.disabled = !jt.is_override;
+
+    const refreshDirty = () => {
+      const saved = scheduleState.cards[jt.job_type] || { delay_hours: 0 };
+      const cur = parseInt(input.value, 10);
+      const isDirty = Number.isFinite(cur) && cur !== saved.delay_hours;
+      dirtyDot.hidden = !isDirty;
+      saveBtn.disabled = !isDirty;
+      resetBtn.disabled = !saved.is_override;
+      statusEl.textContent = '';
+      statusEl.removeAttribute('data-state');
+    };
+
+    input.addEventListener('input', () => {
+      const cur = parseInt(input.value, 10);
+      daysEl.textContent = hoursToDaysLabel(cur);
+      refreshDirty();
+    });
+
+    // Save: PUT {"delay_hours": N}
+    saveBtn.addEventListener('click', async () => {
+      const cur = parseInt(input.value, 10);
+      if (!Number.isFinite(cur)
+          || cur < scheduleState.bounds.min
+          || cur > scheduleState.bounds.max) {
+        showStatus(statusEl,
+          `Must be ${scheduleState.bounds.min}–${scheduleState.bounds.max} hours`,
+          'error');
+        return;
+      }
+      saveBtn.disabled = true;
+      resetBtn.disabled = true;
+      try {
+        const resp = await fetch(schedUpsertURL(jt.job_type), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ delay_hours: cur }),
+        });
+        const parsed = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          showStatus(statusEl, parsed.error || `Save failed (${resp.status})`, 'error');
+          saveBtn.disabled = false;
+          resetBtn.disabled = !(scheduleState.cards[jt.job_type] || {}).is_override;
+          return;
+        }
+        applySavedSchedule(jt.job_type, parsed, input, daysEl, badge,
+                           dirtyDot, saveBtn, resetBtn, statusEl);
+      } catch (_) {
+        showStatus(statusEl, 'Network error — please retry', 'error');
+        saveBtn.disabled = false;
+        resetBtn.disabled = !(scheduleState.cards[jt.job_type] || {}).is_override;
+      }
+    });
+
+    // Reset to default: PUT {} so server reverts.
+    resetBtn.addEventListener('click', async () => {
+      if (!window.confirm('Restore the default delay for this follow-up?')) return;
+      saveBtn.disabled = true;
+      resetBtn.disabled = true;
+      try {
+        const resp = await fetch(schedUpsertURL(jt.job_type), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        });
+        const parsed = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          showStatus(statusEl, parsed.error || `Reset failed (${resp.status})`, 'error');
+          saveBtn.disabled = false;
+          resetBtn.disabled = false;
+          return;
+        }
+        applySavedSchedule(jt.job_type, parsed, input, daysEl, badge,
+                           dirtyDot, saveBtn, resetBtn, statusEl);
+      } catch (_) {
+        showStatus(statusEl, 'Network error — please retry', 'error');
+        saveBtn.disabled = false;
+        resetBtn.disabled = false;
+      }
+    });
+
+    return frag;
+  }
+
+  function applySavedSchedule(jobType, parsed, input, daysEl, badge,
+                              dirtyDot, saveBtn, resetBtn, statusEl) {
+    const newDelay = typeof parsed.delay_hours === 'number'
+      ? parsed.delay_hours
+      : parseInt(input.value, 10);
+    input.value = String(newDelay);
+    daysEl.textContent = hoursToDaysLabel(newDelay);
+
+    const prev = scheduleState.cards[jobType] || {};
+    scheduleState.cards[jobType] = {
+      delay_hours: newDelay,
+      is_override: !!parsed.is_override,
+      label:       prev.label,
+      when:        prev.when,
+    };
+
+    badge.hidden = !parsed.is_override;
+    dirtyDot.hidden = true;
+    saveBtn.disabled = true;
+    resetBtn.disabled = !parsed.is_override;
+
+    const rebased = typeof parsed.rebased_jobs === 'number' ? parsed.rebased_jobs : 0;
+    let msg;
+    if (parsed.is_override) {
+      msg = rebased > 0
+        ? `Saved · ${rebased} pending job${rebased === 1 ? '' : 's'} rebased`
+        : 'Saved';
+    } else {
+      msg = rebased > 0
+        ? `Reverted · ${rebased} pending job${rebased === 1 ? '' : 's'} rebased`
+        : 'Reverted to default';
+    }
+    showStatus(statusEl, msg, 'ok');
+  }
+
   function wireTopnav() {
     const links = document.querySelectorAll('.topnav-link');
     const viewQueue = document.getElementById('view-queue');
     const viewTpl   = document.getElementById('view-templates');
+    const viewSched = document.getElementById('view-schedules');
     if (!links.length || !viewQueue || !viewTpl) return;
 
     const activate = (target) => {
@@ -1079,7 +1358,9 @@
       });
       viewQueue.hidden = target !== 'queue';
       viewTpl.hidden   = target !== 'templates';
+      if (viewSched) viewSched.hidden = target !== 'schedules';
       if (target === 'templates') loadTemplates(false);
+      if (target === 'schedules') loadSchedules(false);
     };
 
     links.forEach((a) => {
@@ -1092,6 +1373,7 @@
 
     // Allow direct-link via hash (e.g. refreshes on /earlscheib#templates).
     if (window.location.hash === '#templates') activate('templates');
+    if (window.location.hash === '#schedules') activate('schedules');
   }
 
   // ---------- Wire up --------------------------------------------------
