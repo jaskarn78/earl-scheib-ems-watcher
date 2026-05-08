@@ -1145,7 +1145,7 @@
     : `${API_BASE}/schedules/${encodeURIComponent(jt)}`;
 
   const scheduleState = {
-    cards:     {},   // job_type -> { delay_hours, is_override, label, when }
+    cards:     {},   // job_type -> { delay_hours, is_override, enabled, label, when }
     bounds:    { min: 1, max: 720 },
     loaded:    false,
   };
@@ -1186,6 +1186,7 @@
         scheduleState.cards[jt.job_type] = {
           delay_hours: jt.delay_hours,
           is_override: !!jt.is_override,
+          enabled:     jt.enabled !== false,  // default true
           label:       jt.label,
           when:        jt.when,
         };
@@ -1219,6 +1220,17 @@
     const resetBtn = frag.querySelector('.sched-reset');
     const dirtyDot = frag.querySelector('.sched-card__dirty-dot');
     const statusEl = frag.querySelector('.sched-card__status');
+
+    // UKK-07: per-schedule enable/disable toggle. Renders initial state
+    // from jt.enabled (default true if missing). Card-level dim via
+    // .is-disabled. Hours input + Save + Reset stay interactive even
+    // when disabled (locked decision 3).
+    const toggleInput = frag.querySelector('.sched-card__toggle-input');
+    const toggleLabel = frag.querySelector('.sched-card__toggle-label');
+    const enabled = jt.enabled !== false;
+    toggleInput.checked = enabled;
+    toggleLabel.textContent = enabled ? 'Enabled' : 'Disabled';
+    article.classList.toggle('is-disabled', !enabled);
 
     input.min  = String(scheduleState.bounds.min);
     input.max  = String(scheduleState.bounds.max);
@@ -1296,12 +1308,75 @@
           resetBtn.disabled = false;
           return;
         }
+        // Reset reverts both fields server-side; the toggle visual must follow.
+        const newEnabled = parsed.enabled !== false;
+        toggleInput.checked = newEnabled;
+        toggleLabel.textContent = newEnabled ? 'Enabled' : 'Disabled';
+        article.classList.toggle('is-disabled', !newEnabled);
         applySavedSchedule(jt.job_type, parsed, input, daysEl, badge,
                            dirtyDot, saveBtn, resetBtn, statusEl);
       } catch (_) {
         showStatus(statusEl, 'Network error — please retry', 'error');
         saveBtn.disabled = false;
         resetBtn.disabled = false;
+      }
+    });
+
+    // UKK-07: toggle-change handler. PUTs {enabled: bool} immediately. On
+    // success: updates label + dim class + cached state, status echoes
+    // cancelled-job count when toggling off.
+    toggleInput.addEventListener('change', async () => {
+      const next = toggleInput.checked;
+      toggleInput.disabled = true;
+      try {
+        const resp = await fetch(schedUpsertURL(jt.job_type), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: next }),
+        });
+        const parsed = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          // Revert checkbox on failure.
+          toggleInput.checked = !next;
+          toggleLabel.textContent = !next ? 'Enabled' : 'Disabled';
+          article.classList.toggle('is-disabled', next);
+          showStatus(statusEl, parsed.error || `Toggle failed (${resp.status})`, 'error');
+          return;
+        }
+        // Reflect server state.
+        const newEnabled = parsed.enabled !== false;
+        toggleInput.checked = newEnabled;
+        toggleLabel.textContent = newEnabled ? 'Enabled' : 'Disabled';
+        article.classList.toggle('is-disabled', !newEnabled);
+
+        // Update cached state.
+        const prev = scheduleState.cards[jt.job_type] || {};
+        scheduleState.cards[jt.job_type] = {
+          ...prev,
+          enabled:     newEnabled,
+          is_override: !!parsed.is_override,
+        };
+        badge.hidden = !parsed.is_override;
+
+        // Status echo per locked decision 4.
+        const cancelled = typeof parsed.cancelled_jobs === 'number'
+          ? parsed.cancelled_jobs : 0;
+        let msg;
+        if (newEnabled) {
+          msg = 'Enabled';
+        } else {
+          msg = cancelled > 0
+            ? `Disabled · ${cancelled} pending job${cancelled === 1 ? '' : 's'} cancelled`
+            : 'Disabled';
+        }
+        showStatus(statusEl, msg, 'ok');
+      } catch (_) {
+        toggleInput.checked = !next;
+        toggleLabel.textContent = !next ? 'Enabled' : 'Disabled';
+        article.classList.toggle('is-disabled', next);
+        showStatus(statusEl, 'Network error — please retry', 'error');
+      } finally {
+        toggleInput.disabled = false;
       }
     });
 
@@ -1317,9 +1392,13 @@
     daysEl.textContent = hoursToDaysLabel(newDelay);
 
     const prev = scheduleState.cards[jobType] || {};
+    const newEnabled = typeof parsed.enabled === 'boolean'
+      ? parsed.enabled
+      : (prev.enabled !== false);
     scheduleState.cards[jobType] = {
       delay_hours: newDelay,
       is_override: !!parsed.is_override,
+      enabled:     newEnabled,
       label:       prev.label,
       when:        prev.when,
     };
