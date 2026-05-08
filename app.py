@@ -91,10 +91,27 @@ TEST_PHONE_OVERRIDE = os.getenv("TEST_PHONE_OVERRIDE", "")
 TEST_PHONE_RECIPIENTS = [
     p.strip() for p in os.getenv("TEST_PHONE_RECIPIENTS", "").split(",") if p.strip()
 ]
+# Hard fail-closed allowlist enforced at the lowest level (_send_single_sms).
+# Even if TEST_PHONE_RECIPIENTS is dropped or send_sms() is bypassed, no
+# message can reach a number outside this set. To go live with real customer
+# texting, set SMS_ALLOWLIST = set() (empty disables the guard).
+SMS_ALLOWLIST = {"+15308450190", "+19254215772"}
 # OH4-04: collapse all scheduling (24h / 72h / review-24h) to now+60s when
 # this env var is "1". Useful for inside-a-shift end-to-end testing; leave
 # dedup intact so duplicate /estimate POSTs still skip.
 IMMEDIATE_SEND_FOR_TESTING = os.getenv("IMMEDIATE_SEND_FOR_TESTING", "") == "1"
+
+# SPN-03: master kill-switch for the auto-send scheduler loop. Default OFF
+# during the staging-to-production migration window so no automatic SMS
+# fires until the operator explicitly opts in. _fire_due_jobs is gated on
+# this constant inside scheduler_loop. The /queue/send-now endpoint is
+# INTENTIONALLY NOT GATED — manual operator clicks still send regardless of
+# this flag (for end-to-end smoke testing during the gate-off period).
+SCHEDULER_ENABLED = os.getenv("SCHEDULER_ENABLED", "0") == "1"
+# Throttle the "scheduler gated off" log message to once per hour so the
+# log file isn't flooded with one line every 30 seconds.
+_GATED_LOG_INTERVAL_S = 3600
+_last_gated_log_ts = 0
 
 # BMS namespace
 BMS_NS = "http://www.cieca.com/BMS"
@@ -124,23 +141,35 @@ CLOSED_STATUSES = {"I", "C", "F", "FI", "FC", "WC"}
 DEFAULT_TEMPLATES = {
     "24h":
         "Hi {first_name}, this is {shop_name}. Just following up on the estimate "
-        "for your {year} {make}. Have questions or ready to schedule? "
+        "for your {year} {short_model}. Have questions or ready to schedule? "
         "Call us at {shop_phone}.",
     "3day":
         "Hi {first_name}, {shop_name} checking in about the estimate for your "
-        "{year} {make} from a few days ago. We'd love to help get it looking "
+        "{year} {short_model} from a few days ago. We'd love to help get it looking "
         "great! Call {shop_phone}.",
     "review":
         "Hi {first_name}, thank you for choosing {shop_name}! Hope you're happy "
-        "with the repair on your {year} {make}. Would you mind leaving us a "
+        "with the repair on your {year} {short_model}. Would you mind leaving us a "
         "Google review? It means a lot: {review_url}",
 }
 
 SHOP_CONSTANTS = {
     "shop_name":  "Earl Scheib Of Concord",
     "shop_phone": "(925) 609-7780",
-    "review_url": "https://g.page/r/review",
+    "review_url": "https://g.page/r/CcTxiBCbBDlEEBM/review",
 }
+
+# SPN-01: default delays in HOURS between event and SMS, mirroring the
+# DEFAULT_TEMPLATES override pattern. When a row is missing from the
+# `schedules` DB table, get_effective_schedule() falls back to these.
+# Bounds: 1 .. 720 hours (1 hour minimum, 30 days maximum).
+DEFAULT_SCHEDULES = {
+    "24h":    24,   # hours after estimate
+    "3day":   72,
+    "review": 24,   # hours after work-completed
+}
+SCHEDULE_MIN_HOURS = 1
+SCHEDULE_MAX_HOURS = 720  # 30 days
 
 # Canonical order + metadata for the Templates admin UI. Drives the card
 # order on the Templates page, the display labels, and the schedule hints.
@@ -154,7 +183,7 @@ JOB_TYPE_META = [
 # Order matters: Templates UI lays out chips in this exact sequence.
 PLACEHOLDERS_PER_ROW = [
     "first_name", "name", "phone", "vin",
-    "year", "make", "model", "vehicle_desc",
+    "year", "make", "model", "short_model", "vehicle_desc",
     "ro_id", "doc_id", "email",
 ]
 PLACEHOLDERS_SHOP = ["shop_name", "shop_phone", "review_url"]
@@ -290,6 +319,7 @@ def init_db():
         ("year",  "ALTER TABLE jobs ADD COLUMN year TEXT DEFAULT ''"),
         ("make",  "ALTER TABLE jobs ADD COLUMN make TEXT DEFAULT ''"),
         ("model", "ALTER TABLE jobs ADD COLUMN model TEXT DEFAULT ''"),
+        ("is_test", "ALTER TABLE jobs ADD COLUMN is_test INTEGER DEFAULT 0"),
     ]
     added = 0
     for col, stmt in migrations:
@@ -332,13 +362,98 @@ def init_db():
     )
     con.commit()
 
+    # SPN-01: Marco-editable per-job-type send delays (in hours). Mirrors the
+    # templates override pattern: absence of a row = use DEFAULT_SCHEDULES,
+    # presence of a row = override. No seed INSERT — the override-vs-default
+    # distinction is what makes "Reset to default" work in the UI.
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS schedules (
+            job_type    TEXT PRIMARY KEY,
+            delay_hours INTEGER NOT NULL,
+            updated_at  INTEGER NOT NULL
+        )
+        """
+    )
+    con.commit()
+
+    _seed_test_jobs_if_missing(con)
     con.close()
     log.info("DB initialised at %s", DB_PATH)
+
+
+def _seed_test_jobs_if_missing(con) -> None:
+    """Insert test jobs if none exist yet. Called at startup and on reset."""
+    import time as _t
+    now = int(_t.time())
+    specs = [
+        # Estimate follow-ups
+        ("Carlos Mendez",  "+15308450190", "24h",    "test|est-jk", "TSTVIN01", "22", "Chevrolet", "Silverado 1500", "22 Silverado 1500"),
+        ("Sandra Reyes",   "+19254215772", "3day",   "test|est-mc", "TSTVIN02", "19", "Honda",     "Accord",         "19 Honda Accord"),
+        # Work-completed review requests
+        ("Carlos Mendez",  "+15308450190", "review", "test|rev-jk", "TSTVIN03", "20", "Toyota",    "Camry",          "20 Toyota Camry"),
+        ("Sandra Reyes",   "+19254215772", "review", "test|rev-mc", "TSTVIN04", "21", "Ford",      "F-150",          "21 Ford F-150"),
+    ]
+    for name, phone, job_type, ekey, vin, year, make, model, vdesc in specs:
+        exists = con.execute(
+            "SELECT 1 FROM jobs WHERE estimate_key=? AND job_type=? AND is_test=1 AND sent=0",
+            (ekey, job_type),
+        ).fetchone()
+        if not exists:
+            con.execute(
+                "INSERT INTO jobs (name, phone, vin, vehicle_desc, year, make, model, "
+                "  doc_id, job_type, send_at, sent, is_test, created_at, estimate_key) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,0,1,?,?)",
+                (name, phone, vin, vdesc, year, make, model,
+                 ekey, job_type, now, now, ekey),
+            )
+    con.commit()
+
+
+def _reset_test_jobs(con) -> int:
+    """Delete all test jobs and re-seed fresh. Returns number inserted."""
+    con.execute("DELETE FROM jobs WHERE is_test = 1")
+    con.commit()
+    _seed_test_jobs_if_missing(con)
+    return con.execute("SELECT COUNT(*) FROM jobs WHERE is_test=1").fetchone()[0]
 
 
 # ---------------------------------------------------------------------------
 # Template rendering (WMH-01)
 # ---------------------------------------------------------------------------
+
+def get_effective_schedule(job_type: str) -> int:
+    """Return the effective delay-hours for a job_type.
+
+    Lookup order:
+      1. schedules DB row for this job_type (override)
+      2. DEFAULT_SCHEDULES[job_type]
+      3. 24 (last-ditch fallback for unknown job_types)
+
+    Defends against a missing table (sqlite3.OperationalError) so tests that
+    bypass init_db still get a sensible default.
+    """
+    try:
+        con = get_db()
+        try:
+            cur = con.cursor()
+            cur.execute(
+                "SELECT delay_hours FROM schedules WHERE job_type = ?",
+                (job_type,),
+            )
+            row = cur.fetchone()
+        finally:
+            con.close()
+    except sqlite3.OperationalError as exc:
+        log.warning("get_effective_schedule: %s", exc)
+        return DEFAULT_SCHEDULES.get(job_type, 24)
+    if row and row["delay_hours"] is not None:
+        try:
+            return int(row["delay_hours"])
+        except (TypeError, ValueError):
+            pass
+    return DEFAULT_SCHEDULES.get(job_type, 24)
+
 
 def _get_template_override(job_type: str) -> str:
     """Return the stored override body for a job_type, or '' if none exists.
@@ -419,6 +534,16 @@ def render_template(job_type: str, row) -> str:
         ctx["first_name"] = str(ctx["name"]).split()[0]
     if not ctx["first_name"]:
         ctx["first_name"] = "there"  # preserves current fallback UX
+
+    # Derive short_model — first two words of model, strips trim/body suffix.
+    if not ctx["short_model"] and ctx["model"]:
+        words = str(ctx["model"]).split()
+        ctx["short_model"] = " ".join(words[:2])
+
+    # Expand 2-digit year → 4-digit (e.g. "22" → "2022", "96" → "1996").
+    yr = str(ctx["year"]).strip() if ctx["year"] else ""
+    if yr.isdigit() and len(yr) == 2:
+        ctx["year"] = ("20" if int(yr) <= 30 else "19") + yr
 
     try:
         return tpl.format_map(ctx)
@@ -604,6 +729,10 @@ def send_sms(to: str, body: str) -> bool:
 
 def _send_single_sms(to: str, body: str) -> bool:
     """Deliver one SMS/WhatsApp message via Twilio REST API."""
+    if SMS_ALLOWLIST and to not in SMS_ALLOWLIST:
+        log.error("SMS_ALLOWLIST blocked send to=%s (not in allowlist %s)",
+                  to, sorted(SMS_ALLOWLIST))
+        return False
     url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json"
     # ===== Twilio WhatsApp (sandbox) -> SMS (production) switch =====
     # Currently using Twilio WhatsApp sandbox for dev/test.
@@ -647,11 +776,28 @@ def _send_single_sms(to: str, body: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def scheduler_loop():
-    """Background thread: fires due jobs every 30 seconds."""
-    log.info("Scheduler started")
+    """Background thread: fires due jobs every 30 seconds.
+
+    SPN-03: Gated on SCHEDULER_ENABLED env-var (default off). When the gate
+    is closed, _fire_due_jobs is skipped and a single log line is emitted
+    at most once per hour so the operator knows the watcher is alive but
+    intentionally not firing. Manual /queue/send-now is NOT gated and
+    continues to fire on operator click.
+    """
+    log.info("Scheduler started (SCHEDULER_ENABLED=%s)", SCHEDULER_ENABLED)
+    global _last_gated_log_ts
     while True:
         try:
-            _fire_due_jobs()
+            if SCHEDULER_ENABLED:
+                _fire_due_jobs()
+            else:
+                now = int(time.time())
+                if now - _last_gated_log_ts >= _GATED_LOG_INTERVAL_S:
+                    log.info(
+                        "scheduler gated off; SCHEDULER_ENABLED=0 "
+                        "— manual send-now still works"
+                    )
+                    _last_gated_log_ts = now
         except Exception as exc:
             log.error("Scheduler error: %s", exc)
         time.sleep(30)
@@ -663,7 +809,7 @@ def _fire_due_jobs():
     try:
         cur = con.cursor()
         cur.execute(
-            "SELECT * FROM jobs WHERE sent = 0 AND send_at <= ?",
+            "SELECT * FROM jobs WHERE sent = 0 AND is_test = 0 AND send_at <= ?",
             (now,),
         )
         rows = cur.fetchall()
@@ -2264,11 +2410,11 @@ class WebhookHandler(BaseHTTPRequestHandler):
             base_cols = (
                 "SELECT id, doc_id, job_type, phone, name, send_at, sent, "
                 "       created_at, vin, vehicle_desc, ro_id, email, address, "
-                "       sent_at, estimate_key, year, make, model "
+                "       sent_at, estimate_key, year, make, model, is_test "
                 "FROM jobs"
             )
             if status == "pending":
-                sql = base_cols + " WHERE sent = 0 ORDER BY send_at ASC"
+                sql = base_cols + " WHERE sent = 0 ORDER BY created_at DESC, id DESC"
             elif status == "sent":
                 sql = (
                     base_cols
@@ -2384,6 +2530,60 @@ class WebhookHandler(BaseHTTPRequestHandler):
             })
             return
 
+        # SPN-01: GET /schedules — returns the effective delay-hours for each
+        # job_type (override-if-present, else default), is_override flag, and
+        # bounds. Dual-auth (HMAC or Basic) — operator-only. Mirrors /templates
+        # exactly so the UI can use the same card pattern.
+        if path == "/earlscheibconcord/schedules":
+            if not _validate_auth(self, b""):
+                self._send_json(401, {"error": "invalid signature"})
+                return
+
+            overrides = {}
+            con = get_db()
+            try:
+                cur = con.cursor()
+                cur.execute(
+                    "SELECT job_type, delay_hours, updated_at FROM schedules"
+                )
+                for r in cur.fetchall():
+                    overrides[r["job_type"]] = (
+                        int(r["delay_hours"]),
+                        int(r["updated_at"]),
+                    )
+            finally:
+                con.close()
+
+            job_types_out = []
+            for meta in JOB_TYPE_META:
+                jt = meta["job_type"]
+                if jt in overrides:
+                    delay_h, updated = overrides[jt]
+                    job_types_out.append({
+                        "job_type":    jt,
+                        "label":       meta["label"],
+                        "when":        meta["when"],
+                        "delay_hours": delay_h,
+                        "is_override": True,
+                        "updated_at":  updated,
+                    })
+                else:
+                    job_types_out.append({
+                        "job_type":    jt,
+                        "label":       meta["label"],
+                        "when":        meta["when"],
+                        "delay_hours": int(DEFAULT_SCHEDULES[jt]),
+                        "is_override": False,
+                        "updated_at":  0,
+                    })
+
+            self._send_json(200, {
+                "job_types": job_types_out,
+                "min_hours": SCHEDULE_MIN_HOURS,
+                "max_hours": SCHEDULE_MAX_HOURS,
+            })
+            return
+
         # Live debug snapshot — consumed by Claude (not Marco). Returns heartbeat
         # freshness, current commands.json state (READ-ONLY), log tail of the
         # most recently uploaded client log, and the count of logs received.
@@ -2436,6 +2636,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 "commands_state": commands_state,
                 "recent_log_tail": tail,
                 "received_logs_count": received_logs_count,
+                # SPN-04: surface the scheduler kill-switch state so both
+                # admin UIs can render a DEV-mode banner when gated off.
+                "scheduler_enabled": SCHEDULER_ENABLED,
             })
             return
 
@@ -2564,6 +2767,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
                     'href="/main.css"', 'href="/earlscheib/main.css"'
                 ).replace(
                     'src="/main.js"', 'src="/earlscheib/main.js"'
+                ).replace(
+                    'src="/logo.png"', 'src="/earlscheib/logo.png"'
                 )
                 injection = (
                     '<script>window.API_BASE_PATH = "/earlscheibconcord";'
@@ -2583,6 +2788,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
             elif path == "/earlscheib/main.js":
                 asset_path = _os_ui.path.join(ui_dir, "main.js")
                 content_type = "application/javascript; charset=utf-8"
+            elif path == "/earlscheib/logo.png":
+                asset_path = _os_ui.path.join(ui_dir, "logo.png")
+                content_type = "image/png"
             else:
                 self.send_response(404); self.end_headers(); return
 
@@ -2697,6 +2905,11 @@ class WebhookHandler(BaseHTTPRequestHandler):
         # sent=1 on Twilio failure so the scheduler can retry later. Mirrors
         # the DELETE /queue HMAC pattern exactly — do not introduce a new
         # auth scheme here.
+        #
+        # SPN-03: This endpoint is INTENTIONALLY NOT GATED on SCHEDULER_ENABLED.
+        # When the auto-send loop is paused (gate closed) Marco / the developer
+        # can still fire one-off SMS via the queue UI for smoke testing.
+        # Do NOT add a SCHEDULER_ENABLED check here — gate the loop only.
         if self.path.split("?")[0] == "/earlscheibconcord/queue/send-now":
             # RJL-02: dual auth — operator can click "Send now" from the
             # browser UI at /earlscheib. Body-signed HMAC still works for the
@@ -2767,6 +2980,18 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 self._send_json(500, {"error": "twilio_send_failed"})
             return
 
+        if self.path.split("?")[0] == "/earlscheibconcord/reset-test-jobs":
+            if not _validate_auth(self, raw):
+                self._send_json(401, {"error": "invalid signature"})
+                return
+            con = get_db()
+            try:
+                n = _reset_test_jobs(con)
+            finally:
+                con.close()
+            self._send_json(200, {"reset": True, "count": n})
+            return
+
         if self.path.split("?")[0] == "/earlscheibconcord/heartbeat":
             import xml.etree.ElementTree as _ET
             try:
@@ -2819,17 +3044,25 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
         if doc_status in ESTIMATE_STATUSES:
             log.info("Estimate status %s for doc_id=%s", doc_status, doc_id)
-            schedule_job(doc_id, "24h", phone, name, next_send_window(now + 24*3600),
+            # SPN-01: pull the effective per-job-type delay from the schedules
+            # table (override) or DEFAULT_SCHEDULES (fallback). Hours → seconds.
+            h_24h  = get_effective_schedule("24h")
+            h_3day = get_effective_schedule("3day")
+            schedule_job(doc_id, "24h", phone, name,
+                         next_send_window(now + h_24h * 3600),
                          vin=vin, vehicle_desc=vehicle_desc, ro_id=ro_id,
                          email=email, address=address,
                          year=year, make=make, model=model)
-            schedule_job(doc_id, "3day", phone, name, next_send_window(now + 72*3600),
+            schedule_job(doc_id, "3day", phone, name,
+                         next_send_window(now + h_3day * 3600),
                          vin=vin, vehicle_desc=vehicle_desc, ro_id=ro_id,
                          email=email, address=address,
                          year=year, make=make, model=model)
         elif doc_status in CLOSED_STATUSES:
             log.info("Closed status %s for doc_id=%s", doc_status, doc_id)
-            schedule_job(doc_id, "review", phone, name, next_send_window(now + 24*3600),
+            h_review = get_effective_schedule("review")
+            schedule_job(doc_id, "review", phone, name,
+                         next_send_window(now + h_review * 3600),
                          vin=vin, vehicle_desc=vehicle_desc, ro_id=ro_id,
                          email=email, address=address,
                          year=year, make=make, model=model)
@@ -2879,19 +3112,33 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
     # ------------------------------------------------------------------
     def do_PUT(self):
-        """WMH-02: Marco-editable message templates.
+        """WMH-02 + SPN-01: Marco-editable message templates and schedules.
 
         Routes:
           PUT /earlscheibconcord/templates/{job_type}
             Body: {"body": "..."}  (<=2000 chars)
             Empty/whitespace body → DELETE row (revert to default).
             Non-empty body        → UPSERT (validates renderability first).
-            job_type must be one of the keys in JOB_TYPE_META.
+
+          PUT /earlscheibconcord/schedules/{job_type}
+            Body: {"delay_hours": N}  (1 <= N <= 720)
+            Empty body / null / missing field → DELETE row (revert).
+            Valid integer → UPSERT + REBASE pending jobs.
+
+          job_type must be one of the keys in JOB_TYPE_META.
 
         All other paths return 404. Dual-auth (HMAC over the raw body, or
         browser Basic auth).
         """
         path = urlparse(self.path).path.rstrip("/")
+
+        # SPN-01: schedules branch — handle BEFORE the templates branch since
+        # both prefixes are disjoint and ordering doesn't matter for matching.
+        sched_prefix = "/earlscheibconcord/schedules/"
+        if path.startswith(sched_prefix):
+            self._do_put_schedule(path, sched_prefix)
+            return
+
         prefix = "/earlscheibconcord/templates/"
 
         if not path.startswith(prefix):
@@ -2993,6 +3240,132 @@ class WebhookHandler(BaseHTTPRequestHandler):
             "is_override": True,
             "body":        body_val,
             "updated_at":  now,
+        })
+
+    # ------------------------------------------------------------------
+    def _do_put_schedule(self, path: str, prefix: str) -> None:
+        """SPN-01 + SPN-02: handle PUT /earlscheibconcord/schedules/{job_type}.
+
+        - Auth: dual (HMAC over raw body, or Basic).
+        - job_type must be one of JOB_TYPE_META.
+        - Body shape: {"delay_hours": N} where 1 <= N <= 720 (integer only).
+        - Empty body, missing/null delay_hours → DELETE row (revert to default).
+        - On UPSERT: rebase send_at for every pending (sent=0) job of that
+          job_type to next_send_window(created_at + delay_hours*3600). Sent
+          rows and other job_types are untouched.
+        - On DELETE: same rebase but using DEFAULT_SCHEDULES[job_type].
+        """
+        content_length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(content_length) if content_length > 0 else b""
+
+        if not _validate_auth(self, raw):
+            self._send_json(401, {"error": "invalid signature"})
+            return
+
+        job_type = path[len(prefix):]
+        valid_types = {m["job_type"] for m in JOB_TYPE_META}
+        if job_type not in valid_types:
+            self._send_json(400, {"error": "unknown job_type"})
+            return
+
+        # Parse body. Empty body / empty JSON / null delay_hours / missing
+        # field all map to "revert to default".
+        revert = False
+        delay_hours = None
+        if not raw:
+            revert = True
+        else:
+            try:
+                parsed = json.loads(raw.decode("utf-8"))
+            except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
+                self._send_json(400, {"error": "invalid JSON"})
+                return
+            if not isinstance(parsed, dict):
+                self._send_json(400, {"error": "body must be a JSON object"})
+                return
+            if "delay_hours" not in parsed or parsed["delay_hours"] is None:
+                revert = True
+            else:
+                val = parsed["delay_hours"]
+                # Reject booleans (bool is a subclass of int in Python — must
+                # check first), floats, strings, and other non-int types.
+                if isinstance(val, bool) or not isinstance(val, int):
+                    self._send_json(400, {
+                        "error": "delay_hours must be an integer",
+                    })
+                    return
+                if val < SCHEDULE_MIN_HOURS or val > SCHEDULE_MAX_HOURS:
+                    self._send_json(400, {
+                        "error": (
+                            f"delay_hours must be between {SCHEDULE_MIN_HOURS} "
+                            f"and {SCHEDULE_MAX_HOURS}"
+                        ),
+                    })
+                    return
+                delay_hours = val
+
+        now_ts = int(time.time())
+        effective_delay: int
+
+        con = get_db()
+        try:
+            cur = con.cursor()
+            if revert:
+                cur.execute(
+                    "DELETE FROM schedules WHERE job_type = ?", (job_type,)
+                )
+                con.commit()
+                effective_delay = int(DEFAULT_SCHEDULES[job_type])
+                response_updated_at = 0
+                response_is_override = False
+                log.info("schedules: %s reverted to default (%dh)",
+                         job_type, effective_delay)
+            else:
+                assert delay_hours is not None
+                cur.execute(
+                    "INSERT OR REPLACE INTO schedules(job_type, delay_hours, updated_at) "
+                    "VALUES (?, ?, ?)",
+                    (job_type, delay_hours, now_ts),
+                )
+                con.commit()
+                effective_delay = int(delay_hours)
+                response_updated_at = now_ts
+                response_is_override = True
+                log.info("schedules: %s override saved (%dh)",
+                         job_type, effective_delay)
+
+            # SPN-02: rebase pending jobs of this job_type.
+            # next_send_window encodes business-hours/weekend rules in Python,
+            # so we cannot express the rebase in pure SQL — fetch, compute,
+            # then executemany the updates.
+            cur.execute(
+                "SELECT id, created_at FROM jobs "
+                "WHERE job_type = ? AND sent = 0",
+                (job_type,),
+            )
+            pending = cur.fetchall()
+            updates = []
+            for r in pending:
+                new_send_at = next_send_window(
+                    int(r["created_at"]) + effective_delay * 3600
+                )
+                updates.append((int(new_send_at), int(r["id"])))
+            if updates:
+                cur.executemany(
+                    "UPDATE jobs SET send_at = ? WHERE id = ?",
+                    updates,
+                )
+                con.commit()
+            rebased = len(updates)
+        finally:
+            con.close()
+
+        log.info("schedules: %s rebased %d pending job(s)", job_type, rebased)
+        self._send_json(200, {
+            "is_override":  response_is_override,
+            "delay_hours":  effective_delay,
+            "updated_at":   response_updated_at,
+            "rebased_jobs": rebased,
         })
 
 
