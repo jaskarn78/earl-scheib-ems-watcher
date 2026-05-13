@@ -2264,6 +2264,13 @@ class WebhookHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
 
+        # Root alias: when the app is served at the apex (e.g. on the Pi at
+        # http://<pi>:8200/), `/` should land on the same page as
+        # `/earlscheibconcord`. Subroutes keep the prefix for backwards-compat
+        # with the Windows watcher's HMAC-signed paths.
+        if path == "":
+            path = "/earlscheibconcord"
+
         if path == "/earlscheibconcord/download" or path == "/earlscheibconcord/download.exe":
             import os
             app_dir = os.path.dirname(os.path.abspath(__file__))
