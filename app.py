@@ -2279,7 +2279,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
         # with the Windows watcher's HMAC-signed paths.
         if path == "":
             self.send_response(302)
-            self.send_header("Location", "/earlscheibconcord/queue")
+            self.send_header("Location", "/earlscheib")
             self.end_headers()
             return
 
