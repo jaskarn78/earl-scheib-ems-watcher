@@ -2248,6 +2248,15 @@ class WebhookHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        # When 401, challenge the client to send basic-auth credentials.
+        # Without WWW-Authenticate, browsers silently display the JSON body
+        # instead of prompting the user to log in. HMAC clients ignore this
+        # header (they don't have credentials to fall back to).
+        if status == 401 and ADMIN_UI_ENABLED:
+            self.send_header(
+                "WWW-Authenticate",
+                'Basic realm="Earl Scheib Admin", charset="UTF-8"',
+            )
         self.end_headers()
         self.wfile.write(body)
 
