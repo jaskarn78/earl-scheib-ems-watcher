@@ -26,7 +26,7 @@ ifneq ($(strip $(HMAC_SECRET)),)
 LDFLAGS += -X main.secretKey=$(HMAC_SECRET)
 endif
 
-.PHONY: build-windows build-linux test clean generate-resources install-tools dev-sign installer installer-syntax portable sync-ui release-prep
+.PHONY: build-windows build-linux build-linux-arm64 test clean generate-resources install-tools dev-sign installer installer-syntax portable sync-ui release-prep
 
 ## install-tools: install required build tools (go-winres)
 install-tools:
@@ -49,6 +49,16 @@ build-windows: generate-resources
 build-linux:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
 	  go build -ldflags "$(LDFLAGS)" -o dist/earlscheib ./cmd/earlscheib
+
+## build-linux-arm64: cross-compile linux/arm64 binary for the Raspberry Pi
+## that hosts the production webhook + admin UI. Same code path as the
+## Windows watcher's --scan subcommand; runs against /opt/esw/ccc-exports
+## via a systemd timer on the Pi. CGO disabled — modernc.org/sqlite and
+## Valentin-Kaiser/go-dbase are both pure-Go, no mingw / cross-toolchain
+## needed.
+build-linux-arm64:
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
+	  go build -ldflags "$(LDFLAGS)" -o dist/earlscheib-linux-arm64 ./cmd/earlscheib
 
 ## test: run all unit tests with race detector
 ## Note: -race requires CGO on Linux; CGO_ENABLED=0 is used only for cross-compile builds.

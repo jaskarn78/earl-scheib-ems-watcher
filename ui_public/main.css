@@ -357,6 +357,42 @@ body {
   border-color: var(--amber);
 }
 
+/* Sort selector — visually paired with the filter pills.
+   Persists in localStorage["eswSort"]; default "newest". */
+.sort-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.sort-label {
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+.sort-select {
+  background-color: var(--surface);
+  border: 1px solid var(--hairline);
+  color: var(--ink);
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 7px 28px 7px 12px;
+  border-radius: var(--r-chip);
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none' stroke='%23687078' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+.sort-select:hover { border-color: var(--navy); color: var(--navy); }
+.sort-select:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+
 .search-wrap {
   position: relative;
   display: inline-flex;
@@ -559,18 +595,33 @@ body {
 }
 .timeline__sent-stamp[hidden] { display: none; }
 
-/* Sent/cancelling visual — fade the body but keep dot + meta legible. */
-.timeline__entry[data-state="sent"] .sms-preview,
-.timeline__entry[data-state="sent"] .job-actions {
+/* Sent/cancelling visual — fade the SMS bubble but keep dot + meta legible.
+   GLV-01: `.job-actions` is NOT faded here so the Resend button stays
+   full-opacity on sent rows. */
+.timeline__entry[data-state="sent"] .sms-preview {
   opacity: 0.55;
 }
-.timeline__entry[data-state="sent"] .job-actions { display: none; }
 .timeline__entry[data-state="cancelling"] .btn-primary { visibility: hidden; }
 
-/* Hide the Send-now + Cancel actions for non-pending rows. */
-.timeline__entry[data-state="sent"]      .job-actions,
-.timeline__entry[data-state="cancelled"] .job-actions {
+/* GLV-01: on sent/cancelled rows, hide only Send-now + Cancel buttons —
+   keep `.job-actions` itself visible so the Resend button can render
+   without a wrapping `display: none` swallowing it. */
+.timeline__entry[data-state="sent"]      .send-now-btn,
+.timeline__entry[data-state="sent"]      .cancel-btn,
+.timeline__entry[data-state="cancelled"] .send-now-btn,
+.timeline__entry[data-state="cancelled"] .cancel-btn {
   display: none;
+}
+
+/* GLV-02: cancelled rows are read-only — no Send-now / Cancel / Resend.
+   Fade the body and tint the "Cancelled" stamp amber so the operator can
+   tell them apart from sent rows at a glance. */
+.timeline__entry[data-state="cancelled"] .sms-preview {
+  opacity: 0.45;
+}
+.timeline__entry[data-state="cancelled"] .timeline__sent-stamp {
+  background-color: rgba(200, 149, 63, 0.16);
+  color: #7a5a20;
 }
 
 /* ============== Job card ============== */
@@ -766,6 +817,14 @@ body {
   letter-spacing: 0.005em;
   border-radius: var(--r-button);
   padding: 10px 18px;
+}
+/* GLV-01: .btn's class-level display:inline-flex outranks the UA
+   stylesheet's [hidden]{display:none} via source order, so plain `hidden`
+   attribute fails to hide buttons. This selector wins via higher
+   specificity (class + attribute = 0,2,0) and restores intuitive
+   `btn.hidden = true` behaviour for Send-now/Cancel/Resend toggling. */
+.btn[hidden] {
+  display: none;
   cursor: pointer;
   transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
 }
@@ -797,6 +856,23 @@ body {
   color: var(--ink);
   border-color: var(--ink-soft);
   background-color: var(--surface-alt);
+}
+
+/* GLV-01: Resend button — secondary visual weight (between primary +
+   ghost). Sits on sent timeline rows in place of where Send-now lives. */
+.btn-secondary {
+  background-color: var(--surface);
+  color: var(--navy);
+  border: 1px solid var(--navy);
+}
+.btn-secondary:hover {
+  background-color: var(--navy);
+  color: #fff;
+  border-color: var(--navy);
+}
+.btn-secondary:disabled {
+  opacity: 0.55;
+  cursor: wait;
 }
 
 .job-error {
@@ -1505,4 +1581,137 @@ body {
   .schedules { padding: 24px 18px 60px; }
   .sched-card { padding: 20px 18px; }
   .schedules-title { font-size: 26px; }
+}
+
+/* ============================================================
+   GLV-01: Send log view
+   ============================================================ */
+.logs {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 28px 32px 80px;
+}
+.logs-header { margin-bottom: 16px; }
+.logs-title {
+  font-family: "Fraunces", "Cormorant Garamond", serif;
+  font-weight: 500;
+  font-size: 30px;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  margin: 0 0 4px 0;
+}
+.logs-sub {
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 14px;
+  color: var(--ink-soft);
+  margin: 0;
+}
+
+.logs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 16px;
+}
+.log-row {
+  display: grid;
+  grid-template-columns: 130px 80px 90px 140px 1fr;
+  align-items: start;
+  gap: 14px;
+  padding: 14px 18px;
+  background-color: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-card, 10px);
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 13.5px;
+  color: var(--ink);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.log-row:hover { border-color: var(--ink-soft); box-shadow: var(--shadow-sm); }
+.log-row__ts {
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+  font-size: 12.5px;
+}
+.log-row__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  border-radius: var(--r-chip);
+  width: fit-content;
+  height: fit-content;
+}
+.log-row__status[data-status="sent"] {
+  background-color: rgba(86, 138, 96, 0.12);
+  color: #2f6c3d;
+}
+.log-row__status[data-status="failed"] {
+  background-color: rgba(192, 73, 67, 0.12);
+  color: var(--oxblood);
+}
+.log-row__kind {
+  color: var(--ink-soft);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.log-row__phone {
+  font-family: "JetBrains Mono", "SF Mono", monospace;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+.log-row__body {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--ink);
+  line-height: 1.45;
+}
+.log-row__body small {
+  display: block;
+  margin-top: 4px;
+  color: var(--terra, #c04943);
+  font-size: 12px;
+}
+.log-row__job-type {
+  font-size: 11px;
+  color: var(--ink-soft);
+  margin-top: 2px;
+}
+.log-row__test-tag {
+  display: inline-block;
+  background-color: rgba(200, 149, 63, 0.16);
+  color: #7a5a20;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: var(--r-chip);
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.logs-empty {
+  text-align: center;
+  color: var(--ink-soft);
+  padding: 60px 0;
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 14px;
+}
+
+@media (max-width: 900px) {
+  .log-row {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .log-row__body { grid-column: 1 / -1; }
+}
+@media (max-width: 720px) {
+  .logs { padding: 24px 18px 60px; }
+  .logs-title { font-size: 26px; }
 }

@@ -34,6 +34,7 @@
       <a class="topnav-link is-active" data-view="queue"     href="#queue"     role="tab" aria-selected="true">Queue</a>
       <a class="topnav-link"           data-view="templates" href="#templates" role="tab" aria-selected="false">Templates</a>
       <a class="topnav-link"           data-view="schedules" href="#schedules" role="tab" aria-selected="false">Schedules</a>
+      <a class="topnav-link"           data-view="logs"      href="#logs"      role="tab" aria-selected="false">Logs</a>
     </nav>
 
     <div class="stats" aria-label="Queue statistics">
@@ -69,12 +70,23 @@
         <button class="filter" type="button" data-filter="estimates" role="tab" aria-selected="true">Estimates</button>
         <button class="filter" type="button" data-filter="completed" role="tab" aria-selected="false">Work Completed</button>
         <button class="filter" type="button" data-filter="sent" role="tab" aria-selected="false">Sent</button>
+        <button class="filter" type="button" data-filter="cancelled" role="tab" aria-selected="false">Cancelled</button>
         <button class="filter" type="button" data-filter="all" role="tab" aria-selected="false">All</button>
         <span class="filter-sep" aria-hidden="true"></span>
         <button class="filter filter--test" type="button" data-filter="test-estimates" role="tab" aria-selected="false">Test Est.</button>
         <button class="filter filter--test" type="button" data-filter="test-completed" role="tab" aria-selected="false">Test Work Compl.</button>
         <button class="test-reset-btn" type="button" title="Reset test jobs (re-seed fresh)" aria-label="Reset test jobs">↺</button>
       </nav>
+      <!-- Sort selector: persists in localStorage["eswSort"]; affects estimate-card order. -->
+      <div class="sort-wrap">
+        <label for="sort-by" class="sort-label">Sort</label>
+        <select id="sort-by" class="sort-select" aria-label="Sort jobs">
+          <option value="newest">Newest activity</option>
+          <option value="oldest">Oldest activity</option>
+          <option value="next-send">Next send time</option>
+          <option value="customer">Customer A→Z</option>
+        </select>
+      </div>
       <div class="search-wrap">
         <svg class="search-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <circle cx="7" cy="7" r="5"></circle>
@@ -125,6 +137,29 @@
       </header>
       <div id="schedules-list" class="schedules-list" aria-live="polite">
         <!-- One .sched-card per job_type, injected by main.js. -->
+      </div>
+    </section>
+  </div>
+
+  <!-- GLV-01: SMS send log view. Every Twilio attempt (send-now, resend, or
+       eventually the scheduler) is recorded in the sms_log table on the Pi
+       and surfaced here. Auto-refreshes on the same 15s cadence as the queue
+       view. Filter pills mirror the queue's pill aesthetic. -->
+  <div id="view-logs" data-view="logs" hidden>
+    <section class="logs" aria-label="SMS send log">
+      <header class="logs-header">
+        <h1 class="logs-title">Send log</h1>
+        <p class="logs-sub">Every SMS Twilio accepted or rejected. Most recent first. Body is truncated to ~320 characters.</p>
+      </header>
+      <section class="controls" aria-label="Logs filters">
+        <nav class="filters" role="tablist" aria-label="Filter sends">
+          <button class="filter logs-filter" type="button" data-logs-filter="all"    role="tab" aria-selected="true">All</button>
+          <button class="filter logs-filter" type="button" data-logs-filter="sent"   role="tab" aria-selected="false">Sent</button>
+          <button class="filter logs-filter" type="button" data-logs-filter="failed" role="tab" aria-selected="false">Failed</button>
+        </nav>
+      </section>
+      <div id="logs-list" class="logs-list" aria-live="polite">
+        <!-- One .log-row per sms_log entry, injected by main.js. -->
       </div>
     </section>
   </div>
@@ -180,6 +215,26 @@
             </svg>
           </button>
           <button class="btn btn-ghost cancel-btn" type="button">Cancel</button>
+          <!-- GLV-01: Resend lives in the same actions footer as Send-now but
+               is shown ONLY when the job is already sent. main.js toggles the
+               visibility based on each row's `sent` state. -->
+          <button class="btn btn-secondary resend-btn" type="button" hidden>
+            <span>Resend</span>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 8a5 5 0 1 1 1.5 3.5"></path>
+              <path d="M3 3v4h4"></path>
+            </svg>
+          </button>
+          <!-- GLV-04: Uncancel — only shown on rows with cancelled=1. Flips
+               cancelled back to 0 so the row reappears under its native
+               pending filter (Estimates or Work Completed). -->
+          <button class="btn btn-secondary uncancel-btn" type="button" hidden>
+            <span>Uncancel</span>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 8a5 5 0 1 1 1.5 3.5"></path>
+              <path d="M3 3v4h4"></path>
+            </svg>
+          </button>
           <span class="job-error" hidden></span>
         </footer>
       </div>

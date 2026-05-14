@@ -162,17 +162,28 @@
   let lastJobs      = [];
   let searchTimerId = null;
 
+  // Sort selector state. Persisted in localStorage so reload keeps the user's
+  // choice. Default "newest" matches the server-side ORDER BY DESC already in
+  // place. Valid values: "newest" | "oldest" | "next-send" | "customer".
+  let currentSort = (function () {
+    try {
+      const stored = localStorage.getItem('eswSort');
+      if (stored && /^(newest|oldest|next-send|customer)$/.test(stored)) return stored;
+    } catch (_) { /* localStorage unavailable — fall through to default */ }
+    return 'newest';
+  })();
+
   // Anti-jitter: skip a full DOM rebuild when neither the data nor the
   // filter/search has changed since the last render. Without this the 15s
   // poll wipes innerHTML and re-runs the staggered fadeUp animation, which
   // reads as visible flicker even when nothing changed.
   let lastRenderKey = '';
 
-  function jobsRenderKey(jobs, filter, search) {
+  function jobsRenderKey(jobs, filter, search, sort) {
     const parts = (jobs || []).map((j) =>
       `${j.id}:${j.sent || 0}:${j.send_at || 0}:${j.sent_at || 0}`,
     );
-    return `${filter}|${search}|${parts.join(',')}`;
+    return `${filter}|${search}|${sort}|${parts.join(',')}`;
   }
 
   // ---------- Helpers --------------------------------------------------
@@ -218,22 +229,37 @@
   // ---------- Filter + search logic (QAJ-02) --------------------------
 
   // Returns true if a single job matches the active filter chip.
+  //
+  // GLV-01: every named "what's pending" pill (estimates, completed, and the
+  // test-* variants) excludes already-sent rows. Only the dedicated `sent`
+  // pill (and `all`) surface sent rows — that is where the Resend button is
+  // intended to live.
+  //
+  // GLV-02: cancelled rows (cancelled=1) appear ONLY under the dedicated
+  // `cancelled` pill and under `all`. Never under pending, sent, estimates,
+  // completed, or test-* views. They never get a Resend button.
   function jobMatchesFilter(job, filter) {
     const isTest = job.is_test === 1;
+    const isCancelled = job.cancelled === 1;
+    const isPending = !isCancelled
+      && (job.sent === 0 || job.sent === undefined);
     switch (filter) {
       case 'all':
         return !isTest;
       case 'estimates':
         return !isTest && (job.job_type === '24h' || job.job_type === '3day')
-          && (job.sent === 0 || job.sent === undefined);
+          && isPending;
       case 'completed':
-        return !isTest && job.job_type === 'review';
+        return !isTest && job.job_type === 'review' && isPending;
       case 'sent':
-        return !isTest && job.sent === 1;
+        return !isTest && job.sent === 1 && !isCancelled;
+      case 'cancelled':
+        return !isTest && isCancelled;
       case 'test-estimates':
-        return isTest && (job.job_type === '24h' || job.job_type === '3day');
+        return isTest && (job.job_type === '24h' || job.job_type === '3day')
+          && isPending;
       case 'test-completed':
-        return isTest && job.job_type === 'review';
+        return isTest && job.job_type === 'review' && isPending;
       default:
         return true;
     }
@@ -281,14 +307,72 @@
     return Array.from(map.values());
   }
 
+  // Sort estimate-card groups according to the user's "Sort" dropdown.
+  // - newest    : group's most recent activity timestamp, DESC (default)
+  // - oldest    : same, ASC
+  // - next-send : earliest pending send_at first; groups with no pending sends
+  //               fall to the bottom (treated as +Infinity for the comparator)
+  // - customer  : alphabetical by name, A→Z
+  // Unknown sort key falls back to "newest" to mirror the server's ORDER BY.
+  function sortGroups(groups, sortKey) {
+    const newestTs = (g) => g.jobs.reduce(
+      (mx, j) => Math.max(mx, j.sent_at || 0, j.send_at || 0, j.created_at || 0),
+      0,
+    );
+    const nextPendingTs = (g) => {
+      let m = Infinity;
+      g.jobs.forEach((j) => {
+        if (!j.sent && j.send_at && j.send_at < m) m = j.send_at;
+      });
+      return m;
+    };
+    const cmps = {
+      'newest':    (a, b) => newestTs(b) - newestTs(a),
+      'oldest':    (a, b) => newestTs(a) - newestTs(b),
+      'next-send': (a, b) => nextPendingTs(a) - nextPendingTs(b),
+      'customer':  (a, b) => (a.name || '').toLowerCase()
+                              .localeCompare((b.name || '').toLowerCase()),
+    };
+    return groups.slice().sort(cmps[sortKey] || cmps['newest']);
+  }
+
   // ---------- Rendering ------------------------------------------------
+
+  // GLV-03 (260513): "Sent today" was session-local — only incremented on
+  // UI clicks in the current tab, never recomputed from server data. So a
+  // page refresh, a fresh tab, or a Cloudflare Access re-auth wiped the
+  // count back to zero, making real sends invisible to the operator.
+  // Compute it from the queue's `sent_at` field using a Pacific-day
+  // boundary (matches the timezone the scheduler + send-now logic use).
+  // `pending` and `cancelled` are excluded — only rows that genuinely
+  // hit Twilio today are counted.
+  function recomputeSentToday(jobs) {
+    if (!jobs || !jobs.length) return 0;
+    const todayPT = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Los_Angeles',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date());
+    let n = 0;
+    for (const j of jobs) {
+      if (j.sent !== 1) continue;
+      if (j.cancelled === 1) continue;
+      if (!j.sent_at) continue;
+      const sentPT = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Los_Angeles',
+        year: 'numeric', month: '2-digit', day: '2-digit',
+      }).format(new Date(j.sent_at * 1000));
+      if (sentPT === todayPT) n += 1;
+    }
+    return n;
+  }
 
   function renderQueue(jobs) {
     const needle = currentSearch.trim().toLowerCase();
-    const renderKey = jobsRenderKey(jobs, currentFilter, needle);
+    const renderKey = jobsRenderKey(jobs, currentFilter, needle, currentSort);
     if (renderKey === lastRenderKey) {
       // Data + view unchanged — skip the rebuild so animations don't replay.
-      counters.pending = jobs ? jobs.filter((j) => !j.sent).length : 0;
+      counters.pending   = jobs ? jobs.filter((j) => !j.sent).length : 0;
+      counters.sentToday = recomputeSentToday(jobs);
       updateStats();
       return;
     }
@@ -297,10 +381,11 @@
     queueEl.innerHTML = '';
     queueEl.setAttribute('aria-busy', 'false');
 
-    counters.pending = jobs ? jobs.filter((j) => !j.sent).length : 0;
+    counters.pending   = jobs ? jobs.filter((j) => !j.sent).length : 0;
+    counters.sentToday = recomputeSentToday(jobs);
     updateStats();
 
-    const groups = groupByEstimate(jobs || []);
+    const groups = sortGroups(groupByEstimate(jobs || []), currentSort);
 
     // Build visibility decisions up-front so we can detect "no results".
     let visibleGroups = 0;
@@ -389,7 +474,11 @@
     const frag = entryTpl.content.cloneNode(true);
     const li   = frag.querySelector('.timeline__entry');
     li.dataset.jobId = String(job.id);
-    li.dataset.state = job.sent === 1 ? 'sent' : 'pending';
+    // GLV-02: cancelled rows get their own data-state so CSS can render
+    // them distinctly (no Send-now, no Cancel, no Resend — read-only).
+    li.dataset.state = job.cancelled === 1
+      ? 'cancelled'
+      : (job.sent === 1 ? 'sent' : 'pending');
 
     const chip = frag.querySelector('.job-chip');
     chip.textContent = JOB_TYPE_LABELS[job.job_type] || job.job_type;
@@ -399,7 +488,14 @@
     frag.querySelector('.job-send-absolute').textContent = formatAbsolute(job.send_at);
 
     // Show a "Sent at …" stamp instead of scheduled-send once delivered.
-    if (job.sent === 1) {
+    // GLV-02: cancelled rows show "Cancelled" instead of "Sent" so the
+    // operator can distinguish removed-from-pipeline rows from real sends.
+    if (job.cancelled === 1) {
+      const stampEl = frag.querySelector('.timeline__sent-stamp');
+      stampEl.hidden = false;
+      stampEl.textContent = 'Cancelled';
+      frag.querySelector('.job-send').hidden = true;
+    } else if (job.sent === 1) {
       const stampEl = frag.querySelector('.timeline__sent-stamp');
       stampEl.hidden = false;
       const whenTs = job.sent_at && job.sent_at > 0 ? job.sent_at : job.send_at;
@@ -409,11 +505,35 @@
 
     frag.querySelector('.sms-bubble').textContent = previewSMS(job.job_type, job);
 
-    const sendBtn   = frag.querySelector('.send-now-btn');
-    const cancelBtn = frag.querySelector('.cancel-btn');
-    const errEl     = frag.querySelector('.job-error');
-    sendBtn.addEventListener('click',   () => handleSendNow(job, li, sendBtn, errEl));
-    cancelBtn.addEventListener('click', () => handleCancel(job, li, cancelBtn, errEl));
+    const sendBtn     = frag.querySelector('.send-now-btn');
+    const cancelBtn   = frag.querySelector('.cancel-btn');
+    const resendBtn   = frag.querySelector('.resend-btn');
+    const uncancelBtn = frag.querySelector('.uncancel-btn');
+    const errEl       = frag.querySelector('.job-error');
+
+    // GLV-01 + GLV-02 + GLV-04: pick the right action button per state.
+    //   pending   → Send-now + Cancel
+    //   sent      → Resend
+    //   cancelled → Uncancel
+    if (job.cancelled === 1) {
+      if (sendBtn)     sendBtn.hidden     = true;
+      if (cancelBtn)   cancelBtn.hidden   = true;
+      if (resendBtn)   resendBtn.hidden   = true;
+      if (uncancelBtn) uncancelBtn.hidden = false;
+    } else if (job.sent === 1) {
+      if (sendBtn)     sendBtn.hidden     = true;
+      if (cancelBtn)   cancelBtn.hidden   = true;
+      if (resendBtn)   resendBtn.hidden   = false;
+      if (uncancelBtn) uncancelBtn.hidden = true;
+    } else {
+      if (resendBtn)   resendBtn.hidden   = true;
+      if (uncancelBtn) uncancelBtn.hidden = true;
+    }
+
+    if (sendBtn)     sendBtn.addEventListener('click',     () => handleSendNow(job, li, sendBtn, errEl));
+    if (cancelBtn)   cancelBtn.addEventListener('click',   () => handleCancel(job, li, cancelBtn, errEl));
+    if (resendBtn)   resendBtn.addEventListener('click',   () => handleResend(job, li, resendBtn, errEl));
+    if (uncancelBtn) uncancelBtn.addEventListener('click', () => handleUncancel(job, li, uncancelBtn, errEl));
 
     return frag;
   }
@@ -475,6 +595,92 @@
     } catch (e) {
       counters.failed++;
       updateStats();
+      showEntryError(errEl, 'Network error — please retry');
+      btnEl.disabled = false;
+    }
+  }
+
+  // ---------- Resend flow (GLV-01) ------------------------------------
+
+  // Resend an already-sent job. Does NOT flip the row's sent flag — the row
+  // stays "sent" and the audit trail of repeated sends lives in sms_log.
+  async function handleResend(job, entryEl, btnEl, errEl) {
+    const type = JOB_TYPE_LABELS[job.job_type] || job.job_type;
+    const confirmMsg = job.is_test === 1
+      ? `Resend "${type}" SMS to test recipients now? (original row stays marked sent)`
+      : `Resend "${type}" SMS to ${job.name || 'this customer'} now? (original row stays marked sent)`;
+    if (!window.confirm(confirmMsg)) return;
+
+    btnEl.disabled = true;
+    errEl.hidden = true;
+    errEl.textContent = '';
+    const origLabel = btnEl.querySelector('span') ? btnEl.querySelector('span').textContent : '';
+    if (btnEl.querySelector('span')) btnEl.querySelector('span').textContent = 'Resending…';
+
+    try {
+      const resendURL = IS_LOCAL_ADMIN
+        ? '/api/resend'
+        : `${API_BASE}/queue/resend`;
+      const resp = await fetch(resendURL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: job.id }),
+      });
+      if (resp.status === 200) {
+        if (btnEl.querySelector('span')) btnEl.querySelector('span').textContent = 'Resent ✓';
+        setTimeout(() => {
+          btnEl.disabled = false;
+          if (btnEl.querySelector('span')) btnEl.querySelector('span').textContent = origLabel || 'Resend';
+        }, 2200);
+        return;
+      }
+      const parsed = await resp.json().catch(() => ({}));
+      const msg = parsed.error ? `Resend failed: ${parsed.error}` : `Resend failed (${resp.status})`;
+      showEntryError(errEl, msg);
+      btnEl.disabled = false;
+      if (btnEl.querySelector('span')) btnEl.querySelector('span').textContent = origLabel || 'Resend';
+    } catch (e) {
+      showEntryError(errEl, 'Network error — please retry');
+      btnEl.disabled = false;
+      if (btnEl.querySelector('span')) btnEl.querySelector('span').textContent = origLabel || 'Resend';
+    }
+  }
+
+  // ---------- Uncancel flow (GLV-04) ----------------------------------
+
+  // Flip cancelled=1 back to cancelled=0 on a row so it reappears in
+  // Estimates / Work Completed as pending. No SMS is sent — Marco can then
+  // click Send-now (or wait for the scheduler when it's re-enabled).
+  async function handleUncancel(job, entryEl, btnEl, errEl) {
+    const type = JOB_TYPE_LABELS[job.job_type] || job.job_type;
+    if (!window.confirm(`Restore "${type}" follow-up for ${job.name || 'this customer'} to pending?`)) return;
+
+    btnEl.disabled = true;
+    errEl.hidden = true;
+    errEl.textContent = '';
+
+    try {
+      const uncancelURL = IS_LOCAL_ADMIN
+        ? '/api/uncancel'
+        : `${API_BASE}/queue/uncancel`;
+      const resp = await fetch(uncancelURL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: job.id }),
+      });
+      if (resp.status === 200) {
+        // Reload the queue so the row drops out of Cancelled and reappears
+        // under its native pending filter.
+        setTimeout(fetchQueue, 400);
+        return;
+      }
+      const parsed = await resp.json().catch(() => ({}));
+      const msg = parsed.error
+        ? `Uncancel failed: ${parsed.error}`
+        : `Uncancel failed (${resp.status})`;
+      showEntryError(errEl, msg);
+      btnEl.disabled = false;
+    } catch (e) {
       showEntryError(errEl, 'Network error — please retry');
       btnEl.disabled = false;
     }
@@ -692,33 +898,23 @@
     setDiagText('diag-version', d.app_version || 'dev');
   }
 
-  // Server-side /earlscheibconcord/diagnostic returns a different shape —
-  // it can't see Marco's local filesystem, so we surface the operator-useful
-  // fields it does know: whether Marco's watcher is currently checking in,
-  // how long ago the last heartbeat arrived, active operator commands,
-  // and the tail of the most recent uploaded log.
+  // Server-side /earlscheibconcord/diagnostic returns the heartbeat from the
+  // scanner (Pi-only architecture: the scanner runs locally on the same Pi
+  // as the webhook). We surface 3 useful signals: which host most recently
+  // checked in, whether it's online (last heartbeat within freshness window),
+  // and how long ago the heartbeat arrived. The other fields the upstream
+  // payload carries (received_logs_count, commands_state) were meaningful
+  // when Marco's Windows PC was a remote client; in the Pi-only setup they
+  // never advance past zero/idle, so we hide their rows in
+  // relabelDiagnosticForServer() rather than render misleading data.
   function renderServerDiagnostic(d) {
     const hb = d.last_heartbeat || {};
     const hbSecs = typeof hb.seconds_ago === 'number' ? hb.seconds_ago : null;
     const clientOnline = !!d.client_online;
 
-    setDiagText('diag-watch-folder', hb.host ? `${hb.host} (shop PC)` : '—');
+    setDiagText('diag-watch-folder', hb.host || '—');
     setDiagStatus('diag-folder-exists', clientOnline,
       clientOnline ? 'online' : 'offline');
-    setDiagText('diag-file-count',
-      typeof d.received_logs_count === 'number'
-        ? `${d.received_logs_count} log upload${d.received_logs_count === 1 ? '' : 's'}`
-        : '—'
-    );
-
-    let cmdsText = 'idle';
-    if (d.commands_state && typeof d.commands_state === 'object') {
-      const active = Object.entries(d.commands_state)
-        .filter(([, v]) => v === true || (v && v !== 0 && v !== '0'))
-        .map(([k]) => k);
-      if (active.length) cmdsText = active.join(', ');
-    }
-    setDiagText('diag-last-scan', cmdsText);
 
     if (hbSecs === null) {
       setDiagText('diag-last-heartbeat', hb.ts ? 'recent' : '—');
@@ -729,9 +925,6 @@
     } else {
       setDiagText('diag-last-heartbeat', `${Math.floor(hbSecs / 3600)}h ago`);
     }
-
-    setDiagStatus('diag-hmac', true, 'server-authed');
-    setDiagText('diag-version', 'server');
   }
 
   function setDiagText(id, txt) {
@@ -740,14 +933,14 @@
   }
 
   function relabelDiagnosticForServer() {
+    // Pi-only architecture (post-OC migration): the watcher is the same host
+    // as the webhook, so client-tracking fields no longer carry meaning.
+    // Relabel the 3 fields we still populate; hide the 4 fields that would
+    // otherwise show "0 log uploads / idle / server-authed / server" forever.
     const relabels = {
-      'diag-watch-folder':  'Shop PC',
-      'diag-folder-exists': 'Client status',
-      'diag-file-count':    'Logs received',
-      'diag-last-scan':     'Active commands',
+      'diag-watch-folder':  'Watcher host',
+      'diag-folder-exists': 'Status',
       'diag-last-heartbeat':'Last heartbeat',
-      'diag-hmac':          'Auth',
-      'diag-version':       'Source',
     };
     for (const [id, label] of Object.entries(relabels)) {
       const dd = document.getElementById(id);
@@ -755,6 +948,16 @@
       const dt = dd.previousElementSibling;
       if (dt && dt.tagName === 'DT') dt.textContent = label;
     }
+    // Hide rows we no longer populate. Both <dt> and <dd> are toggled so
+    // the dl grid collapses cleanly without leaving a blank cell.
+    const hideIds = ['diag-file-count', 'diag-last-scan', 'diag-hmac', 'diag-version'];
+    hideIds.forEach((id) => {
+      const dd = document.getElementById(id);
+      if (!dd) return;
+      const dt = dd.previousElementSibling;
+      dd.style.display = 'none';
+      if (dt && dt.tagName === 'DT') dt.style.display = 'none';
+    });
   }
 
   function setDiagStatus(id, ok, txt) {
@@ -803,6 +1006,21 @@
         renderQueue(lastJobs);
       });
     });
+
+    // Sort dropdown — restore persisted choice on mount, then write through to
+    // localStorage on every change. Forces a re-render by clearing the
+    // jitter-guard so groups reorder immediately.
+    const sortSel = document.getElementById('sort-by');
+    if (sortSel) {
+      sortSel.value = currentSort;
+      sortSel.addEventListener('change', () => {
+        const v = sortSel.value;
+        if (v === currentSort) return;
+        currentSort = v;
+        try { localStorage.setItem('eswSort', v); } catch (_) { /* ignore */ }
+        renderQueue(lastJobs);
+      });
+    }
 
     const resetBtn = document.querySelector('.test-reset-btn');
     if (resetBtn) {
@@ -1075,6 +1293,15 @@
       when:        (templateState.cards[jobType] || {}).when,
     };
     effectiveTemplates[jobType] = newBody;
+
+    // GLV-05 (260513): force the queue to re-render the SMS-preview bubbles
+    // against the new template body. Without this, the queue's
+    // "Customer receives" panel keeps showing the OLD copy until the next
+    // job-state change — because `lastRenderKey` only keys on job IDs +
+    // sent/cancelled state, not on template content. Clearing the cache
+    // key + calling renderQueue rebuilds every visible bubble immediately.
+    lastRenderKey = '';
+    if (lastJobs && lastJobs.length) renderQueue(lastJobs);
 
     badge.hidden = !parsed.is_override;
     dirtyDot.hidden = true;
@@ -1427,6 +1654,7 @@
     const viewQueue = document.getElementById('view-queue');
     const viewTpl   = document.getElementById('view-templates');
     const viewSched = document.getElementById('view-schedules');
+    const viewLogs  = document.getElementById('view-logs');
     if (!links.length || !viewQueue || !viewTpl) return;
 
     const activate = (target) => {
@@ -1438,8 +1666,10 @@
       viewQueue.hidden = target !== 'queue';
       viewTpl.hidden   = target !== 'templates';
       if (viewSched) viewSched.hidden = target !== 'schedules';
+      if (viewLogs)  viewLogs.hidden  = target !== 'logs';
       if (target === 'templates') loadTemplates(false);
       if (target === 'schedules') loadSchedules(false);
+      if (target === 'logs')      loadSmsLog();
     };
 
     links.forEach((a) => {
@@ -1453,6 +1683,109 @@
     // Allow direct-link via hash (e.g. refreshes on /earlscheib#templates).
     if (window.location.hash === '#templates') activate('templates');
     if (window.location.hash === '#schedules') activate('schedules');
+    if (window.location.hash === '#logs')      activate('logs');
+  }
+
+  // ---------- Logs view (GLV-01) --------------------------------------
+
+  // Filter state for the Logs view. Mirrors the Queue's pill pattern.
+  // Valid values: 'all' | 'sent' | 'failed'.
+  let currentLogsFilter = 'all';
+  let logsRefreshTimerId = null;
+
+  // The sms-log read endpoint accepts POST + HMAC-or-basic — auth gate is
+  // identical to /queue. Use POST with empty body so HMAC signing of "" works
+  // identically to the existing endpoints.
+  const smsLogURL = IS_LOCAL_ADMIN
+    ? '/api/sms-log'
+    : `${API_BASE}/sms-log`;
+
+  async function loadSmsLog() {
+    const listEl = document.getElementById('logs-list');
+    if (!listEl) return;
+    try {
+      const url = `${smsLogURL}?limit=200&status=${encodeURIComponent(currentLogsFilter)}`;
+      const resp = await fetch(url, {
+        method: 'POST',
+        body: '',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!resp.ok) {
+        listEl.innerHTML = `<div class="logs-empty">Failed to load (HTTP ${resp.status}).</div>`;
+        return;
+      }
+      const data = await resp.json();
+      renderSmsLog(data.rows || []);
+    } catch (exc) {
+      listEl.innerHTML = `<div class="logs-empty">Failed to load: ${escapeHTML(String(exc))}.</div>`;
+    }
+  }
+
+  function renderSmsLog(rows) {
+    const listEl = document.getElementById('logs-list');
+    if (!listEl) return;
+    if (!rows.length) {
+      listEl.innerHTML = '<div class="logs-empty">No send attempts logged yet.</div>';
+      return;
+    }
+    const frag = document.createDocumentFragment();
+    rows.forEach((row) => {
+      const div = document.createElement('div');
+      div.className = 'log-row';
+      const ts = new Date((row.created_at || 0) * 1000);
+      const tsStr = isFinite(ts.getTime())
+        ? `${ts.toLocaleDateString()} ${ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+        : '—';
+      const status = (row.status || 'failed').toLowerCase();
+      const kindText = (row.kind || 'send').toLowerCase();
+      const jobType = row.job_type || '—';
+      const phone = row.phone || '—';
+      const body = row.body || '';
+      const err = row.error ? `<small>${escapeHTML(row.error)}</small>` : '';
+      const testTag = row.is_test
+        ? '<span class="log-row__test-tag">test</span>'
+        : '';
+      div.innerHTML = `
+        <div class="log-row__ts">${escapeHTML(tsStr)}</div>
+        <div class="log-row__status" data-status="${escapeAttr(status)}">${escapeHTML(status)}</div>
+        <div class="log-row__kind">${escapeHTML(kindText)}${testTag}</div>
+        <div>
+          <div class="log-row__phone">${escapeHTML(phone)}</div>
+          <div class="log-row__job-type">${escapeHTML(jobType)}</div>
+        </div>
+        <div class="log-row__body">${escapeHTML(body)}${err}</div>
+      `;
+      frag.appendChild(div);
+    });
+    listEl.innerHTML = '';
+    listEl.appendChild(frag);
+  }
+
+  function escapeHTML(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+  function escapeAttr(s) { return escapeHTML(s); }
+
+  function wireLogsFilters() {
+    document.querySelectorAll('.logs-filter').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const f = btn.getAttribute('data-logs-filter') || 'all';
+        if (f === currentLogsFilter) return;
+        currentLogsFilter = f;
+        document.querySelectorAll('.logs-filter').forEach((b) => {
+          b.setAttribute(
+            'aria-selected',
+            b.getAttribute('data-logs-filter') === f ? 'true' : 'false',
+          );
+        });
+        loadSmsLog();
+      });
+    });
   }
 
   // ---------- Wire up --------------------------------------------------
@@ -1461,6 +1794,15 @@
     wireFilters();
     wireSearch();
     wireTopnav();
+    wireLogsFilters();
+
+    // GLV-01: when the Logs tab is visible, auto-refresh on the same cadence
+    // as the queue so a fresh send shows up without a manual reload. Skip
+    // the poll when the tab is hidden to keep the network quiet.
+    setInterval(() => {
+      const viewLogs = document.getElementById('view-logs');
+      if (viewLogs && !viewLogs.hidden) loadSmsLog();
+    }, REFRESH_MS);
 
     // Public-mode diagnostic labels: the same <dd> elements carry different
     // data when talking to app.py (server-centric) vs the Go admin
