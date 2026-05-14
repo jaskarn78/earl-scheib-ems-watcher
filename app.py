@@ -3093,6 +3093,41 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 self._send_json(500, {"error": "twilio_send_failed"})
             return
 
+        # GLV-04: Uncancel — flip cancelled=1 back to 0 so the row reappears
+        # under its native pending filter (Estimates or Work Completed). No
+        # SMS is sent; Marco can subsequently click Send-now or wait for the
+        # scheduler when re-enabled.
+        if self.path.split("?")[0] == "/earlscheibconcord/queue/uncancel":
+            if not _validate_auth(self, raw):
+                self._send_json(401, {"error": "invalid signature"})
+                return
+            try:
+                body = json.loads(raw.decode("utf-8"))
+                job_id = int(body["id"])
+            except (ValueError, KeyError, json.JSONDecodeError, UnicodeDecodeError):
+                self._send_json(400, {"error": "invalid JSON"})
+                return
+
+            con = get_db()
+            try:
+                cur = con.cursor()
+                cur.execute(
+                    "UPDATE jobs SET cancelled = 0 "
+                    "WHERE id = ? AND cancelled = 1",
+                    (job_id,),
+                )
+                con.commit()
+                affected = cur.rowcount
+            finally:
+                con.close()
+
+            if affected == 1:
+                log.info("Job uncancelled via admin UI: id=%s", job_id)
+                self._send_json(200, {"uncancelled": 1})
+            else:
+                self._send_json(404, {"error": "not_found_or_not_cancelled"})
+            return
+
         if self.path.split("?")[0] == "/earlscheibconcord/reset-test-jobs":
             if not _validate_auth(self, raw):
                 self._send_json(401, {"error": "invalid signature"})
