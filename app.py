@@ -394,6 +394,32 @@ def init_db():
         log.info("schedules: added enabled column (default 1)")
         con.commit()
 
+    # GLV-01: persistent SMS send log. Every Twilio attempt — scheduler,
+    # operator Send-now, operator Resend — appends one row. Surfaced in the
+    # admin UI's Logs tab. created_at is indexed DESC for the cheap
+    # "latest 200" reads the UI does.
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sms_log (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at  INTEGER NOT NULL,
+            job_id      INTEGER,
+            job_type    TEXT NOT NULL DEFAULT '',
+            phone       TEXT NOT NULL,
+            body        TEXT NOT NULL DEFAULT '',
+            status      TEXT NOT NULL,
+            kind        TEXT NOT NULL,
+            is_test     INTEGER NOT NULL DEFAULT 0,
+            error       TEXT NOT NULL DEFAULT ''
+        )
+        """
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_sms_log_created_at "
+        "ON sms_log(created_at DESC)"
+    )
+    con.commit()
+
     _seed_test_jobs_if_missing(con)
     con.close()
     log.info("DB initialised at %s", DB_PATH)
@@ -787,6 +813,14 @@ def send_sms(to: str, body: str) -> bool:
 
     When fan-out is active, returns True only if EVERY recipient delivered.
     """
+    ok, _ = _send_sms_with_error(to, body)
+    return ok
+
+
+def _send_sms_with_error(to: str, body: str) -> tuple[bool, str]:
+    """Like send_sms but also returns the first Twilio/allowlist error
+    string for sms_log persistence. Empty string on full success.
+    """
     if TEST_PHONE_RECIPIENTS:
         recipients = [clean_phone(p) for p in TEST_PHONE_RECIPIENTS]
         log.info("TEST_PHONE_RECIPIENTS fan-out: %s -> %s", to, ",".join(recipients))
@@ -797,18 +831,72 @@ def send_sms(to: str, body: str) -> bool:
         recipients = [to]
 
     all_ok = True
+    first_err = ""
     for recipient in recipients:
-        if not _send_single_sms(recipient, body):
+        ok, err = _send_single_sms(recipient, body)
+        if not ok:
             all_ok = False
-    return all_ok
+            if not first_err:
+                first_err = err or "send_failed"
+    return all_ok, ("" if all_ok else first_err)
 
 
-def _send_single_sms(to: str, body: str) -> bool:
-    """Deliver one SMS/WhatsApp message via Twilio REST API."""
+def _log_sms(
+    *,
+    job_id: int | None,
+    job_type: str,
+    phone: str,
+    body: str,
+    status: str,        # "sent" | "failed"
+    kind: str,          # "send" | "resend" | "scheduler"
+    is_test: bool,
+    error: str = "",
+) -> None:
+    """Append one row to sms_log. Failures are swallowed (logged) so a
+    DB hiccup never breaks the actual send path — the audit log is
+    nice-to-have, never load-bearing on delivery.
+
+    body is truncated to 2000 chars to bound row size. The UI shows ~320
+    chars; keep some headroom for future inspection without unbounded
+    growth.
+    """
+    try:
+        con = get_db()
+        try:
+            con.execute(
+                "INSERT INTO sms_log "
+                "(created_at, job_id, job_type, phone, body, status, kind, "
+                " is_test, error) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    int(time.time()),
+                    job_id,
+                    job_type or "",
+                    phone or "",
+                    (body or "")[:2000],
+                    status,
+                    kind,
+                    1 if is_test else 0,
+                    (error or "")[:500],
+                ),
+            )
+            con.commit()
+        finally:
+            con.close()
+    except Exception as exc:
+        log.warning("sms_log insert failed (non-fatal): %s", exc)
+
+
+def _send_single_sms(to: str, body: str) -> tuple[bool, str]:
+    """Deliver one SMS/WhatsApp message via Twilio REST API.
+
+    Returns (ok, error_string). error_string is "" on success, otherwise a
+    short tag suitable for the sms_log.error column.
+    """
     if SMS_ALLOWLIST and to not in SMS_ALLOWLIST:
         log.error("SMS_ALLOWLIST blocked send to=%s (not in allowlist %s)",
                   to, sorted(SMS_ALLOWLIST))
-        return False
+        return False, "allowlist_blocked"
     url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json"
     # ===== Twilio WhatsApp (sandbox) -> SMS (production) switch =====
     # Currently using Twilio WhatsApp sandbox for dev/test.
@@ -841,10 +929,12 @@ def _send_single_sms(to: str, body: str) -> bool:
         with urlopen(req, timeout=15) as resp:
             resp_body = resp.read().decode("utf-8")
             log.info("Twilio response %s to=%s: %s", resp.status, to, resp_body[:200])
-            return resp.status in (200, 201)
+            if resp.status in (200, 201):
+                return True, ""
+            return False, f"twilio_http_{resp.status}"
     except URLError as exc:
         log.error("Twilio request failed to=%s: %s", to, exc)
-        return False
+        return False, f"twilio_url_error: {exc}"[:200]
 
 
 # ---------------------------------------------------------------------------
@@ -905,7 +995,18 @@ def _fire_due_jobs():
                 continue
 
             log.info("Firing job %s: type=%s phone=%s", job_id, job_type, phone)
-            success = send_sms(phone, body)
+            success, send_err = _send_sms_with_error(phone, body)
+            is_test_row = bool(row["is_test"]) if "is_test" in row.keys() else False
+            _log_sms(
+                job_id=job_id,
+                job_type=job_type,
+                phone=phone,
+                body=body,
+                status=("sent" if success else "failed"),
+                kind="scheduler",
+                is_test=is_test_row,
+                error=send_err,
+            )
             if success:
                 cur.execute("UPDATE jobs SET sent = 1 WHERE id = ?", (job_id,))
                 con.commit()
@@ -3070,7 +3171,25 @@ class WebhookHandler(BaseHTTPRequestHandler):
             # Recipient redirection (TEST_PHONE_OVERRIDE / TEST_PHONE_RECIPIENTS)
             # is handled inside send_sms so admin UI shows the real customer
             # phone while testing still routes messages to the operator.
-            ok = send_sms(phone, sms_body)
+            ok, send_err = _send_sms_with_error(phone, sms_body)
+            # GLV-01: log every send-now attempt — success or failure —
+            # before the response so the operator's Logs tab reflects the
+            # outcome even if Twilio rejected the request.
+            is_test_row = False
+            try:
+                is_test_row = bool(row["is_test"]) if "is_test" in row.keys() else False
+            except (AttributeError, IndexError, TypeError):
+                pass
+            _log_sms(
+                job_id=job_id,
+                job_type=row["job_type"],
+                phone=phone,
+                body=sms_body,
+                status=("sent" if ok else "failed"),
+                kind="send",
+                is_test=is_test_row,
+                error=send_err,
+            )
             if ok:
                 log.info("send-now: id=%s phone=%s type=%s OK",
                          job_id, phone, row["job_type"])
