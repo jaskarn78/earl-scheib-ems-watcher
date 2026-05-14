@@ -803,23 +803,20 @@ def schedule_job(
 # SMS sending
 # ---------------------------------------------------------------------------
 
-def send_sms(to: str, body: str) -> bool:
+def send_sms(to: str, body: str) -> tuple[bool, str]:
     """Send an SMS/WhatsApp message via Twilio.
+
+    Returns (ok, error_string). error_string is "" on full success, otherwise
+    a short tag suitable for the sms_log.error column.
 
     During testing, recipient resolution follows:
       1. TEST_PHONE_RECIPIENTS (comma-sep list)  — fan out to every entry.
       2. TEST_PHONE_OVERRIDE  (single number)    — replace `to`.
       3. Default                                 — use `to`.
 
-    When fan-out is active, returns True only if EVERY recipient delivered.
-    """
-    ok, _ = _send_sms_with_error(to, body)
-    return ok
-
-
-def _send_sms_with_error(to: str, body: str) -> tuple[bool, str]:
-    """Like send_sms but also returns the first Twilio/allowlist error
-    string for sms_log persistence. Empty string on full success.
+    When fan-out is active, ok is True only if EVERY recipient delivered.
+    GLV-01: tuple return replaced the prior `bool` shape so sms_log entries
+    can record the actual Twilio / allowlist error tag.
     """
     if TEST_PHONE_RECIPIENTS:
         recipients = [clean_phone(p) for p in TEST_PHONE_RECIPIENTS]
@@ -995,7 +992,7 @@ def _fire_due_jobs():
                 continue
 
             log.info("Firing job %s: type=%s phone=%s", job_id, job_type, phone)
-            success, send_err = _send_sms_with_error(phone, body)
+            success, send_err = send_sms(phone, body)
             is_test_row = bool(row["is_test"]) if "is_test" in row.keys() else False
             _log_sms(
                 job_id=job_id,
@@ -3205,7 +3202,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
             # Recipient redirection (TEST_PHONE_OVERRIDE / TEST_PHONE_RECIPIENTS)
             # is handled inside send_sms so admin UI shows the real customer
             # phone while testing still routes messages to the operator.
-            ok, send_err = _send_sms_with_error(phone, sms_body)
+            ok, send_err = send_sms(phone, sms_body)
             # GLV-01: log every send-now attempt — success or failure —
             # before the response so the operator's Logs tab reflects the
             # outcome even if Twilio rejected the request.
@@ -3333,7 +3330,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 return
 
             phone = row["phone"]
-            ok, send_err = _send_sms_with_error(phone, sms_body)
+            ok, send_err = send_sms(phone, sms_body)
             _log_sms(
                 job_id=job_id,
                 job_type=row["job_type"],

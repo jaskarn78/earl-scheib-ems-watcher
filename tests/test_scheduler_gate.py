@@ -84,7 +84,7 @@ def test_scheduler_gate_disabled_skips_due_jobs(reload_app_with_gate, monkeypatc
     calls = []
     def _fake_send(to, body):
         calls.append((to, body))
-        return True
+        return True, ""
     monkeypatch.setattr(app_mod, "send_sms", _fake_send)
 
     # Simulate one tick of the scheduler_loop body — the gated branch
@@ -114,7 +114,7 @@ def test_scheduler_gate_enabled_fires_due_jobs(reload_app_with_gate, monkeypatch
     calls = []
     def _fake_send(to, body):
         calls.append((to, body))
-        return True
+        return True, ""
     monkeypatch.setattr(app_mod, "send_sms", _fake_send)
 
     # When the gate is open, the scheduler_loop body would call
@@ -192,7 +192,7 @@ def test_send_now_fires_with_gate_off(reload_app_with_gate, monkeypatch):
     calls = []
     def _fake_send(to, body):
         calls.append((to, body))
-        return True
+        return True, ""
     monkeypatch.setattr(app_mod, "send_sms", _fake_send)
 
     server = HTTPServer(("127.0.0.1", 0), app_mod.WebhookHandler)
