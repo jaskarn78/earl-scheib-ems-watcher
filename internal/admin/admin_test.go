@@ -957,3 +957,134 @@ func TestAdminProxy_ScheduleUpsert_PropagatesUpstream400(t *testing.T) {
 		t.Errorf("body: got %s, want %s", body, upstreamErr)
 	}
 }
+
+// GLV-01: /api/resend mirrors /api/send-now byte-for-byte; verify it signs
+// canonical {"id":N} and forwards to /queue/resend as POST.
+func TestProxyResend_SignsJSONBodyAndForwards(t *testing.T) {
+	secret := "test-secret-resend"
+	captured := &atomic.Pointer[capturedRequest]{}
+	remote := newFakeRemote(t, 200, []byte(`{"resent":true}`), captured)
+	defer remote.Close()
+
+	adminURL, stop := startAdminWithURLCh(t, remote.URL, secret, 5*time.Second)
+	defer stop()
+
+	resp, body := postJSON(t, adminURL+"/api/resend", `{"id": 42}`)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: got %d, want 200; body=%s", resp.StatusCode, body)
+	}
+	cr := captured.Load()
+	if cr == nil {
+		t.Fatal("fake remote never captured a request")
+	}
+	if cr.method != http.MethodPost {
+		t.Errorf("upstream method: got %s, want POST", cr.method)
+	}
+	if !strings.HasSuffix(cr.path, "/earlscheibconcord/queue/resend") {
+		t.Errorf("upstream path: got %q, want suffix /earlscheibconcord/queue/resend", cr.path)
+	}
+	wantBody := `{"id":42}`
+	if string(cr.body) != wantBody {
+		t.Errorf("upstream body: got %q, want %q", cr.body, wantBody)
+	}
+	if cr.sig != webhook.Sign(secret, []byte(wantBody)) {
+		t.Errorf("upstream X-EMS-Signature mismatch")
+	}
+}
+
+// GLV-04: /api/uncancel — same canonical body pattern as resend/send-now.
+func TestProxyUncancel_SignsJSONBodyAndForwards(t *testing.T) {
+	secret := "test-secret-uncancel"
+	captured := &atomic.Pointer[capturedRequest]{}
+	remote := newFakeRemote(t, 200, []byte(`{"uncancelled":1}`), captured)
+	defer remote.Close()
+
+	adminURL, stop := startAdminWithURLCh(t, remote.URL, secret, 5*time.Second)
+	defer stop()
+
+	resp, body := postJSON(t, adminURL+"/api/uncancel", `{"id": 9}`)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: got %d, want 200; body=%s", resp.StatusCode, body)
+	}
+	cr := captured.Load()
+	if cr == nil {
+		t.Fatal("fake remote never captured a request")
+	}
+	if !strings.HasSuffix(cr.path, "/earlscheibconcord/queue/uncancel") {
+		t.Errorf("upstream path: got %q, want suffix /earlscheibconcord/queue/uncancel", cr.path)
+	}
+	wantBody := `{"id":9}`
+	if string(cr.body) != wantBody {
+		t.Errorf("upstream body: got %q, want %q", cr.body, wantBody)
+	}
+	if cr.sig != webhook.Sign(secret, []byte(wantBody)) {
+		t.Errorf("upstream X-EMS-Signature mismatch")
+	}
+}
+
+// GLV-01: /api/sms-log — empty body, HMAC of "", query string forwarded
+// after whitelist (status) + numeric (limit) validation.
+func TestProxySmsLog_ForwardsEmptyBodyWithQuery(t *testing.T) {
+	secret := "test-secret-sms-log"
+	captured := &atomic.Pointer[capturedRequest]{}
+	remote := newFakeRemote(t, 200, []byte(`{"rows":[],"count":0}`), captured)
+	defer remote.Close()
+
+	adminURL, stop := startAdminWithURLCh(t, remote.URL, secret, 5*time.Second)
+	defer stop()
+
+	resp, body := postJSON(t, adminURL+"/api/sms-log?limit=50&status=sent", "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: got %d, want 200; body=%s", resp.StatusCode, body)
+	}
+	cr := captured.Load()
+	if cr == nil {
+		t.Fatal("fake remote never captured a request")
+	}
+	if cr.method != http.MethodPost {
+		t.Errorf("upstream method: got %s, want POST", cr.method)
+	}
+	if !strings.HasSuffix(cr.path, "/earlscheibconcord/sms-log") {
+		t.Errorf("upstream path: got %q, want suffix /earlscheibconcord/sms-log", cr.path)
+	}
+	if len(cr.body) != 0 {
+		t.Errorf("upstream body should be empty, got %q", cr.body)
+	}
+	if cr.sig != webhook.Sign(secret, []byte("")) {
+		t.Errorf("upstream X-EMS-Signature: want sig of empty body")
+	}
+}
+
+func TestProxySmsLog_RejectsBadStatus(t *testing.T) {
+	captured := &atomic.Pointer[capturedRequest]{}
+	remote := newFakeRemote(t, 200, []byte(`{}`), captured)
+	defer remote.Close()
+
+	adminURL, stop := startAdminWithURLCh(t, remote.URL, "secret", 5*time.Second)
+	defer stop()
+
+	resp, _ := postJSON(t, adminURL+"/api/sms-log?status=bogus", "")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want 400", resp.StatusCode)
+	}
+	if captured.Load() != nil {
+		t.Error("upstream must not be called on rejected query")
+	}
+}
+
+func TestProxyResend_BadJSON(t *testing.T) {
+	captured := &atomic.Pointer[capturedRequest]{}
+	remote := newFakeRemote(t, 200, []byte(`{}`), captured)
+	defer remote.Close()
+
+	adminURL, stop := startAdminWithURLCh(t, remote.URL, "secret", 5*time.Second)
+	defer stop()
+
+	resp, _ := postJSON(t, adminURL+"/api/resend", "not-json")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want 400", resp.StatusCode)
+	}
+	if captured.Load() != nil {
+		t.Error("upstream must not be called on malformed body")
+	}
+}

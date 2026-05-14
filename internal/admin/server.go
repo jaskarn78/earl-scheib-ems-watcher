@@ -162,6 +162,11 @@ func Run(ctx context.Context, cfg Config) error {
 	// route pair (list at the bare path, upsert at the trailing-slash subtree).
 	mux.HandleFunc("/api/schedules", s.handleSchedulesList)
 	mux.HandleFunc("/api/schedules/", s.handleScheduleUpsert)
+	// GLV-01 / GLV-04: Resend + Uncancel + Logs proxies. Mirror the
+	// /api/cancel + /api/send-now byte-for-byte HMAC-canonical pattern.
+	mux.HandleFunc("/api/resend", s.handleResend)
+	mux.HandleFunc("/api/uncancel", s.handleUncancel)
+	mux.HandleFunc("/api/sms-log", s.handleSmsLog)
 	mux.HandleFunc("/alive", s.handleAlive)
 
 	httpServer := &http.Server{
@@ -325,6 +330,24 @@ func (s *server) remoteTemplatesURL() string {
 // remoteTemplateURL returns the remote /templates/{job_type} endpoint (PUT).
 func (s *server) remoteTemplateURL(jobType string) string {
 	return s.remoteTemplatesURL() + "/" + jobType
+}
+
+// remoteResendURL returns the remote /queue/resend endpoint (POST).
+// GLV-01: same prefix convention as remoteSendNowURL.
+func (s *server) remoteResendURL() string {
+	return strings.TrimRight(s.cfg.WebhookURL, "/") + "/queue/resend"
+}
+
+// remoteUncancelURL returns the remote /queue/uncancel endpoint (POST).
+// GLV-04: same prefix convention as remoteSendNowURL.
+func (s *server) remoteUncancelURL() string {
+	return strings.TrimRight(s.cfg.WebhookURL, "/") + "/queue/uncancel"
+}
+
+// remoteSmsLogURL returns the remote /sms-log endpoint (POST, empty body).
+// GLV-01: same prefix convention; HMAC of "" matches GET /queue parity.
+func (s *server) remoteSmsLogURL() string {
+	return strings.TrimRight(s.cfg.WebhookURL, "/") + "/sms-log"
 }
 
 // remoteSchedulesURL returns the remote /schedules endpoint (GET listing).

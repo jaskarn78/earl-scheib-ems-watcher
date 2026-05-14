@@ -207,6 +207,168 @@ func (s *server) handleSendNow(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(respBody)
 }
 
+// handleResend proxies POST /api/resend -> POST {webhookURL}/queue/resend.
+// GLV-01: byte-for-byte clone of handleSendNow — only the upstream URL
+// differs. {"id": N} canonical re-marshal + HMAC sign + body/status relay.
+func (s *server) handleResend(w http.ResponseWriter, r *http.Request) {
+	s.proxyIDBodyPOST(w, r, s.remoteResendURL())
+}
+
+// handleUncancel proxies POST /api/uncancel -> POST {webhookURL}/queue/uncancel.
+// GLV-04: same {"id": N} canonical pattern as handleResend / handleSendNow.
+func (s *server) handleUncancel(w http.ResponseWriter, r *http.Request) {
+	s.proxyIDBodyPOST(w, r, s.remoteUncancelURL())
+}
+
+// proxyIDBodyPOST is the shared {"id": N} canonical-body POST proxy used by
+// /api/send-now, /api/resend, and /api/uncancel. Re-marshals to canonical
+// compact JSON so the HMAC covers identical bytes outbound and on the
+// server's _validate_auth check. Body limit + 4 KiB response cap match the
+// handleSendNow precedent.
+func (s *server) proxyIDBodyPOST(w http.ResponseWriter, r *http.Request, upstreamURL string) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	raw, err := io.ReadAll(io.LimitReader(r.Body, 1024))
+	if err != nil {
+		s.jsonError(w, http.StatusBadRequest, "read body: "+err.Error())
+		return
+	}
+	var parsed struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil || parsed.ID == 0 {
+		s.jsonError(w, http.StatusBadRequest, "body must be {\"id\": N} with non-zero integer N")
+		return
+	}
+
+	outBody, err := json.Marshal(struct {
+		ID int64 `json:"id"`
+	}{ID: parsed.ID})
+	if err != nil {
+		s.jsonError(w, http.StatusInternalServerError, "marshal: "+err.Error())
+		return
+	}
+
+	sig := webhook.Sign(s.cfg.Secret, outBody)
+
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL, bytes.NewReader(outBody))
+	if err != nil {
+		s.jsonError(w, http.StatusInternalServerError, "build request: "+err.Error())
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Length", fmt.Sprintf("%d", len(outBody)))
+	req.Header.Set("X-EMS-Signature", sig)
+	req.Header.Set("X-EMS-Source", "EarlScheibWatcher-Admin")
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		s.jsonError(w, http.StatusBadGateway, "upstream unreachable: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if err != nil {
+		s.jsonError(w, http.StatusBadGateway, "read upstream body: "+err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	_, _ = w.Write(respBody)
+}
+
+// GLV-01: known sms-log status values — whitelisted on POST /api/sms-log so
+// the proxy isn't a free-range query-string pass-through. Must stay in
+// lock-step with app.py /sms-log handler.
+var validSmsLogStatuses = map[string]bool{
+	"all":    true,
+	"sent":   true,
+	"failed": true,
+}
+
+// handleSmsLog proxies POST /api/sms-log -> POST {webhookURL}/sms-log.
+// Empty body (HMAC of ""). Query string: limit + status forwarded after
+// whitelist validation. Response body cap is 1 MiB to accommodate 200 rows.
+func (s *server) handleSmsLog(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	q := r.URL.Query()
+	status := q.Get("status")
+	if status != "" && !validSmsLogStatuses[status] {
+		s.jsonError(w, http.StatusBadRequest, "invalid status; must be one of: all, sent, failed")
+		return
+	}
+	limit := q.Get("limit")
+	// Reject obviously bogus limit values; the server clamps to [1, 500] but
+	// we filter the wire format here so a malformed query never reaches it.
+	if limit != "" {
+		ok := true
+		for _, c := range limit {
+			if c < '0' || c > '9' {
+				ok = false
+				break
+			}
+		}
+		if !ok || len(limit) > 4 {
+			s.jsonError(w, http.StatusBadRequest, "invalid limit; must be 1..4-digit integer")
+			return
+		}
+	}
+
+	upstreamURL := s.remoteSmsLogURL()
+	parts := []string{}
+	if status != "" {
+		parts = append(parts, "status="+status)
+	}
+	if limit != "" {
+		parts = append(parts, "limit="+limit)
+	}
+	if len(parts) > 0 {
+		upstreamURL = upstreamURL + "?" + strings.Join(parts, "&")
+	}
+
+	sig := webhook.Sign(s.cfg.Secret, []byte(""))
+
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL, nil)
+	if err != nil {
+		s.jsonError(w, http.StatusInternalServerError, "build request: "+err.Error())
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Length", "0")
+	req.Header.Set("X-EMS-Signature", sig)
+	req.Header.Set("X-EMS-Source", "EarlScheibWatcher-Admin")
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		s.jsonError(w, http.StatusBadGateway, "upstream unreachable: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		s.jsonError(w, http.StatusBadGateway, "read upstream body: "+err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	_, _ = w.Write(body)
+}
+
 func (s *server) jsonError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
