@@ -3212,6 +3212,65 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 self._send_json(500, {"error": "twilio_send_failed"})
             return
 
+        # GLV-01: Resend — re-fire an already-sent (or pending) job via Twilio
+        # WITHOUT touching the row's sent flag. The original row's "sent"
+        # status is the historical record of the first delivery; the resend
+        # is recorded in sms_log only. Operator-only — dual-auth.
+        if self.path.split("?")[0] == "/earlscheibconcord/queue/resend":
+            if not _validate_auth(self, raw):
+                self._send_json(401, {"error": "invalid signature"})
+                return
+            try:
+                body = json.loads(raw.decode("utf-8"))
+                job_id = int(body["id"])
+            except (ValueError, KeyError, json.JSONDecodeError, UnicodeDecodeError):
+                self._send_json(400, {"error": "invalid JSON"})
+                return
+
+            con = get_db()
+            try:
+                cur = con.cursor()
+                cur.execute(
+                    "SELECT id, job_type, phone, name, vin, vehicle_desc, "
+                    "       ro_id, email, doc_id, year, make, model, is_test "
+                    "FROM jobs WHERE id = ?",
+                    (job_id,),
+                )
+                row = cur.fetchone()
+            finally:
+                con.close()
+
+            if row is None:
+                self._send_json(404, {"error": "not_found"})
+                return
+
+            sms_body = render_template(row["job_type"], row)
+            if not sms_body:
+                self._send_json(500, {"error": "unknown_job_type_or_empty_template"})
+                return
+
+            phone = row["phone"]
+            ok, send_err = _send_sms_with_error(phone, sms_body)
+            _log_sms(
+                job_id=job_id,
+                job_type=row["job_type"],
+                phone=phone,
+                body=sms_body,
+                status=("sent" if ok else "failed"),
+                kind="resend",
+                is_test=bool(row["is_test"]),
+                error=send_err,
+            )
+            if ok:
+                log.info("resend: id=%s phone=%s type=%s OK",
+                         job_id, phone, row["job_type"])
+                self._send_json(200, {"resent": True})
+            else:
+                log.error("resend: id=%s twilio send failed: %s",
+                          job_id, send_err)
+                self._send_json(500, {"error": "twilio_send_failed"})
+            return
+
         # GLV-04: Uncancel — flip cancelled=1 back to 0 so the row reappears
         # under its native pending filter (Estimates or Work Completed). No
         # SMS is sent; Marco can subsequently click Send-now or wait for the
