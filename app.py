@@ -3212,6 +3212,55 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 self._send_json(500, {"error": "twilio_send_failed"})
             return
 
+        # GLV-01: SMS send-log read endpoint. POST (with empty body) so the
+        # HMAC of "" parity matches GET /queue. Query params: limit (1..500),
+        # status (all|sent|failed). Returns the latest N rows DESC by
+        # created_at. Operator-only — dual-auth.
+        sms_log_path = self.path.split("?")[0]
+        if sms_log_path == "/earlscheibconcord/sms-log":
+            if not _validate_auth(self, raw):
+                self._send_json(401, {"error": "invalid signature"})
+                return
+            parsed_q = urlparse(self.path)
+            qs = parse_qs(parsed_q.query)
+            try:
+                limit = int(qs.get("limit", ["200"])[0])
+            except ValueError:
+                limit = 200
+            limit = max(1, min(limit, 500))
+            status = qs.get("status", ["all"])[0]
+            if status not in ("all", "sent", "failed"):
+                self._send_json(
+                    400,
+                    {"error": "invalid status; must be one of: all, sent, failed"},
+                )
+                return
+
+            base_cols = (
+                "SELECT id, created_at, job_id, job_type, phone, body, "
+                "       status, kind, is_test, error "
+                "FROM sms_log"
+            )
+            if status == "all":
+                sql = base_cols + " ORDER BY created_at DESC, id DESC LIMIT ?"
+                params: tuple = (limit,)
+            else:
+                sql = (
+                    base_cols
+                    + " WHERE status = ? ORDER BY created_at DESC, id DESC LIMIT ?"
+                )
+                params = (status, limit)
+
+            con = get_db()
+            try:
+                cur = con.cursor()
+                cur.execute(sql, params)
+                rows = [dict(r) for r in cur.fetchall()]
+            finally:
+                con.close()
+            self._send_json(200, {"rows": rows, "count": len(rows)})
+            return
+
         # GLV-01: Resend — re-fire an already-sent (or pending) job via Twilio
         # WITHOUT touching the row's sent flag. The original row's "sent"
         # status is the historical record of the first delivery; the resend
