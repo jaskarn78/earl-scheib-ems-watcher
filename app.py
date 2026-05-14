@@ -1021,6 +1021,30 @@ def _fire_due_jobs():
 # BMS XML parsing
 # ---------------------------------------------------------------------------
 
+def _mask_phone(raw: str) -> str:
+    """Mask a phone number for the admin diagnostic panel — keeps enough
+    of the digits to recognise the number at a glance ("+19256•••934")
+    without printing the full sender on the public admin UI. Returns ""
+    for empty input. Strips any "whatsapp:" prefix so the prefix doesn't
+    consume the visible digits.
+
+    Example outputs:
+      "+19256033934"           -> "+19256•••934"
+      "whatsapp:+14155238886"  -> "whatsapp:+14155•••886"
+      ""                        -> ""
+    """
+    if not raw:
+        return ""
+    prefix = ""
+    rest = raw
+    if rest.startswith("whatsapp:"):
+        prefix = "whatsapp:"
+        rest = rest[len("whatsapp:"):]
+    if len(rest) <= 6:
+        return prefix + rest
+    return prefix + rest[:5] + "•••" + rest[-3:]
+
+
 def clean_phone(raw: str) -> str:
     """Normalize a phone number to E.164 format (+1XXXXXXXXXX for US)."""
     if not raw:
@@ -2844,6 +2868,14 @@ class WebhookHandler(BaseHTTPRequestHandler):
             except OSError:
                 tail = ""
 
+            # GLV-incident-260514: after Marco's go-live to (925) 603-3934
+            # an SMS went out from the prior 844 sandbox number because the
+            # Pi's .env was never updated. Surface the live TWILIO_FROM in
+            # the diagnostic panel (masked but recognisable) so this is
+            # visible at a glance and a wrong-number drift can't recur
+            # silently. Empty string when unset — UI distinguishes.
+            twilio_from_masked = _mask_phone(TWILIO_FROM)
+
             self._send_json(200, {
                 "last_heartbeat": last_heartbeat,
                 "client_online": client_online,
@@ -2853,6 +2885,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 # SPN-04: surface the scheduler kill-switch state so both
                 # admin UIs can render a DEV-mode banner when gated off.
                 "scheduler_enabled": SCHEDULER_ENABLED,
+                # GLV-incident-260514: masked Twilio sender number.
+                "twilio_from_masked": twilio_from_masked,
             })
             return
 

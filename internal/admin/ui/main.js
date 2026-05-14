@@ -870,7 +870,10 @@
 
   // Go admin (Marco's local binary) returns client-side fields —
   // watch_folder on disk, file count, last scan result, baked-in HMAC secret.
+  // Twilio sender doesn't apply to the local watcher (the Pi is the sender),
+  // so we hide the row in local mode rather than leave a permanent "—".
   function renderLocalDiagnostic(d) {
+    hideDiagRow('diag-twilio-from');
     setDiagText('diag-watch-folder', d.watch_folder || '—');
 
     const existsTxt = d.folder_exists
@@ -925,6 +928,12 @@
     } else {
       setDiagText('diag-last-heartbeat', `${Math.floor(hbSecs / 3600)}h ago`);
     }
+
+    // GLV-incident-260514: masked Twilio sender. Operator-visible so a
+    // wrong-number drift (e.g. stale sandbox value in .env) is caught
+    // at a glance. Server returns "" when TWILIO_FROM is unset.
+    const tf = d.twilio_from_masked;
+    setDiagText('diag-twilio-from', tf ? tf : 'NOT SET');
   }
 
   function setDiagText(id, txt) {
@@ -951,13 +960,17 @@
     // Hide rows we no longer populate. Both <dt> and <dd> are toggled so
     // the dl grid collapses cleanly without leaving a blank cell.
     const hideIds = ['diag-file-count', 'diag-last-scan', 'diag-hmac', 'diag-version'];
-    hideIds.forEach((id) => {
-      const dd = document.getElementById(id);
-      if (!dd) return;
-      const dt = dd.previousElementSibling;
-      dd.style.display = 'none';
-      if (dt && dt.tagName === 'DT') dt.style.display = 'none';
-    });
+    hideIds.forEach(hideDiagRow);
+  }
+
+  // Shared helper — hides both the <dt> and <dd> of a diagnostic row so the
+  // dl grid collapses cleanly.
+  function hideDiagRow(id) {
+    const dd = document.getElementById(id);
+    if (!dd) return;
+    const dt = dd.previousElementSibling;
+    dd.style.display = 'none';
+    if (dt && dt.tagName === 'DT') dt.style.display = 'none';
   }
 
   function setDiagStatus(id, ok, txt) {

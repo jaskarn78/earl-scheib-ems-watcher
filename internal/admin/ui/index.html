@@ -108,6 +108,10 @@
         <dt>Files in folder</dt>          <dd id="diag-file-count">—</dd>
         <dt>Last scan</dt>                <dd id="diag-last-scan">—</dd>
         <dt>Last heartbeat (server)</dt>  <dd id="diag-last-heartbeat">—</dd>
+        <!-- GLV-incident-260514: surface the active Twilio sender so a
+             wrong-number drift (e.g. stale sandbox 844 still in .env) is
+             visible at a glance. Masked: "+19256•••934". -->
+        <dt>Twilio sender</dt>            <dd id="diag-twilio-from">—</dd>
         <dt>HMAC secret baked in</dt>     <dd id="diag-hmac">—</dd>
         <dt>Version</dt>                  <dd id="diag-version">—</dd>
       </dl>
