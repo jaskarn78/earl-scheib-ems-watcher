@@ -73,12 +73,20 @@ def test_delete_queue_happy_path(queue_server):
                   headers={"X-EMS-Signature": sig, "Content-Type": "application/json"})
     with urlopen(req, timeout=3) as resp:
         assert resp.status == 200
+        # GLV-02: response shape preserved for back-compat; semantics moved
+        # from hard DELETE to soft cancelled=1.
         assert json.loads(resp.read().decode("utf-8")) == {"deleted": 1}
 
-    # Verify row is gone
+    # GLV-02: row stays in the DB but flips to cancelled=1 so the admin UI's
+    # Cancelled chip and Uncancel button have data to work against.
     con = sqlite3.connect(queue_server["db_path"])
-    assert con.execute("SELECT COUNT(*) FROM jobs WHERE id = ?", (alice_id,)).fetchone()[0] == 0
+    row = con.execute(
+        "SELECT sent, cancelled FROM jobs WHERE id = ?", (alice_id,)
+    ).fetchone()
     con.close()
+    assert row is not None, "row must remain after soft cancel"
+    assert row[0] == 0, "sent flag is untouched by cancel"
+    assert row[1] == 1, "cancelled flag flipped to 1"
 
 
 def test_delete_queue_missing_row(queue_server):

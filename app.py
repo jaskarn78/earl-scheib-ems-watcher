@@ -320,6 +320,10 @@ def init_db():
         ("make",  "ALTER TABLE jobs ADD COLUMN make TEXT DEFAULT ''"),
         ("model", "ALTER TABLE jobs ADD COLUMN model TEXT DEFAULT ''"),
         ("is_test", "ALTER TABLE jobs ADD COLUMN is_test INTEGER DEFAULT 0"),
+        # GLV-02: soft-cancel. Old behaviour DELETEd the row, which made
+        # Uncancel impossible and erased the audit trail. cancelled=1 means
+        # "Marco cancelled this job"; scheduler must skip these rows.
+        ("cancelled", "ALTER TABLE jobs ADD COLUMN cancelled INTEGER DEFAULT 0"),
     ]
     added = 0
     for col, stmt in migrations:
@@ -665,7 +669,7 @@ def schedule_job(
     try:
         cur = con.cursor()
         cur.execute(
-            "SELECT id, sent, created_at FROM jobs "
+            "SELECT id, sent, created_at, cancelled FROM jobs "
             "WHERE estimate_key = ? AND job_type = ? "
             "ORDER BY id DESC LIMIT 1",
             (estimate_key, job_type),
@@ -677,6 +681,30 @@ def schedule_job(
             eid = existing["id"]
             sent = existing["sent"]
             created_at = existing["created_at"]
+            cancelled = existing["cancelled"]
+
+            # GLV-02: explicit branch for cancelled rows. Marco's intent is
+            # authoritative — a CCC resave of an estimate Marco already
+            # cancelled MUST NOT silently un-cancel it. (CCC fires ~20 resaves
+            # per minute on a single save; un-cancelling on each would erase
+            # Marco's action.) Refresh contact fields so Uncancel later picks
+            # up any phone / VIN corrections, but keep the row cancelled.
+            if cancelled == 1:
+                cur.execute(
+                    "UPDATE jobs SET name=?, phone=?, vin=?, vehicle_desc=?, "
+                    " ro_id=?, email=?, address=?, doc_id=?, "
+                    " year=?, make=?, model=? "
+                    "WHERE id=?",
+                    (name, phone, vin, vehicle_desc, ro_id, email, address,
+                     doc_id, year, make, model, eid),
+                )
+                con.commit()
+                log.info(
+                    "skip resave: estimate_key=%s job_type=%s is cancelled "
+                    "(id=%s) — fields refreshed, cancellation preserved",
+                    estimate_key, job_type, eid,
+                )
+                return
 
             if sent == 0:
                 # Refresh customer/vehicle data on the pending row; preserve
@@ -857,7 +885,8 @@ def _fire_due_jobs():
     try:
         cur = con.cursor()
         cur.execute(
-            "SELECT * FROM jobs WHERE sent = 0 AND is_test = 0 AND send_at <= ?",
+            "SELECT * FROM jobs "
+            "WHERE sent = 0 AND is_test = 0 AND cancelled = 0 AND send_at <= ?",
             (now,),
         )
         rows = cur.fetchall()
@@ -2474,14 +2503,26 @@ class WebhookHandler(BaseHTTPRequestHandler):
             # depend on `job.sent`. Without it, the 'sent' chip is always
             # empty and rows render as 'pending' regardless of actual state.
             # This is additive — pre-existing clients only consume new fields.
+            # GLV-02: include cancelled in the projection. UI gates the
+            # Cancelled chip on `job.cancelled === 1`; without this field the
+            # chip would always be empty regardless of DB state.
             base_cols = (
                 "SELECT id, doc_id, job_type, phone, name, send_at, sent, "
                 "       created_at, vin, vehicle_desc, ro_id, email, address, "
-                "       sent_at, estimate_key, year, make, model, is_test "
+                "       sent_at, estimate_key, year, make, model, is_test, "
+                "       cancelled "
                 "FROM jobs"
             )
+            # GLV-02: "pending" means literally pending — exclude cancelled
+            # rows. They surface under status=all (where the UI's Cancelled
+            # chip lives). This matches the word's plain meaning and the UI's
+            # jobMatchesFilter contract (isPending = !isCancelled && sent==0).
             if status == "pending":
-                sql = base_cols + " WHERE sent = 0 ORDER BY created_at DESC, id DESC"
+                sql = (
+                    base_cols
+                    + " WHERE sent = 0 AND cancelled = 0 "
+                    "ORDER BY created_at DESC, id DESC"
+                )
             elif status == "sent":
                 sql = (
                     base_cols
@@ -3181,10 +3222,17 @@ class WebhookHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "invalid JSON"})
             return
 
+        # GLV-02: soft-cancel. The row stays in the DB with cancelled=1 so the
+        # admin UI's Cancelled filter chip and Uncancel button have data to
+        # work against. Scheduler / dedup paths gate on cancelled=0.
         con = get_db()
         try:
             cur = con.cursor()
-            cur.execute("DELETE FROM jobs WHERE id = ? AND sent = 0", (job_id,))
+            cur.execute(
+                "UPDATE jobs SET cancelled = 1 "
+                "WHERE id = ? AND sent = 0 AND cancelled = 0",
+                (job_id,),
+            )
             con.commit()
             affected = cur.rowcount
         finally:
@@ -3192,6 +3240,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
         if affected == 1:
             log.info("Job cancelled via admin UI: id=%s", job_id)
+            # Preserve the legacy {"deleted": 1} response shape so older
+            # Go-admin / proxy clients keep working — the field is now a flag
+            # for "the row is no longer pending", not literally a row delete.
             self._send_json(200, {"deleted": 1})
         else:
             self._send_json(404, {"error": "not found or already sent"})
