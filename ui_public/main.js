@@ -1832,6 +1832,19 @@
       .then((data) => {
         if (!data || !Array.isArray(data.job_types)) return;
         data.job_types.forEach((jt) => { effectiveTemplates[jt.job_type] = jt.body; });
+        // Hydrate SHOP_CONSTANTS from the server's authoritative values
+        // so the queue-card preview renders the same shop_name / shop_phone /
+        // review_url that the actual SMS will use. Without this, the hardcoded
+        // JS fallbacks (e.g. "Earl Scheib Auto Body Concord") drift from the
+        // server's SHOP_CONSTANTS on a rename. data.sample_row has the shop
+        // placeholders merged in (see app.py /templates handler).
+        const shopKeys = (data.placeholders && data.placeholders.shop) || [];
+        const sample = data.sample_row || {};
+        shopKeys.forEach((k) => {
+          if (sample[k] !== undefined && sample[k] !== null && sample[k] !== '') {
+            SHOP_CONSTANTS[k] = sample[k];
+          }
+        });
         // If any queue cards are already mounted, refresh their preview bubbles.
         document.querySelectorAll('.timeline__entry').forEach((li) => {
           // jobId is set when an entry is built; its parent card has the job
