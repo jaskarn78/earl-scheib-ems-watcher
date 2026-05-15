@@ -124,6 +124,16 @@ _TWILIO_MSG_CACHE: dict = {}
 _TWILIO_MSG_CACHE_TTL_S = 60
 _TWILIO_MSG_CACHE_LOCK = threading.Lock()
 
+# USH-02: Marco's personal cell. The TwiML Bin forwards inbound customer
+# SMS to this number ("From +NNN: <body>"). Twilio messages with `to` =
+# this number are forwards from Twilio's TwiML Bin, NOT customer messages —
+# the body's "From +NNN:" prefix carries the actual replier's phone.
+OPERATOR_FORWARD_NUMBER = "+19254215772"
+
+# USH-02: Matches the prefix the TwiML Bin emits on forwarded inbound SMS.
+# Captures the replier's E.164 phone. See TwiML body: "From {{From}}: {{Body}}".
+_FORWARD_PREFIX_RE = re.compile(r"^From (\+\d{10,15}):\s*")
+
 # BMS namespace
 BMS_NS = "http://www.cieca.com/BMS"
 NS = {"bms": BMS_NS}
@@ -989,40 +999,103 @@ def _fetch_twilio_messages(
             "price_unit": m.get("price_unit"),
         })
 
-    # Customer enrichment: most recent jobs row per phone wins. Single query,
-    # in-memory join — cheaper than N round-trips and the jobs table is small.
-    phones = {r["from"] if r["direction"] == "inbound" else r["to"] for r in rows}
-    phones = {p for p in phones if p}
-    enrichment: dict[str, dict] = {}
-    if phones:
-        placeholders = ",".join("?" * len(phones))
+    # USH-02: Customer enrichment. Phone-only matching is unreliable because:
+    #   - Test phones (Marco's, Jas's cell) appear on many jobs from the
+    #     TEST_PHONE_RECIPIENTS fan-out era → most-recent-job-at-phone
+    #     mislabels every historical fan-out send.
+    #   - The TwiML Bin forwards inbound to Marco's number, so those rows
+    #     have `to` = Marco's phone, not a customer's.
+    #   - Ad-hoc test sends via Twilio API don't appear in sms_log, so any
+    #     enrichment fallback for those is best-effort at best.
+    # Strategy: prefer sms_log body match (authoritative — sms_log records
+    # the actual job_id for every send); for inbound and ambiguous outbound,
+    # only enrich when the phone maps unambiguously (one customer name).
+    if rows:
+        oldest = min((r["date_sent"] for r in rows if r["date_sent"]), default=0)
+        since_ts = oldest - 60 if oldest else 0
         con = get_db()
         try:
             cur = con.cursor()
+            # Index 1: jobs grouped by phone. Phone → enrichment only when
+            # all jobs at that phone share the same customer name (otherwise
+            # ambiguous, leave un-enriched).
             cur.execute(
-                f"SELECT id, phone, name, job_type "
-                f"FROM jobs WHERE phone IN ({placeholders}) "
-                f"ORDER BY created_at DESC, id DESC",
-                tuple(phones),
+                "SELECT id, phone, name, job_type FROM jobs "
+                "ORDER BY created_at DESC, id DESC"
             )
+            jobs_by_phone: dict[str, list[dict]] = {}
             for jr in cur.fetchall():
-                # First row wins per phone (already DESC-ordered).
-                enrichment.setdefault(
-                    jr["phone"],
-                    {
-                        "job_id": jr["id"],
-                        "customer_name": jr["name"],
-                        "job_type": jr["job_type"],
-                    },
-                )
+                if not jr["phone"]:
+                    continue
+                jobs_by_phone.setdefault(jr["phone"], []).append({
+                    "job_id": jr["id"],
+                    "customer_name": jr["name"],
+                    "job_type": jr["job_type"],
+                })
+            unambiguous_by_phone: dict[str, dict] = {}
+            for phone, jobs_at_phone in jobs_by_phone.items():
+                names = {j["customer_name"] for j in jobs_at_phone}
+                if len(names) == 1:
+                    unambiguous_by_phone[phone] = jobs_at_phone[0]
+            # Index 2: sms_log by body in the time window. Body match is the
+            # authoritative path — sms_log stores the real job_id for every
+            # attempt, so this resolves correctly even when fan-out scattered
+            # the same body to multiple phone numbers.
+            cur.execute(
+                "SELECT s.body, s.job_id, j.name, j.job_type "
+                "FROM sms_log s LEFT JOIN jobs j ON s.job_id = j.id "
+                "WHERE s.created_at >= ? "
+                "ORDER BY s.created_at DESC",
+                (since_ts,),
+            )
+            sms_log_by_body: dict[str, dict] = {}
+            for sr in cur.fetchall():
+                body = sr["body"]
+                if body and body not in sms_log_by_body:
+                    sms_log_by_body[body] = {
+                        "job_id": sr["job_id"],
+                        "customer_name": sr["name"],
+                        "job_type": sr["job_type"],
+                    }
         finally:
             con.close()
+    else:
+        unambiguous_by_phone = {}
+        sms_log_by_body = {}
+
     for r in rows:
-        match_phone = r["from"] if r["direction"] == "inbound" else r["to"]
-        meta = enrichment.get(match_phone, {})
-        r["customer_name"] = meta.get("customer_name") or None
-        r["job_id"] = meta.get("job_id")
-        r["job_type"] = meta.get("job_type") or None
+        enrich = None
+        if r["direction"] == "outbound":
+            to = r.get("to") or ""
+            body = r.get("body") or ""
+            # Body match wins for anything we sent via send_sms — including
+            # fan-out residue (same body, multiple recipients) which the old
+            # phone-based logic mislabeled. Twilio-generated bodies (TwiML
+            # Bin forwards) won't appear in sms_log, falling through to the
+            # forward-prefix path below.
+            enrich = sms_log_by_body.get(body)
+            if not enrich and to == OPERATOR_FORWARD_NUMBER:
+                # TwiML Bin forward — parse "From +NNN:" prefix and look up
+                # the replier. May still be None if the replier isn't in
+                # jobs (test sender, unknown number).
+                m = _FORWARD_PREFIX_RE.match(body)
+                if m:
+                    enrich = unambiguous_by_phone.get(m.group(1))
+            if not enrich and to != OPERATOR_FORWARD_NUMBER:
+                # Phone fallback — only for ad-hoc sends that bypassed
+                # sms_log (e.g., direct Twilio API tests). Skip for forwards
+                # to Marco; those should never enrich via phone.
+                enrich = unambiguous_by_phone.get(to)
+        else:  # inbound
+            enrich = unambiguous_by_phone.get(r.get("from") or "")
+        if enrich:
+            r["customer_name"] = enrich.get("customer_name") or None
+            r["job_id"] = enrich.get("job_id")
+            r["job_type"] = enrich.get("job_type") or None
+        else:
+            r["customer_name"] = None
+            r["job_id"] = None
+            r["job_type"] = None
 
     rows.sort(key=lambda r: r["date_sent"], reverse=True)
     return rows, ""
