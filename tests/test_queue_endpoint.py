@@ -25,25 +25,23 @@ def test_get_queue_happy_path(queue_server):
     assert [r["name"] for r in body] == ["Carol Example", "Alice Example", "Bob Example"]
 
 
-def test_get_queue_missing_signature(queue_server):
+def test_get_queue_no_signature_allowed(queue_server):
+    """LAE: GET /queue has no origin-side auth — CF Access is the edge gate.
+    Unsigned requests pass through to the queue response."""
     req = Request(f"{queue_server['base_url']}/earlscheibconcord/queue")
-    try:
-        urlopen(req, timeout=3)
-        assert False, "expected 401"
-    except HTTPError as e:
-        assert e.code == 401
-        body = json.loads(e.read().decode("utf-8"))
-        assert body == {"error": "invalid signature"}
+    with urlopen(req, timeout=3) as resp:
+        assert resp.status == 200
+        body = json.loads(resp.read().decode("utf-8"))
+    assert isinstance(body, list)
 
 
-def test_get_queue_bad_signature(queue_server):
+def test_get_queue_with_signature_still_works(queue_server):
+    """HMAC-signed requests to GET /queue continue to work (Go admin proxy path)."""
+    sig = sign(queue_server["secret"], b"")
     req = Request(f"{queue_server['base_url']}/earlscheibconcord/queue",
-                  headers={"X-EMS-Signature": "deadbeef" * 8})
-    try:
-        urlopen(req, timeout=3)
-        assert False, "expected 401"
-    except HTTPError as e:
-        assert e.code == 401
+                  headers={"X-EMS-Signature": sig})
+    with urlopen(req, timeout=3) as resp:
+        assert resp.status == 200
 
 
 def test_get_queue_ordering_and_filter(queue_server):
@@ -124,13 +122,25 @@ def test_delete_queue_already_sent(queue_server):
     con.close()
 
 
-def test_delete_queue_bad_signature(queue_server):
-    body = json.dumps({"id": 1}).encode("utf-8")
+def test_delete_queue_no_signature_allowed(queue_server):
+    """LAE: DELETE /queue has no origin-side auth — CF Access is the edge gate.
+    Requests without a valid HMAC signature still process the delete."""
+    # Insert a row to cancel
+    con = sqlite3.connect(queue_server["db_path"])
+    cur = con.cursor()
+    import time as _time
+    cur.execute(
+        "INSERT INTO jobs (doc_id, job_type, phone, name, send_at, sent, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("LAE-DELETE-TEST", "24h", "+15559990001", "Test User", int(_time.time()) + 3600, 0, int(_time.time())),
+    )
+    con.commit()
+    row_id = cur.lastrowid
+    con.close()
+
+    payload = json.dumps({"id": row_id}).encode("utf-8")
     req = Request(f"{queue_server['base_url']}/earlscheibconcord/queue",
-                  data=body, method="DELETE",
-                  headers={"X-EMS-Signature": "00" * 32, "Content-Type": "application/json"})
-    try:
-        urlopen(req, timeout=3)
-        assert False, "expected 401"
-    except HTTPError as e:
-        assert e.code == 401
+                  data=payload, method="DELETE",
+                  headers={"Content-Type": "application/json"})
+    with urlopen(req, timeout=3) as resp:
+        assert resp.status == 200
