@@ -217,60 +217,17 @@ def _validate_hmac(body: bytes, sig_header: str) -> bool:
     return hmac.compare_digest(expected, sig_header)
 
 
-# ---------------------------------------------------------------------------
-# Basic auth (RJL-02) — browser access to operator endpoints
-# ---------------------------------------------------------------------------
-#
-# The watcher client POSTs with HMAC signatures; browsers cannot sign (no
-# shared secret in JS). For the public /earlscheib admin UI the operator
-# authenticates with HTTP Basic, and the same endpoints (GET /queue, DELETE
-# /queue, POST /queue/send-now, GET /diagnostic) accept either HMAC OR
-# basic-auth via _validate_auth. Machine-to-machine endpoints stay
-# HMAC-only (see _validate_auth call-sites below).
-#
-# When ADMIN_UI_USER or ADMIN_UI_PASSWORD is unset the feature is disabled —
-# /earlscheib returns 404 and basic-auth always fails, so the operational
-# surface is identical to pre-RJL behaviour.
-
-ADMIN_UI_USER = os.getenv("ADMIN_UI_USER", "")
-ADMIN_UI_PASSWORD = os.getenv("ADMIN_UI_PASSWORD", "")
-ADMIN_UI_ENABLED = bool(ADMIN_UI_USER and ADMIN_UI_PASSWORD)
-
-
-def _validate_basic_auth(header: str) -> bool:
-    """Return True if Authorization header is valid basic auth matching the
-    configured ADMIN_UI_USER / ADMIN_UI_PASSWORD env vars. Uses
-    hmac.compare_digest for constant-time comparison on both user AND
-    password to avoid leaking the username via timing. Returns False if
-    the feature is disabled (either env var empty).
-    """
-    if not ADMIN_UI_ENABLED or not header or not header.startswith("Basic "):
-        return False
-    try:
-        decoded = base64.b64decode(header[6:]).decode("utf-8", errors="replace")
-    except (ValueError, UnicodeDecodeError):
-        return False
-    user, _, pw = decoded.partition(":")
-    return (
-        hmac.compare_digest(user.encode("utf-8"), ADMIN_UI_USER.encode("utf-8"))
-        and hmac.compare_digest(pw.encode("utf-8"), ADMIN_UI_PASSWORD.encode("utf-8"))
-    )
+# Auth: CF Access is the sole gate for the admin UI and operator endpoints.
+# Machine-to-machine endpoints (watcher → server) are HMAC-signed; see _validate_hmac.
 
 
 def _validate_auth(handler, raw: bytes) -> bool:
-    """Accept either a valid HMAC signature (watcher client) or valid
-    basic auth (operator browser at /earlscheib). Both schemes are
-    constant-time compared internally. Returns True on first success.
+    """Return True if the request carries a valid HMAC signature.
+    Operator/browser access is gated by Cloudflare Access at the edge;
+    this function is for machine-to-machine endpoints only.
     """
     sig = handler.headers.get("X-EMS-Signature", "")
-    if _validate_hmac(raw, sig):
-        return True
-    auth = handler.headers.get("Authorization", "")
-    if _validate_basic_auth(auth):
-        log.info("basic-auth: user=%s ip=%s path=%s",
-                 ADMIN_UI_USER, handler.client_address[0], handler.path)
-        return True
-    return False
+    return _validate_hmac(raw, sig)
 
 
 # ---------------------------------------------------------------------------
@@ -2399,15 +2356,6 @@ class WebhookHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
-        # When 401, challenge the client to send basic-auth credentials.
-        # Without WWW-Authenticate, browsers silently display the JSON body
-        # instead of prompting the user to log in. HMAC clients ignore this
-        # header (they don't have credentials to fall back to).
-        if status == 401 and ADMIN_UI_ENABLED:
-            self.send_header(
-                "WWW-Authenticate",
-                'Basic realm="Earl Scheib Admin", charset="UTF-8"',
-            )
         self.end_headers()
         self.wfile.write(body)
 
@@ -2596,12 +2544,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/earlscheibconcord/queue":
-            # RJL-02: accept HMAC (Go admin proxy) OR Basic auth (public
-            # /earlscheib browser). GET signs empty body b"" — matches
-            # remote-config precedent.
-            if not _validate_auth(self, b""):
-                self._send_json(401, {"error": "invalid signature"})
-                return
+            # Auth: CF Access (edge gate) — no origin-side check needed
 
             # ULH-01: optional ?status= filter so the admin UI lifecycle
             # chips (pending/sent/all) can populate. Default is "pending"
@@ -2825,11 +2768,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
         # HMAC-authed so only holders of CCC_SECRET can inspect.
         if path == "/earlscheibconcord/diagnostic":
             import os as _os
-            # RJL-02: dual auth — HMAC or Basic. Operator browser needs this
-            # endpoint for the live diagnostic panel on /earlscheib.
-            if not _validate_auth(self, b""):
-                self._send_json(401, {"error": "invalid signature"})
-                return
+            # Auth: CF Access (edge gate) — no origin-side check needed
 
             ts = LAST_HEARTBEAT["ts"]
             host = LAST_HEARTBEAT["host"]
@@ -2958,10 +2897,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
             return
 
         # ------------------------------------------------------------------
-        # RJL-01: public admin UI at /earlscheib (basic-auth'd).
-        # Only active when ADMIN_UI_USER and ADMIN_UI_PASSWORD are both set
-        # in the environment. Otherwise returns 404 so the endpoint is
-        # effectively invisible.
+        # RJL-01 (updated LAE): public admin UI at /earlscheib.
+        # CF Access at the edge is the sole gate — no origin-side auth.
         #
         # Layout:
         #   GET /earlscheib         → index.html with API_BASE_PATH injected
@@ -2971,24 +2908,13 @@ class WebhookHandler(BaseHTTPRequestHandler):
         # Source of truth for these assets is internal/admin/ui/*. Copies
         # live in ui_public/. See `make sync-ui`.
         # ------------------------------------------------------------------
+        # Auth: CF Access (edge gate) — no origin-side check needed
         if path == "/earlscheib" or path.startswith("/earlscheib/"):
             # NOTE: `import os` is re-bound locally elsewhere in do_GET, which
             # turns `os` into a function-local name for the whole method and
             # causes UnboundLocalError on first reference here. Alias to a
             # local name loaded via import to dodge the scoping trap.
             import os as _os_ui
-            if not ADMIN_UI_ENABLED:
-                self.send_response(404); self.end_headers(); return
-            auth = self.headers.get("Authorization", "")
-            if not _validate_basic_auth(auth):
-                self.send_response(401)
-                self.send_header("WWW-Authenticate", 'Basic realm="Earl Scheib Queue"')
-                self.send_header("Content-Length", "0")
-                self.end_headers()
-                return
-
-            log.info("basic-auth: user=%s ip=%s path=%s",
-                     ADMIN_UI_USER, self.client_address[0], path)
 
             app_dir = _os_ui.path.dirname(_os_ui.path.abspath(__file__))
             ui_dir = _os_ui.path.join(app_dir, "ui_public")
@@ -3156,12 +3082,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
         # can still fire one-off SMS via the queue UI for smoke testing.
         # Do NOT add a SCHEDULER_ENABLED check here — gate the loop only.
         if self.path.split("?")[0] == "/earlscheibconcord/queue/send-now":
-            # RJL-02: dual auth — operator can click "Send now" from the
-            # browser UI at /earlscheib. Body-signed HMAC still works for the
-            # Go admin proxy.
-            if not _validate_auth(self, raw):
-                self._send_json(401, {"error": "invalid signature"})
-                return
+            # Auth: CF Access (edge gate) — no origin-side check needed
             try:
                 body = json.loads(raw.decode("utf-8"))
                 job_id = int(body["id"])
@@ -3501,13 +3422,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
         content_length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(content_length) if content_length > 0 else b""
 
-        # RJL-02: dual auth — operator's browser cancels jobs via DELETE too.
-        # HMAC signs the exact JSON body bytes (matches telemetry precedent);
-        # Basic auth is accepted unconditionally of body content.
-        if not _validate_auth(self, raw):
-            self._send_json(401, {"error": "invalid signature"})
-            return
-
+        # Auth: CF Access (edge gate) — no origin-side check needed
         try:
             body = json.loads(raw.decode("utf-8"))
             job_id = int(body["id"])
