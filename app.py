@@ -95,7 +95,9 @@ TEST_PHONE_RECIPIENTS = [
 # Even if TEST_PHONE_RECIPIENTS is dropped or send_sms() is bypassed, no
 # message can reach a number outside this set. To go live with real customer
 # texting, set SMS_ALLOWLIST = set() (empty disables the guard).
-SMS_ALLOWLIST = {"+15308450190", "+19254215772"}
+# 2026-05-15: A2P 10DLC complete and Marco signed off on real-customer sends —
+# allowlist intentionally empty so customer numbers from the queue are honored.
+SMS_ALLOWLIST = set()
 # OH4-04: collapse all scheduling (24h / 72h / review-24h) to now+60s when
 # this env var is "1". Useful for inside-a-shift end-to-end testing; leave
 # dedup intact so duplicate /estimate POSTs still skip.
