@@ -115,6 +115,15 @@ SCHEDULER_ENABLED = os.getenv("SCHEDULER_ENABLED", "0") == "1"
 _GATED_LOG_INTERVAL_S = 3600
 _last_gated_log_ts = 0
 
+# USH-01: Twilio Messages API cache for the admin Logs tab. Keyed by
+# (days, status, direction, limit). 60s TTL is plenty — the UI polls on the
+# same 15s cadence as the queue, so on a quiet shop most requests hit cache.
+# Avoids hammering Twilio (and burning REST quota) when multiple operators
+# have the Logs tab open. Cleared on process restart; no persistent state.
+_TWILIO_MSG_CACHE: dict = {}
+_TWILIO_MSG_CACHE_TTL_S = 60
+_TWILIO_MSG_CACHE_LOCK = threading.Lock()
+
 # BMS namespace
 BMS_NS = "http://www.cieca.com/BMS"
 NS = {"bms": BMS_NS}
@@ -221,15 +230,6 @@ def _validate_hmac(body: bytes, sig_header: str) -> bool:
 
 # Auth: CF Access is the sole gate for the admin UI and operator endpoints.
 # Machine-to-machine endpoints (watcher → server) are HMAC-signed; see _validate_hmac.
-
-
-def _validate_auth(handler, raw: bytes) -> bool:
-    """Return True if the request carries a valid HMAC signature.
-    Operator/browser access is gated by Cloudflare Access at the edge;
-    this function is for machine-to-machine endpoints only.
-    """
-    sig = handler.headers.get("X-EMS-Signature", "")
-    return _validate_hmac(raw, sig)
 
 
 # ---------------------------------------------------------------------------
@@ -891,6 +891,161 @@ def _send_single_sms(to: str, body: str) -> tuple[bool, str]:
     except URLError as exc:
         log.error("Twilio request failed to=%s: %s", to, exc)
         return False, f"twilio_url_error: {exc}"[:200]
+
+
+# USH-01: Twilio Messages API reader for the admin Logs tab. Source of truth
+# for what actually went out (and came in) on the wire — the local sms_log
+# table only records what we *tried* to send and can be misleading when
+# TEST_PHONE_* redirects are toggled.
+_TWILIO_STATUS_WHITELIST = {
+    "all", "accepted", "queued", "sending", "sent",
+    "delivered", "undelivered", "failed", "receiving", "received",
+}
+_TWILIO_DIRECTION_WHITELIST = {"all", "outbound", "inbound"}
+
+
+def _parse_twilio_date_sent(date_str: str) -> int:
+    """Twilio returns RFC 2822 dates like 'Fri, 15 May 2026 21:47:27 +0000'.
+    Convert to unix seconds. Return 0 on any parse failure so the row still
+    renders (UI shows '—' for ts=0)."""
+    if not date_str:
+        return 0
+    try:
+        from email.utils import parsedate_to_datetime
+        dt = parsedate_to_datetime(date_str)
+        return int(dt.timestamp())
+    except (TypeError, ValueError, AttributeError):
+        return 0
+
+
+def _fetch_twilio_messages(
+    days: int, status: str, direction: str, limit: int,
+) -> tuple[list[dict], str]:
+    """Fetch + normalize Twilio Messages for the admin Logs view.
+
+    Returns (rows, error). On success, error is "". On failure, rows is []
+    and error is a short tag suitable for surfacing in the JSON response.
+
+    Filters applied at the Twilio side when possible (DateSent>=, PageSize),
+    then client-side for direction and status when Twilio's filter doesn't
+    natively support the value combo we want.
+    """
+    if not TWILIO_ACCOUNT_SID or not TWILIO_API_KEY or not TWILIO_API_SECRET:
+        return [], "twilio_creds_missing"
+
+    # Build query string. DateSent>=YYYY-MM-DD is the canonical filter.
+    from urllib.parse import urlencode
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    params = {
+        "DateSent>": since.strftime("%Y-%m-%d"),
+        "PageSize": str(min(limit, 1000)),
+    }
+    url = (
+        f"https://api.twilio.com/2010-04-01/Accounts/"
+        f"{TWILIO_ACCOUNT_SID}/Messages.json?{urlencode(params)}"
+    )
+
+    credentials = f"{TWILIO_API_KEY}:{TWILIO_API_SECRET}"
+    encoded = base64.b64encode(credentials.encode("utf-8")).decode("utf-8")
+    req = Request(url, method="GET")
+    req.add_header("Authorization", f"Basic {encoded}")
+    req.add_header("Accept", "application/json")
+
+    try:
+        with urlopen(req, timeout=15) as resp:
+            if resp.status != 200:
+                return [], f"twilio_http_{resp.status}"
+            payload = json.loads(resp.read().decode("utf-8"))
+    except URLError as exc:
+        log.error("Twilio messages fetch failed: %s", exc)
+        return [], "twilio_url_error"
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        log.error("Twilio messages parse failed: %s", exc)
+        return [], "twilio_parse_error"
+
+    raw_msgs = payload.get("messages", []) or []
+    rows: list[dict] = []
+    for m in raw_msgs:
+        # Twilio's direction values: outbound-api, outbound-call, outbound-reply,
+        # inbound. Normalize to {outbound, inbound} for the UI.
+        raw_dir = (m.get("direction") or "").lower()
+        norm_dir = "inbound" if raw_dir.startswith("inbound") else "outbound"
+        msg_status = (m.get("status") or "").lower()
+        if direction != "all" and norm_dir != direction:
+            continue
+        if status != "all" and msg_status != status:
+            continue
+        rows.append({
+            "sid": m.get("sid") or "",
+            "date_sent": _parse_twilio_date_sent(m.get("date_sent") or m.get("date_created") or ""),
+            "direction": norm_dir,
+            "status": msg_status,
+            "from": m.get("from") or "",
+            "to": m.get("to") or "",
+            "body": (m.get("body") or "")[:500],  # bound payload size
+            "error_code": m.get("error_code"),
+            "error_message": m.get("error_message"),
+            "price": m.get("price"),
+            "price_unit": m.get("price_unit"),
+        })
+
+    # Customer enrichment: most recent jobs row per phone wins. Single query,
+    # in-memory join — cheaper than N round-trips and the jobs table is small.
+    phones = {r["from"] if r["direction"] == "inbound" else r["to"] for r in rows}
+    phones = {p for p in phones if p}
+    enrichment: dict[str, dict] = {}
+    if phones:
+        placeholders = ",".join("?" * len(phones))
+        con = get_db()
+        try:
+            cur = con.cursor()
+            cur.execute(
+                f"SELECT id, phone, name, job_type "
+                f"FROM jobs WHERE phone IN ({placeholders}) "
+                f"ORDER BY created_at DESC, id DESC",
+                tuple(phones),
+            )
+            for jr in cur.fetchall():
+                # First row wins per phone (already DESC-ordered).
+                enrichment.setdefault(
+                    jr["phone"],
+                    {
+                        "job_id": jr["id"],
+                        "customer_name": jr["name"],
+                        "job_type": jr["job_type"],
+                    },
+                )
+        finally:
+            con.close()
+    for r in rows:
+        match_phone = r["from"] if r["direction"] == "inbound" else r["to"]
+        meta = enrichment.get(match_phone, {})
+        r["customer_name"] = meta.get("customer_name") or None
+        r["job_id"] = meta.get("job_id")
+        r["job_type"] = meta.get("job_type") or None
+
+    rows.sort(key=lambda r: r["date_sent"], reverse=True)
+    return rows, ""
+
+
+def _get_twilio_messages_cached(
+    days: int, status: str, direction: str, limit: int,
+) -> tuple[list[dict], str, int, int]:
+    """Cache-aware wrapper around _fetch_twilio_messages.
+
+    Returns (rows, error, cached_at, stale_seconds).
+    """
+    key = (days, status, direction, limit)
+    now = int(time.time())
+    with _TWILIO_MSG_CACHE_LOCK:
+        cached = _TWILIO_MSG_CACHE.get(key)
+        if cached and (now - cached["cached_at"]) < _TWILIO_MSG_CACHE_TTL_S:
+            return cached["rows"], cached["error"], cached["cached_at"], now - cached["cached_at"]
+    # Fetch outside the lock so a slow Twilio call doesn't block other readers.
+    rows, error = _fetch_twilio_messages(days, status, direction, limit)
+    with _TWILIO_MSG_CACHE_LOCK:
+        _TWILIO_MSG_CACHE[key] = {"rows": rows, "error": error, "cached_at": now}
+    return rows, error, now, 0
 
 
 # ---------------------------------------------------------------------------
@@ -2614,14 +2769,57 @@ class WebhookHandler(BaseHTTPRequestHandler):
             self._send_json(200, rows)
             return
 
+        # USH-01: Twilio-backed messages view for the admin Logs tab. Replaces
+        # the local sms_log view (which only knows what we *tried* to send and
+        # can mislead when TEST_PHONE_RECIPIENTS fan-out is toggled). Reads
+        # straight from Twilio's Messages API and enriches with customer name
+        # / job_id by joining against the local `jobs` table on phone.
+        # Auth: CF Access (edge gate) — same pattern as /queue.
+        if path == "/earlscheibconcord/twilio-messages":
+            qs = parse_qs(parsed.query)
+            try:
+                days = int(qs.get("days", ["30"])[0])
+            except ValueError:
+                days = 30
+            days = max(1, min(days, 90))
+            try:
+                limit = int(qs.get("limit", ["200"])[0])
+            except ValueError:
+                limit = 200
+            limit = max(1, min(limit, 500))
+            status = qs.get("status", ["all"])[0].lower()
+            if status not in _TWILIO_STATUS_WHITELIST:
+                self._send_json(400, {"error": "invalid status"})
+                return
+            direction = qs.get("direction", ["all"])[0].lower()
+            if direction not in _TWILIO_DIRECTION_WHITELIST:
+                self._send_json(400, {"error": "invalid direction"})
+                return
+
+            rows, error, cached_at, stale_seconds = _get_twilio_messages_cached(
+                days=days, status=status, direction=direction, limit=limit,
+            )
+            if error:
+                self._send_json(502, {
+                    "error": error,
+                    "rows": [],
+                    "count": 0,
+                })
+                return
+            self._send_json(200, {
+                "rows": rows,
+                "count": len(rows),
+                "cached_at": cached_at,
+                "stale_seconds": stale_seconds,
+                "cache_ttl_s": _TWILIO_MSG_CACHE_TTL_S,
+            })
+            return
+
         # WMH-02: GET /templates — returns the effective body for each
         # job_type (override-if-present, else default), the is_override flag,
         # placeholder catalog, and a sample row for client-side preview.
-        # Dual-auth (HMAC or Basic) — operator-only.
+        # Auth: CF Access (edge gate) — same pattern as /queue.
         if path == "/earlscheibconcord/templates":
-            if not _validate_auth(self, b""):
-                self._send_json(401, {"error": "invalid signature"})
-                return
 
             # Pull all override rows in one query so we don't hit the DB per
             # job_type.
@@ -2707,12 +2905,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
         # SPN-01: GET /schedules — returns the effective delay-hours for each
         # job_type (override-if-present, else default), is_override flag, and
-        # bounds. Dual-auth (HMAC or Basic) — operator-only. Mirrors /templates
-        # exactly so the UI can use the same card pattern.
+        # bounds. Auth: CF Access (edge gate). Mirrors /templates exactly so
+        # the UI can use the same card pattern.
         if path == "/earlscheibconcord/schedules":
-            if not _validate_auth(self, b""):
-                self._send_json(401, {"error": "invalid signature"})
-                return
 
             overrides = {}
             con = get_db()
@@ -3169,12 +3364,11 @@ class WebhookHandler(BaseHTTPRequestHandler):
         # GLV-01: SMS send-log read endpoint. POST (with empty body) so the
         # HMAC of "" parity matches GET /queue. Query params: limit (1..500),
         # status (all|sent|failed). Returns the latest N rows DESC by
-        # created_at. Operator-only — dual-auth.
+        # created_at. Auth: CF Access (edge gate).
+        # USH-01: superseded by GET /twilio-messages for the admin UI; kept
+        # for diagnostic access to the local sms_log table.
         sms_log_path = self.path.split("?")[0]
         if sms_log_path == "/earlscheibconcord/sms-log":
-            if not _validate_auth(self, raw):
-                self._send_json(401, {"error": "invalid signature"})
-                return
             parsed_q = urlparse(self.path)
             qs = parse_qs(parsed_q.query)
             try:
@@ -3218,11 +3412,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
         # GLV-01: Resend — re-fire an already-sent (or pending) job via Twilio
         # WITHOUT touching the row's sent flag. The original row's "sent"
         # status is the historical record of the first delivery; the resend
-        # is recorded in sms_log only. Operator-only — dual-auth.
+        # is recorded in sms_log only. Auth: CF Access (edge gate).
         if self.path.split("?")[0] == "/earlscheibconcord/queue/resend":
-            if not _validate_auth(self, raw):
-                self._send_json(401, {"error": "invalid signature"})
-                return
             try:
                 body = json.loads(raw.decode("utf-8"))
                 job_id = int(body["id"])
@@ -3279,9 +3470,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
         # SMS is sent; Marco can subsequently click Send-now or wait for the
         # scheduler when re-enabled.
         if self.path.split("?")[0] == "/earlscheibconcord/queue/uncancel":
-            if not _validate_auth(self, raw):
-                self._send_json(401, {"error": "invalid signature"})
-                return
+            # Auth: CF Access (edge gate).
             try:
                 body = json.loads(raw.decode("utf-8"))
                 job_id = int(body["id"])
@@ -3310,9 +3499,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
             return
 
         if self.path.split("?")[0] == "/earlscheibconcord/reset-test-jobs":
-            if not _validate_auth(self, raw):
-                self._send_json(401, {"error": "invalid signature"})
-                return
+            # Auth: CF Access (edge gate).
             con = get_db()
             try:
                 n = _reset_test_jobs(con)
@@ -3496,9 +3683,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
         content_length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(content_length) if content_length > 0 else b""
 
-        if not _validate_auth(self, raw):
-            self._send_json(401, {"error": "invalid signature"})
-            return
+        # Auth: CF Access (edge gate).
 
         job_type = path[len(prefix):]
         valid_types = {m["job_type"] for m in JOB_TYPE_META}
@@ -3605,9 +3790,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
         content_length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(content_length) if content_length > 0 else b""
 
-        if not _validate_auth(self, raw):
-            self._send_json(401, {"error": "invalid signature"})
-            return
+        # Auth: CF Access (edge gate).
 
         job_type = path[len(prefix):]
         valid_types = {m["job_type"] for m in JOB_TYPE_META}

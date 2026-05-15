@@ -1682,7 +1682,7 @@
       if (viewLogs)  viewLogs.hidden  = target !== 'logs';
       if (target === 'templates') loadTemplates(false);
       if (target === 'schedules') loadSchedules(false);
-      if (target === 'logs')      loadSmsLog();
+      if (target === 'logs')      loadTwilioMessages();
     };
 
     links.forEach((a) => {
@@ -1699,79 +1699,113 @@
     if (window.location.hash === '#logs')      activate('logs');
   }
 
-  // ---------- Logs view (GLV-01) --------------------------------------
+  // ---------- Logs view (USH-01) --------------------------------------
+  // Twilio-backed message log. Replaces the previous sms_log-backed view —
+  // the local table couldn't distinguish "we tried to send to the customer"
+  // from "we actually sent to the customer" when TEST_PHONE_RECIPIENTS
+  // fan-out was toggled. Twilio's Messages API is the source of truth.
 
-  // Filter state for the Logs view. Mirrors the Queue's pill pattern.
-  // Valid values: 'all' | 'sent' | 'failed'.
-  let currentLogsFilter = 'all';
-  let logsRefreshTimerId = null;
+  const currentLogsFilters = { status: 'all', direction: 'all', days: 30 };
 
-  // The sms-log read endpoint accepts POST + HMAC-or-basic — auth gate is
-  // identical to /queue. Use POST with empty body so HMAC signing of "" works
-  // identically to the existing endpoints.
-  const smsLogURL = IS_LOCAL_ADMIN
-    ? '/api/sms-log'
-    : `${API_BASE}/sms-log`;
+  // GET endpoint — no auth body, query-string only. CF Access gates the edge.
+  const twilioMessagesURL = IS_LOCAL_ADMIN
+    ? '/api/twilio-messages'
+    : `${API_BASE}/twilio-messages`;
 
-  async function loadSmsLog() {
+  async function loadTwilioMessages() {
     const listEl = document.getElementById('logs-list');
     if (!listEl) return;
+    const params = new URLSearchParams({
+      status: currentLogsFilters.status,
+      direction: currentLogsFilters.direction,
+      days: String(currentLogsFilters.days),
+      limit: '200',
+    });
     try {
-      const url = `${smsLogURL}?limit=200&status=${encodeURIComponent(currentLogsFilter)}`;
-      const resp = await fetch(url, {
-        method: 'POST',
-        body: '',
-        headers: { 'Content-Type': 'application/json' },
+      const resp = await fetch(`${twilioMessagesURL}?${params.toString()}`, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
       });
       if (!resp.ok) {
-        listEl.innerHTML = `<div class="logs-empty">Failed to load (HTTP ${resp.status}).</div>`;
+        // 502 with a body still has useful diagnostic — show the tag.
+        let detail = `HTTP ${resp.status}`;
+        try {
+          const data = await resp.json();
+          if (data && data.error) detail = `${detail} (${data.error})`;
+        } catch (_) { /* body wasn't JSON */ }
+        listEl.innerHTML = `<div class="logs-empty">Failed to load: ${escapeHTML(detail)}.</div>`;
+        updateLogsFreshness(null);
         return;
       }
       const data = await resp.json();
-      renderSmsLog(data.rows || []);
+      renderTwilioMessages(data.rows || []);
+      updateLogsFreshness(data);
     } catch (exc) {
       listEl.innerHTML = `<div class="logs-empty">Failed to load: ${escapeHTML(String(exc))}.</div>`;
+      updateLogsFreshness(null);
     }
   }
 
-  function renderSmsLog(rows) {
+  function renderTwilioMessages(rows) {
     const listEl = document.getElementById('logs-list');
     if (!listEl) return;
     if (!rows.length) {
-      listEl.innerHTML = '<div class="logs-empty">No send attempts logged yet.</div>';
+      listEl.innerHTML = '<div class="logs-empty">No messages in this range.</div>';
       return;
     }
     const frag = document.createDocumentFragment();
     rows.forEach((row) => {
       const div = document.createElement('div');
       div.className = 'log-row';
-      const ts = new Date((row.created_at || 0) * 1000);
-      const tsStr = isFinite(ts.getTime())
-        ? `${ts.toLocaleDateString()} ${ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+      const ts = new Date((row.date_sent || 0) * 1000);
+      const tsStr = isFinite(ts.getTime()) && row.date_sent
+        ? `${ts.toLocaleDateString()} ${ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
         : '—';
-      const status = (row.status || 'failed').toLowerCase();
-      const kindText = (row.kind || 'send').toLowerCase();
+      const direction = row.direction === 'inbound' ? 'inbound' : 'outbound';
+      const arrow = direction === 'inbound' ? '↓' : '↑';
+      const status = (row.status || '').toLowerCase();
+      const customer = row.customer_name || '—';
+      const matchPhone = direction === 'inbound' ? (row.from || '') : (row.to || '');
+      const phone = matchPhone || '—';
       const jobType = row.job_type || '—';
-      const phone = row.phone || '—';
       const body = row.body || '';
-      const err = row.error ? `<small>${escapeHTML(row.error)}</small>` : '';
-      const testTag = row.is_test
-        ? '<span class="log-row__test-tag">test</span>'
+      const errParts = [];
+      if (row.error_code) errParts.push(`code ${row.error_code}`);
+      if (row.error_message) errParts.push(row.error_message);
+      const err = errParts.length
+        ? `<small>${escapeHTML(errParts.join(' — '))}</small>`
         : '';
+      const sidShort = row.sid ? row.sid.slice(0, 8) : '—';
       div.innerHTML = `
         <div class="log-row__ts">${escapeHTML(tsStr)}</div>
-        <div class="log-row__status" data-status="${escapeAttr(status)}">${escapeHTML(status)}</div>
-        <div class="log-row__kind">${escapeHTML(kindText)}${testTag}</div>
-        <div>
-          <div class="log-row__phone">${escapeHTML(phone)}</div>
-          <div class="log-row__job-type">${escapeHTML(jobType)}</div>
-        </div>
+        <div class="log-row__direction" data-direction="${escapeAttr(direction)}" title="${escapeAttr(direction)}">${arrow}</div>
+        <div class="log-row__customer">${escapeHTML(customer)}</div>
+        <div class="log-row__phone">${escapeHTML(phone)}</div>
+        <div class="log-row__job-type">${escapeHTML(jobType)}</div>
+        <div class="log-row__status" data-status="${escapeAttr(status)}">${escapeHTML(status || '—')}</div>
         <div class="log-row__body">${escapeHTML(body)}${err}</div>
+        <div class="log-row__sid" title="${escapeAttr(row.sid || '')}">${escapeHTML(sidShort)}</div>
       `;
       frag.appendChild(div);
     });
     listEl.innerHTML = '';
     listEl.appendChild(frag);
+  }
+
+  function updateLogsFreshness(data) {
+    const el = document.getElementById('logs-freshness');
+    if (!el) return;
+    if (!data || !data.cached_at) {
+      el.textContent = '';
+      return;
+    }
+    const stale = Number(data.stale_seconds || 0);
+    const count = Number(data.count || 0);
+    if (stale <= 1) {
+      el.textContent = `${count} messages · just refreshed`;
+    } else {
+      el.textContent = `${count} messages · ${stale}s ago`;
+    }
   }
 
   function escapeHTML(s) {
@@ -1787,16 +1821,20 @@
   function wireLogsFilters() {
     document.querySelectorAll('.logs-filter').forEach((btn) => {
       btn.addEventListener('click', () => {
-        const f = btn.getAttribute('data-logs-filter') || 'all';
-        if (f === currentLogsFilter) return;
-        currentLogsFilter = f;
-        document.querySelectorAll('.logs-filter').forEach((b) => {
+        const key = btn.getAttribute('data-filter-key');
+        const value = btn.getAttribute('data-filter-value');
+        if (!key || value === null) return;
+        const coerced = key === 'days' ? Number(value) : value;
+        if (currentLogsFilters[key] === coerced) return;
+        currentLogsFilters[key] = coerced;
+        // Update aria-selected only within this filter group.
+        document.querySelectorAll(`.logs-filter[data-filter-key="${key}"]`).forEach((b) => {
           b.setAttribute(
             'aria-selected',
-            b.getAttribute('data-logs-filter') === f ? 'true' : 'false',
+            b.getAttribute('data-filter-value') === value ? 'true' : 'false',
           );
         });
-        loadSmsLog();
+        loadTwilioMessages();
       });
     });
   }
@@ -1814,7 +1852,7 @@
     // the poll when the tab is hidden to keep the network quiet.
     setInterval(() => {
       const viewLogs = document.getElementById('view-logs');
-      if (viewLogs && !viewLogs.hidden) loadSmsLog();
+      if (viewLogs && !viewLogs.hidden) loadTwilioMessages();
     }, REFRESH_MS);
 
     // Public-mode diagnostic labels: the same <dd> elements carry different

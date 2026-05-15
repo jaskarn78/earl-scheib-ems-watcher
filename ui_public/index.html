@@ -145,25 +145,48 @@
     </section>
   </div>
 
-  <!-- GLV-01: SMS send log view. Every Twilio attempt (send-now, resend, or
-       eventually the scheduler) is recorded in the sms_log table on the Pi
-       and surfaced here. Auto-refreshes on the same 15s cadence as the queue
-       view. Filter pills mirror the queue's pill aesthetic. -->
+  <!-- USH-01: Twilio-backed message log. Queries Twilio's Messages API
+       directly (server-side, 60s cached) so this is the source of truth for
+       what actually went out on the wire — including inbound replies from
+       customers. The local sms_log table is still recorded for diagnostics
+       (allowlist_blocked etc.) but is no longer the UI's source.
+       Auto-refreshes on the same 15s cadence as the queue view. -->
   <div id="view-logs" data-view="logs" hidden>
-    <section class="logs" aria-label="SMS send log">
+    <section class="logs" aria-label="Twilio message log">
       <header class="logs-header">
-        <h1 class="logs-title">Send log</h1>
-        <p class="logs-sub">Every SMS Twilio accepted or rejected. Most recent first. Body is truncated to ~320 characters.</p>
+        <h1 class="logs-title">Messages</h1>
+        <p class="logs-sub">Pulled live from Twilio. Outbound + inbound, most recent first. Includes the actual delivery status reported by carriers.</p>
       </header>
-      <section class="controls" aria-label="Logs filters">
-        <nav class="filters" role="tablist" aria-label="Filter sends">
-          <button class="filter logs-filter" type="button" data-logs-filter="all"    role="tab" aria-selected="true">All</button>
-          <button class="filter logs-filter" type="button" data-logs-filter="sent"   role="tab" aria-selected="false">Sent</button>
-          <button class="filter logs-filter" type="button" data-logs-filter="failed" role="tab" aria-selected="false">Failed</button>
-        </nav>
+      <section class="controls logs-controls" aria-label="Message filters">
+        <div class="logs-filter-group" role="group" aria-label="Status">
+          <span class="logs-filter-label">Status</span>
+          <nav class="filters" role="tablist">
+            <button class="filter logs-filter" type="button" data-filter-key="status" data-filter-value="all"          role="tab" aria-selected="true">All</button>
+            <button class="filter logs-filter" type="button" data-filter-key="status" data-filter-value="delivered"    role="tab" aria-selected="false">Delivered</button>
+            <button class="filter logs-filter" type="button" data-filter-key="status" data-filter-value="failed"       role="tab" aria-selected="false">Failed</button>
+            <button class="filter logs-filter" type="button" data-filter-key="status" data-filter-value="undelivered"  role="tab" aria-selected="false">Undelivered</button>
+          </nav>
+        </div>
+        <div class="logs-filter-group" role="group" aria-label="Direction">
+          <span class="logs-filter-label">Direction</span>
+          <nav class="filters" role="tablist">
+            <button class="filter logs-filter" type="button" data-filter-key="direction" data-filter-value="all"      role="tab" aria-selected="true">All</button>
+            <button class="filter logs-filter" type="button" data-filter-key="direction" data-filter-value="outbound" role="tab" aria-selected="false">Outbound</button>
+            <button class="filter logs-filter" type="button" data-filter-key="direction" data-filter-value="inbound"  role="tab" aria-selected="false">Inbound</button>
+          </nav>
+        </div>
+        <div class="logs-filter-group" role="group" aria-label="Range">
+          <span class="logs-filter-label">Range</span>
+          <nav class="filters" role="tablist">
+            <button class="filter logs-filter" type="button" data-filter-key="days" data-filter-value="1"  role="tab" aria-selected="false">24h</button>
+            <button class="filter logs-filter" type="button" data-filter-key="days" data-filter-value="7"  role="tab" aria-selected="false">7d</button>
+            <button class="filter logs-filter" type="button" data-filter-key="days" data-filter-value="30" role="tab" aria-selected="true">30d</button>
+          </nav>
+        </div>
+        <div class="logs-freshness" id="logs-freshness" aria-live="polite"></div>
       </section>
       <div id="logs-list" class="logs-list" aria-live="polite">
-        <!-- One .log-row per sms_log entry, injected by main.js. -->
+        <!-- One .log-row per Twilio message, injected by main.js. -->
       </div>
     </section>
   </div>

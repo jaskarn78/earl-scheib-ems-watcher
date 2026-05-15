@@ -90,23 +90,23 @@ def test_get_templates_sample_row_from_pending_job(queue_server):
     assert sample["review_url"] == "https://g.page/r/review"
 
 
-def test_get_templates_bad_signature(queue_server):
-    req = Request(f"{queue_server['base_url']}{BASE}",
-                  headers={"X-EMS-Signature": "00" * 32})
-    try:
-        urlopen(req, timeout=3)
-        assert False, "expected 401"
-    except HTTPError as e:
-        assert e.code == 401
-
-
-def test_get_templates_missing_signature(queue_server):
+def test_get_templates_no_signature_allowed(queue_server):
+    """USH-01: GET /templates has no origin-side auth — CF Access is the edge gate.
+    Unsigned requests pass through to the templates response."""
     req = Request(f"{queue_server['base_url']}{BASE}")
-    try:
-        urlopen(req, timeout=3)
-        assert False, "expected 401"
-    except HTTPError as e:
-        assert e.code == 401
+    with urlopen(req, timeout=3) as resp:
+        assert resp.status == 200
+        body = json.loads(resp.read().decode("utf-8"))
+    assert "job_types" in body
+
+
+def test_get_templates_with_signature_still_works(queue_server):
+    """HMAC-signed requests continue to work (Go admin proxy path)."""
+    sig = sign(queue_server["secret"], b"")
+    req = Request(f"{queue_server['base_url']}{BASE}",
+                  headers={"X-EMS-Signature": sig})
+    with urlopen(req, timeout=3) as resp:
+        assert resp.status == 200
 
 
 # ---------- PUT: happy paths ----------
@@ -250,16 +250,18 @@ def test_put_templates_missing_body_field(queue_server):
         assert e.code == 400
 
 
-def test_put_templates_bad_signature(queue_server):
-    raw = json.dumps({"body": "legit body"}).encode("utf-8")
+def test_put_templates_no_signature_allowed(queue_server):
+    """USH-01: PUT /templates/{job_type} has no origin-side auth — CF Access
+    is the edge gate. An unsigned PUT successfully writes the override."""
+    raw = json.dumps({"body": "Unsigned-OK {first_name} {shop_name}"}).encode("utf-8")
     req = Request(f"{queue_server['base_url']}{BASE}/24h",
                   data=raw, method="PUT",
-                  headers={"X-EMS-Signature": "00" * 32, "Content-Type": "application/json"})
-    try:
-        urlopen(req, timeout=3)
-        assert False, "expected 401"
-    except HTTPError as e:
-        assert e.code == 401
+                  headers={"Content-Type": "application/json"})
+    with urlopen(req, timeout=3) as resp:
+        assert resp.status == 200
+        body = json.loads(resp.read().decode("utf-8"))
+    assert body["is_override"] is True
+    assert body["body"] == "Unsigned-OK {first_name} {shop_name}"
 
 
 def test_put_templates_invalid_path_returns_404(queue_server):

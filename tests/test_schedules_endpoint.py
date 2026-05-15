@@ -67,25 +67,25 @@ def test_get_schedules_default_delays(queue_server):
         assert jt["when"]
 
 
-def test_get_schedules_bad_signature(queue_server):
+def test_get_schedules_no_signature_allowed(queue_server):
+    """USH-01: GET /schedules has no origin-side auth — CF Access is the edge gate.
+    Unsigned requests pass through to the schedules response."""
+    req = Request(f"{queue_server['base_url']}{BASE}")
+    with urlopen(req, timeout=3) as resp:
+        assert resp.status == 200
+        body = json.loads(resp.read().decode("utf-8"))
+    assert "job_types" in body
+
+
+def test_get_schedules_with_signature_still_works(queue_server):
+    """HMAC-signed requests continue to work (Go admin proxy path)."""
+    sig = sign(queue_server["secret"], b"")
     req = Request(
         f"{queue_server['base_url']}{BASE}",
-        headers={"X-EMS-Signature": "00" * 32},
+        headers={"X-EMS-Signature": sig},
     )
-    try:
-        urlopen(req, timeout=3)
-        assert False, "expected 401"
-    except HTTPError as e:
-        assert e.code == 401
-
-
-def test_get_schedules_missing_signature(queue_server):
-    req = Request(f"{queue_server['base_url']}{BASE}")
-    try:
-        urlopen(req, timeout=3)
-        assert False, "expected 401"
-    except HTTPError as e:
-        assert e.code == 401
+    with urlopen(req, timeout=3) as resp:
+        assert resp.status == 200
 
 
 # ---------- PUT happy path ----------
@@ -230,21 +230,20 @@ def test_put_schedule_unknown_job_type(queue_server):
         assert "unknown" in body["error"].lower()
 
 
-def test_put_schedule_bad_signature(queue_server):
-    raw = json.dumps({"delay_hours": 24}).encode("utf-8")
+def test_put_schedule_no_signature_allowed(queue_server):
+    """USH-01: PUT /schedules/{job_type} has no origin-side auth — CF Access
+    is the edge gate. An unsigned PUT successfully writes the override."""
+    raw = json.dumps({"delay_hours": 36}).encode("utf-8")
     req = Request(
         f"{queue_server['base_url']}{BASE}/24h",
         data=raw, method="PUT",
-        headers={
-            "X-EMS-Signature": "00" * 32,
-            "Content-Type": "application/json",
-        },
+        headers={"Content-Type": "application/json"},
     )
-    try:
-        urlopen(req, timeout=3)
-        assert False, "expected 401"
-    except HTTPError as e:
-        assert e.code == 401
+    with urlopen(req, timeout=3) as resp:
+        assert resp.status == 200
+        body = json.loads(resp.read().decode("utf-8"))
+    assert body["delay_hours"] == 36
+    assert body["is_override"] is True
 
 
 # ---------- SPN-02: rebase-on-PUT ----------
