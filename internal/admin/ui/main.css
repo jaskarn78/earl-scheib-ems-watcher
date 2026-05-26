@@ -1315,33 +1315,78 @@ body {
   .diag-grid dt { margin-top: 10px; }
 }
 
-/* ============== SPN-04: dev-mode banner ============== */
+/* ============== WNC-01: auto-send toggle bar ============== */
 
-.dev-banner {
-  background-color: var(--oxblood);
-  color: #fff;
-  padding: 10px 24px;
+/* A clearly visible but non-alarming strip above the topbar.
+   Uses the cream/oxblood palette already in the design system.
+   No transitions/animations (CLAUDE.md design discipline). */
+.auto-send-toggle {
+  background-color: var(--surface-alt, #f5f0eb);
+  border-bottom: 1px solid var(--hairline, #ddd);
+  padding: 8px 24px;
+  display: flex;
+  align-items: center;
+}
+
+.auto-send-toggle__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
   font-family: "Inter", system-ui, sans-serif;
   font-size: 13px;
-  letter-spacing: 0.01em;
-  text-align: center;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.15);
-}
-.dev-banner strong {
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.dev-banner em {
-  font-style: italic;
   font-weight: 500;
+  color: var(--ink, #1a2d4d);
 }
-.dev-banner code {
-  font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace;
-  background-color: rgba(255, 255, 255, 0.18);
-  padding: 1px 6px;
-  border-radius: 4px;
-  font-size: 12px;
+
+/* Visually hidden checkbox — track renders via adjacent sibling. */
+.auto-send-toggle__input {
+  position: absolute;
+  opacity: 0;
+  width: 36px;
+  height: 20px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.auto-send-toggle__track {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--ink-soft, #8a9ab0);
+  flex: 0 0 auto;
+}
+
+.auto-send-toggle__track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--surface, #fff);
+}
+
+/* ON state — track flips to oxblood, thumb shifts right. Instantaneous. */
+.auto-send-toggle__input:checked + .auto-send-toggle__track {
+  background: var(--oxblood, #8b1a23);
+}
+.auto-send-toggle__input:checked + .auto-send-toggle__track::after {
+  left: 18px;
+}
+
+/* Keyboard focus ring. */
+.auto-send-toggle__input:focus-visible + .auto-send-toggle__track {
+  outline: 2px solid var(--oxblood, #8b1a23);
+  outline-offset: 2px;
+}
+
+.auto-send-toggle__text {
+  letter-spacing: 0.01em;
 }
 
 /* ============== SPN-05: Schedules editor ============== */

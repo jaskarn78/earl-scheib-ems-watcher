@@ -103,14 +103,14 @@ SMS_ALLOWLIST = set()
 # dedup intact so duplicate /estimate POSTs still skip.
 IMMEDIATE_SEND_FOR_TESTING = os.getenv("IMMEDIATE_SEND_FOR_TESTING", "") == "1"
 
-# SPN-03: master kill-switch for the auto-send scheduler loop. Default OFF
-# during the staging-to-production migration window so no automatic SMS
-# fires until the operator explicitly opts in. _fire_due_jobs is gated on
-# this constant inside scheduler_loop. The /queue/send-now endpoint is
-# INTENTIONALLY NOT GATED — manual operator clicks still send regardless of
-# this flag (for end-to-end smoke testing during the gate-off period).
-SCHEDULER_ENABLED = os.getenv("SCHEDULER_ENABLED", "0") == "1"
-# Throttle the "scheduler gated off" log message to once per hour so the
+# WNC-01: Persistent auto-send toggle backed by the app_settings DB table.
+# The SCHEDULER_ENABLED env var is only a first-boot seed — once the
+# app_settings row exists, env changes have no effect. The DB value is the
+# sole gate. See get_auto_send_enabled() / set_auto_send_enabled().
+# _AUTO_SEND_SEED is evaluated at module load; init_db() seeds with INSERT OR IGNORE.
+AUTO_SEND_SETTING_KEY = "auto_send_enabled"
+_AUTO_SEND_SEED = "1" if os.getenv("SCHEDULER_ENABLED", "0") == "1" else "0"
+# Throttle the "auto-send disabled" log message to once per hour so the
 # log file isn't flooded with one line every 30 seconds.
 _GATED_LOG_INTERVAL_S = 3600
 _last_gated_log_ts = 0
@@ -389,6 +389,26 @@ def init_db():
     )
     con.commit()
 
+    # WNC-01: generic key-value settings table. Future toggles reuse this.
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key        TEXT PRIMARY KEY,
+            value      TEXT NOT NULL,
+            updated_at INTEGER NOT NULL
+        )
+        """
+    )
+    con.commit()
+
+    # First-boot seed: INSERT OR IGNORE means this is a no-op when the row
+    # already exists — DB value wins; env changes after first boot are ignored.
+    cur.execute(
+        "INSERT OR IGNORE INTO app_settings(key, value, updated_at) VALUES (?, ?, ?)",
+        (AUTO_SEND_SETTING_KEY, _AUTO_SEND_SEED, int(time.time())),
+    )
+    con.commit()
+
     _seed_test_jobs_if_missing(con)
     con.close()
     log.info("DB initialised at %s", DB_PATH)
@@ -500,6 +520,64 @@ def get_schedule_enabled(job_type: str) -> bool:
         return bool(int(val))
     except (TypeError, ValueError):
         return True
+
+
+def get_auto_send_enabled() -> bool:
+    """WNC-01: return True iff the auto-send toggle is ON in app_settings.
+
+    Defaults to False (OFF) when:
+      - app_settings table missing (pre-migration or bypass path)
+      - Row missing or value is NULL
+      - Any parse error
+
+    Conservative safe-default: OFF for a live SMS server means we never
+    accidentally blast texts when DB state is uncertain.
+
+    Mirrors get_schedule_enabled's defensive shape exactly.
+    """
+    try:
+        con = get_db()
+        try:
+            cur = con.cursor()
+            cur.execute(
+                "SELECT value FROM app_settings WHERE key = ?",
+                (AUTO_SEND_SETTING_KEY,),
+            )
+            row = cur.fetchone()
+        finally:
+            con.close()
+    except sqlite3.OperationalError as exc:
+        log.warning("get_auto_send_enabled: %s", exc)
+        return False
+    if row is None:
+        return False
+    val = row["value"] if hasattr(row, "keys") else row[0]
+    if val is None:
+        return False
+    try:
+        return val == "1"
+    except (TypeError, ValueError):
+        return False
+
+
+def set_auto_send_enabled(enabled: bool) -> None:
+    """WNC-01: persist the auto-send toggle state to app_settings.
+
+    Upserts the row so it works whether the table is seeded or not.
+    Stores "1" for True, "0" for False.
+    Uses parameterized SQL throughout (codebase norm).
+    """
+    value = "1" if enabled else "0"
+    con = get_db()
+    try:
+        con.execute(
+            "INSERT INTO app_settings(key, value, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+            (AUTO_SEND_SETTING_KEY, value, int(time.time())),
+        )
+        con.commit()
+    finally:
+        con.close()
 
 
 def _get_template_override(job_type: str) -> str:
@@ -1128,23 +1206,23 @@ def _get_twilio_messages_cached(
 def scheduler_loop():
     """Background thread: fires due jobs every 30 seconds.
 
-    SPN-03: Gated on SCHEDULER_ENABLED env-var (default off). When the gate
-    is closed, _fire_due_jobs is skipped and a single log line is emitted
-    at most once per hour so the operator knows the watcher is alive but
-    intentionally not firing. Manual /queue/send-now is NOT gated and
-    continues to fire on operator click.
+    WNC-01: Gated on get_auto_send_enabled() (fresh DB read each iteration).
+    When the gate is closed, _fire_due_jobs is skipped and a single log line
+    is emitted at most once per hour so the operator knows the watcher is
+    alive but intentionally not firing. Manual /queue/send-now is NOT gated
+    and continues to fire on operator click.
     """
-    log.info("Scheduler started (SCHEDULER_ENABLED=%s)", SCHEDULER_ENABLED)
+    log.info("Scheduler started (auto_send_enabled=%s)", get_auto_send_enabled())
     global _last_gated_log_ts
     while True:
         try:
-            if SCHEDULER_ENABLED:
+            if get_auto_send_enabled():
                 _fire_due_jobs()
             else:
                 now = int(time.time())
                 if now - _last_gated_log_ts >= _GATED_LOG_INTERVAL_S:
                     log.info(
-                        "scheduler gated off; SCHEDULER_ENABLED=0 "
+                        "auto-send disabled via toggle "
                         "— manual send-now still works"
                     )
                     _last_gated_log_ts = now
@@ -3088,9 +3166,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 "commands_state": commands_state,
                 "recent_log_tail": tail,
                 "received_logs_count": received_logs_count,
-                # SPN-04: surface the scheduler kill-switch state so both
-                # admin UIs can render a DEV-mode banner when gated off.
-                "scheduler_enabled": SCHEDULER_ENABLED,
+                # WNC-01: surface the auto-send toggle state so the admin UI
+                # can render the toggle. Key name preserved for UI back-compat.
+                "scheduler_enabled": get_auto_send_enabled(),
                 # GLV-incident-260514: masked Twilio sender number.
                 "twilio_from_masked": twilio_from_masked,
             })
@@ -3432,6 +3510,28 @@ class WebhookHandler(BaseHTTPRequestHandler):
                     con2.close()
                 log.error("send-now: id=%s twilio send failed; rolled back sent flag", job_id)
                 self._send_json(500, {"error": "twilio_send_failed"})
+            return
+
+        # WNC-01: auto-send toggle endpoint. Marco flips auto-send ON/OFF
+        # from the admin UI. State is persisted in app_settings (DB).
+        # Auth: CF Access (edge gate) — same as send-now, no origin-side check.
+        # T-wnc-01: strict bool validation — reject non-bool (ints, strings,
+        # missing key, bad JSON) with 400.
+        if self.path.split("?")[0] == "/earlscheibconcord/auto-send":
+            try:
+                body = json.loads(raw.decode("utf-8"))
+                enabled = body["enabled"]
+                # isinstance check: True/False pass; 0/1 ints fail (bool is a
+                # subclass of int, so isinstance(True, bool) is True but
+                # isinstance(1, bool) is False).
+                if not isinstance(enabled, bool):
+                    raise ValueError("enabled must be a real bool")
+            except (ValueError, KeyError, json.JSONDecodeError, UnicodeDecodeError):
+                self._send_json(400, {"error": "invalid JSON"})
+                return
+            set_auto_send_enabled(enabled)
+            log.info("auto-send toggle: enabled=%s", enabled)
+            self._send_json(200, {"enabled": enabled})
             return
 
         # GLV-01: SMS send-log read endpoint. POST (with empty body) so the

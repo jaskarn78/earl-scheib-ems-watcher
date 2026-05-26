@@ -1,12 +1,11 @@
-"""Tests for SPN-03 scheduler kill-switch (SCHEDULER_ENABLED env-var).
+"""Tests for WNC-01: persistent auto-send toggle backed by app_settings table.
 
-When SCHEDULER_ENABLED != "1": _fire_due_jobs is skipped by scheduler_loop
-(verified via direct calls — we don't run the loop in tests). Manual
-send-now (POST /queue/send-now) is INTENTIONALLY NOT GATED and must
-continue to fire SMS regardless of the gate state.
+The toggle state lives in the DB (app_settings.key='auto_send_enabled').
+SCHEDULER_ENABLED env var is only the first-boot seed; once the row exists,
+env changes are ignored — the DB value is the sole gate.
 
-The gate is a module-level constant evaluated at import time, so each test
-mutates the env and reloads `app` to pick up the fresh value.
+Manual send-now (POST /queue/send-now) is INTENTIONALLY NOT GATED and must
+continue to fire SMS regardless of the toggle state (SPN-03 contract preserved).
 """
 import importlib
 import json
@@ -21,10 +20,12 @@ from tests.conftest import sign
 
 @pytest.fixture
 def reload_app_with_gate(monkeypatch, tmp_path):
-    """Reload app.py with a configurable SCHEDULER_ENABLED env-var.
+    """Reload app.py with a configurable SCHEDULER_ENABLED env-var seed.
 
     Returns a callable: reload_app_with_gate("1") or reload_app_with_gate("0").
     Each call returns the freshly-reloaded `app` module bound to a temp DB.
+    The db_path is SHARED across calls within the same test — used to prove
+    the env-ignored-after-seed contract (D-02).
     """
     secret = "pytest-fixture-secret-do-not-ship"
     db_path = str(tmp_path / "jobs.db")
@@ -67,29 +68,67 @@ def _seed_due_job(db_path, job_type="24h", phone="+15308450190"):
     return job_id
 
 
+# ---------------------------------------------------------------------------
+# First-boot seed tests
+# ---------------------------------------------------------------------------
+
+def test_first_boot_seed_env_zero_sets_off(reload_app_with_gate):
+    """First-boot seed: env SCHEDULER_ENABLED=0 → app_settings row OFF → get_auto_send_enabled() is False."""
+    app_mod, db_path, _ = reload_app_with_gate("0")
+    assert app_mod.get_auto_send_enabled() is False
+
+
+def test_first_boot_seed_env_one_sets_on(reload_app_with_gate):
+    """First-boot seed: env SCHEDULER_ENABLED=1 → app_settings row ON → get_auto_send_enabled() is True."""
+    app_mod, db_path, _ = reload_app_with_gate("1")
+    assert app_mod.get_auto_send_enabled() is True
+
+
+def test_first_boot_seed_env_unset_defaults_off(reload_app_with_gate):
+    """First-boot seed: env unset → defaults to 0 → get_auto_send_enabled() is False."""
+    app_mod, db_path, _ = reload_app_with_gate(None)
+    assert app_mod.get_auto_send_enabled() is False
+
+
+def test_env_ignored_after_seed(reload_app_with_gate):
+    """D-02 (load-bearing): with an existing app_settings row=OFF, reload app
+    with env=1 and call init_db again → get_auto_send_enabled() stays False.
+    DB wins; env is ignored after first boot.
+    """
+    # First boot: seed OFF.
+    app_mod, db_path, _ = reload_app_with_gate("0")
+    assert app_mod.get_auto_send_enabled() is False
+
+    # Second boot with a different env (would be "1") — same db_path.
+    app_mod2, _, _ = reload_app_with_gate("1")
+    # Row already exists from first boot with value="0"; INSERT OR IGNORE is a no-op.
+    assert app_mod2.get_auto_send_enabled() is False, (
+        "env=1 on second reload must NOT override existing DB row (D-02)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Scheduler loop gate tests
+# ---------------------------------------------------------------------------
+
 def test_scheduler_gate_disabled_skips_due_jobs(reload_app_with_gate, monkeypatch):
-    """With SCHEDULER_ENABLED=0, _fire_due_jobs should NOT call send_sms
-    for due rows. Note: this asserts behaviour of _fire_due_jobs directly.
-    The scheduler_loop function is what actually checks the gate, so we
-    additionally verify the gate-check pattern via the loop logic in
-    test_scheduler_loop_skips_when_gated below.
+    """With auto-send OFF, scheduler_loop should NOT call _fire_due_jobs.
+    We verify via direct simulation of the loop's gate check.
     """
     app_mod, db_path, _ = reload_app_with_gate("0")
-    assert app_mod.SCHEDULER_ENABLED is False
+    assert app_mod.get_auto_send_enabled() is False
 
     # Seed a due job.
     _seed_due_job(db_path)
 
-    # Patch send_sms to a recorder.
     calls = []
     def _fake_send(to, body):
         calls.append((to, body))
         return True, ""
     monkeypatch.setattr(app_mod, "send_sms", _fake_send)
 
-    # Simulate one tick of the scheduler_loop body — the gated branch
-    # should NOT call _fire_due_jobs.
-    if app_mod.SCHEDULER_ENABLED:
+    # Simulate one tick of the scheduler_loop body — gated OFF.
+    if app_mod.get_auto_send_enabled():
         app_mod._fire_due_jobs()
     # else: gated off — no-op (mirrors scheduler_loop's check).
 
@@ -104,10 +143,12 @@ def test_scheduler_gate_disabled_skips_due_jobs(reload_app_with_gate, monkeypatc
 
 
 def test_scheduler_gate_enabled_fires_due_jobs(reload_app_with_gate, monkeypatch):
-    """With SCHEDULER_ENABLED=1, _fire_due_jobs must call send_sms and mark
-    the row sent=1."""
-    app_mod, db_path, _ = reload_app_with_gate("1")
-    assert app_mod.SCHEDULER_ENABLED is True
+    """With auto-send ON (set_auto_send_enabled(True)), _fire_due_jobs must
+    call send_sms and mark the row sent=1."""
+    app_mod, db_path, _ = reload_app_with_gate("0")
+    # Start OFF, then flip ON via DB setter.
+    app_mod.set_auto_send_enabled(True)
+    assert app_mod.get_auto_send_enabled() is True
 
     _seed_due_job(db_path)
 
@@ -117,8 +158,7 @@ def test_scheduler_gate_enabled_fires_due_jobs(reload_app_with_gate, monkeypatch
         return True, ""
     monkeypatch.setattr(app_mod, "send_sms", _fake_send)
 
-    # When the gate is open, the scheduler_loop body would call
-    # _fire_due_jobs — we call it directly here.
+    # When the gate is open, call _fire_due_jobs directly.
     app_mod._fire_due_jobs()
 
     assert len(calls) == 1
@@ -133,15 +173,12 @@ def test_scheduler_gate_enabled_fires_due_jobs(reload_app_with_gate, monkeypatch
     assert sent_val == 1
 
 
-def test_scheduler_gate_default_is_off(reload_app_with_gate):
-    """Plan-locked decision D-03: default value when SCHEDULER_ENABLED is
-    unset is `"0"` (off). Reset the env-var to confirm."""
-    app_mod, _, _ = reload_app_with_gate(None)
-    assert app_mod.SCHEDULER_ENABLED is False
-
+# ---------------------------------------------------------------------------
+# Gated-off log throttle
+# ---------------------------------------------------------------------------
 
 def test_scheduler_gated_off_log_throttle_once_per_hour(reload_app_with_gate, caplog):
-    """The "scheduler gated off" log message must fire at most once per
+    """The "auto-send disabled" log message must fire at most once per
     _GATED_LOG_INTERVAL_S (3600s default). Stepping the gated branch twice
     in quick succession should produce only one log line.
     """
@@ -150,12 +187,11 @@ def test_scheduler_gated_off_log_throttle_once_per_hour(reload_app_with_gate, ca
     app_mod._last_gated_log_ts = 0
     assert app_mod._GATED_LOG_INTERVAL_S >= 3600
 
-    # Inline the scheduler_loop's gated branch twice in succession.
     def step_gated():
         now = int(time.time())
         if now - app_mod._last_gated_log_ts >= app_mod._GATED_LOG_INTERVAL_S:
             app_mod.log.info(
-                "scheduler gated off; SCHEDULER_ENABLED=0 "
+                "auto-send disabled via toggle "
                 "— manual send-now still works"
             )
             app_mod._last_gated_log_ts = now
@@ -168,23 +204,25 @@ def test_scheduler_gated_off_log_throttle_once_per_hour(reload_app_with_gate, ca
 
     gated_msgs = [
         r for r in caplog.records
-        if "scheduler gated off" in r.getMessage()
+        if "auto-send disabled" in r.getMessage()
     ]
     assert len(gated_msgs) == 1
 
 
-# ---------- Manual send-now is NOT gated (SPN-03 critical) ----------
+# ---------------------------------------------------------------------------
+# Manual send-now is NOT gated (SPN-03 critical)
+# ---------------------------------------------------------------------------
 
 def test_send_now_fires_with_gate_off(reload_app_with_gate, monkeypatch):
-    """Manual /queue/send-now MUST fire SMS regardless of SCHEDULER_ENABLED.
-    We exercise the full HTTP path: spin a server, monkeypatch send_sms,
-    POST a signed body, assert send was called.
+    """Manual /queue/send-now MUST fire SMS regardless of auto-send toggle state.
+    Full HTTP path: spin a server, monkeypatch send_sms, POST a signed body,
+    assert send was called.
     """
     import threading
     from http.server import HTTPServer
 
     app_mod, db_path, secret = reload_app_with_gate("0")
-    assert app_mod.SCHEDULER_ENABLED is False
+    assert app_mod.get_auto_send_enabled() is False
 
     # Seed a pending row.
     job_id = _seed_due_job(db_path, job_type="review", phone="+15308450190")
@@ -230,7 +268,155 @@ def test_send_now_fires_with_gate_off(reload_app_with_gate, monkeypatch):
     assert sent_val == 1
 
 
-# ---------- UKK-05: ems_bundle skips schedule_job for disabled job_types ----------
+# ---------------------------------------------------------------------------
+# POST /auto-send endpoint tests
+# ---------------------------------------------------------------------------
+
+def _spin_server(app_mod):
+    """Helper: start a WebhookHandler on an ephemeral port. Returns
+    (base_url, stop_callable)."""
+    import threading
+    from http.server import HTTPServer
+    server = HTTPServer(("127.0.0.1", 0), app_mod.WebhookHandler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    def stop():
+        server.shutdown()
+        server.server_close()
+    return f"http://127.0.0.1:{port}", stop
+
+
+def test_auto_send_endpoint_enable(reload_app_with_gate):
+    """POST /auto-send {enabled: true} persists ON and returns {enabled: true}."""
+    app_mod, db_path, secret = reload_app_with_gate("0")
+    assert app_mod.get_auto_send_enabled() is False
+
+    base_url, stop = _spin_server(app_mod)
+    try:
+        raw = json.dumps({"enabled": True}).encode("utf-8")
+        req = Request(
+            f"{base_url}/earlscheibconcord/auto-send",
+            data=raw, method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        with urlopen(req, timeout=3) as resp:
+            assert resp.status == 200
+            parsed = json.loads(resp.read().decode("utf-8"))
+        assert parsed.get("enabled") is True
+    finally:
+        stop()
+
+    assert app_mod.get_auto_send_enabled() is True
+
+
+def test_auto_send_endpoint_disable(reload_app_with_gate):
+    """POST /auto-send {enabled: false} persists OFF and returns {enabled: false}."""
+    app_mod, db_path, secret = reload_app_with_gate("1")
+    assert app_mod.get_auto_send_enabled() is True
+
+    base_url, stop = _spin_server(app_mod)
+    try:
+        raw = json.dumps({"enabled": False}).encode("utf-8")
+        req = Request(
+            f"{base_url}/earlscheibconcord/auto-send",
+            data=raw, method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        with urlopen(req, timeout=3) as resp:
+            assert resp.status == 200
+            parsed = json.loads(resp.read().decode("utf-8"))
+        assert parsed.get("enabled") is False
+    finally:
+        stop()
+
+    assert app_mod.get_auto_send_enabled() is False
+
+
+def test_auto_send_endpoint_rejects_int(reload_app_with_gate):
+    """POST /auto-send {enabled: 1} (int, not bool) must return 400."""
+    app_mod, db_path, secret = reload_app_with_gate("0")
+
+    base_url, stop = _spin_server(app_mod)
+    try:
+        raw = json.dumps({"enabled": 1}).encode("utf-8")
+        req = Request(
+            f"{base_url}/earlscheibconcord/auto-send",
+            data=raw, method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        from urllib.error import HTTPError
+        with pytest.raises(HTTPError) as exc_info:
+            urlopen(req, timeout=3)
+        assert exc_info.value.code == 400
+    finally:
+        stop()
+
+
+def test_auto_send_endpoint_rejects_string(reload_app_with_gate):
+    """POST /auto-send {enabled: "true"} (string) must return 400."""
+    app_mod, db_path, secret = reload_app_with_gate("0")
+
+    base_url, stop = _spin_server(app_mod)
+    try:
+        raw = json.dumps({"enabled": "true"}).encode("utf-8")
+        req = Request(
+            f"{base_url}/earlscheibconcord/auto-send",
+            data=raw, method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        from urllib.error import HTTPError
+        with pytest.raises(HTTPError) as exc_info:
+            urlopen(req, timeout=3)
+        assert exc_info.value.code == 400
+    finally:
+        stop()
+
+
+def test_auto_send_endpoint_rejects_missing_key(reload_app_with_gate):
+    """POST /auto-send {} (missing 'enabled' key) must return 400."""
+    app_mod, db_path, secret = reload_app_with_gate("0")
+
+    base_url, stop = _spin_server(app_mod)
+    try:
+        raw = json.dumps({}).encode("utf-8")
+        req = Request(
+            f"{base_url}/earlscheibconcord/auto-send",
+            data=raw, method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        from urllib.error import HTTPError
+        with pytest.raises(HTTPError) as exc_info:
+            urlopen(req, timeout=3)
+        assert exc_info.value.code == 400
+    finally:
+        stop()
+
+
+def test_auto_send_endpoint_rejects_bad_json(reload_app_with_gate):
+    """POST /auto-send with invalid JSON must return 400."""
+    app_mod, db_path, secret = reload_app_with_gate("0")
+
+    base_url, stop = _spin_server(app_mod)
+    try:
+        raw = b"not-valid-json"
+        req = Request(
+            f"{base_url}/earlscheibconcord/auto-send",
+            data=raw, method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        from urllib.error import HTTPError
+        with pytest.raises(HTTPError) as exc_info:
+            urlopen(req, timeout=3)
+        assert exc_info.value.code == 400
+    finally:
+        stop()
+
+
+# ---------------------------------------------------------------------------
+# UKK-05: ems_bundle skips schedule_job for disabled job_types
+# ---------------------------------------------------------------------------
 
 def _bms_xml(doc_id: str, doc_status: str, doc_ver: str = None) -> bytes:
     """Build a minimal BMS XML payload for parse_bms() that exercises the
@@ -274,22 +460,6 @@ def _post_ems_bundle(base_url: str, secret: str, xml: bytes):
         },
     )
     return urlopen(req, timeout=3)
-
-
-def _spin_server(app_mod):
-    """Helper: start a WebhookHandler on an ephemeral port. Returns
-    (base_url, stop_callable)."""
-    import threading
-    from http.server import HTTPServer
-    server = HTTPServer(("127.0.0.1", 0), app_mod.WebhookHandler)
-    port = server.server_address[1]
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-
-    def stop():
-        server.shutdown()
-        server.server_close()
-    return f"http://127.0.0.1:{port}", stop
 
 
 def _disable_jt_directly(db_path: str, job_type: str):
