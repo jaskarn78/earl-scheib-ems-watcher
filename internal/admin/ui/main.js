@@ -855,13 +855,28 @@
         renderServerDiagnostic(d);
       }
 
-      // SPN-04: dev-mode banner. Show only when scheduler_enabled === false.
-      // Hide on undefined so we don't flash the banner during the brief
-      // moment before the first /diagnostic poll resolves on a UI version
-      // that pre-dates SPN.
-      const banner = document.getElementById('dev-banner');
-      if (banner) {
-        banner.hidden = d.scheduler_enabled !== false;
+      // WNC-01: auto-send toggle. Visible only when /diagnostic returns a
+      // boolean scheduler_enabled (Pi-served path). Hidden in local Go admin
+      // mode (returns undefined) — we never POST to /api/auto-send.
+      // Guard: typeof check so pre-SPN UI or Go admin gracefully hides toggle.
+      const toggleBar = document.getElementById('auto-send-toggle');
+      const toggleCheckbox = document.getElementById('auto-send-checkbox');
+      const toggleLabel = document.getElementById('auto-send-label');
+      if (toggleBar && typeof d.scheduler_enabled === 'boolean') {
+        toggleBar.hidden = false;
+        // Programmatic state sync from poll — do NOT trigger the change handler.
+        if (toggleCheckbox) {
+          toggleCheckbox.dataset.syncing = '1';
+          toggleCheckbox.checked = d.scheduler_enabled;
+          delete toggleCheckbox.dataset.syncing;
+        }
+        if (toggleLabel) {
+          toggleLabel.textContent = d.scheduler_enabled
+            ? 'Auto-send ON — texts go out automatically'
+            : 'Auto-send OFF — paused; manual Send now still works';
+        }
+      } else if (toggleBar) {
+        toggleBar.hidden = true;
       }
     } catch (_) {
       // Transient errors at 5s poll cadence — silent by design.
@@ -1892,6 +1907,36 @@
         if (lastJobs && lastJobs.length) renderQueue(lastJobs);
       })
       .catch(() => { /* silent — defaults handle it */ });
+
+    // WNC-01: wire the auto-send toggle. Only fires a POST when the change
+    // is user-initiated (not the programmatic poll sync which sets dataset.syncing).
+    const autoSendCheckbox = document.getElementById('auto-send-checkbox');
+    const autoSendLabel    = document.getElementById('auto-send-label');
+    if (autoSendCheckbox) {
+      autoSendCheckbox.addEventListener('change', async () => {
+        if (autoSendCheckbox.dataset.syncing) return; // poll sync — no POST
+        const desired = autoSendCheckbox.checked;
+        const prior   = !desired; // current checked state before user click
+        try {
+          const resp = await fetch(`${API_BASE}/auto-send`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: desired }),
+          });
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          if (autoSendLabel) {
+            autoSendLabel.textContent = desired
+              ? 'Auto-send ON — texts go out automatically'
+              : 'Auto-send OFF — paused; manual Send now still works';
+          }
+        } catch (_) {
+          // Revert to prior state; next diagnostic poll will reconcile.
+          autoSendCheckbox.dataset.syncing = '1';
+          autoSendCheckbox.checked = prior;
+          delete autoSendCheckbox.dataset.syncing;
+        }
+      });
+    }
 
     fetchQueue();
     setInterval(fetchQueue, REFRESH_MS);

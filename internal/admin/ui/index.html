@@ -14,12 +14,15 @@
   <link rel="stylesheet" href="/main.css">
 </head>
 <body>
-  <!-- SPN-04: DEV-mode banner — visible only when /diagnostic.scheduler_enabled === false.
+  <!-- WNC-01: auto-send toggle — visible only when /diagnostic returns a boolean
+       scheduler_enabled (Pi-served). Hidden in local Go admin (returns undefined).
        Toggled by main.js on every diagnostic poll. -->
-  <div id="dev-banner" class="dev-banner" hidden role="status" aria-live="polite">
-    <strong>DEV MODE</strong> &nbsp;·&nbsp; auto-send scheduler is paused
-    (set <code>SCHEDULER_ENABLED=1</code> on the server to enable).
-    Manual <em>Send now</em> still works.
+  <div id="auto-send-toggle" class="auto-send-toggle" hidden role="status" aria-live="polite">
+    <label class="auto-send-toggle__label">
+      <input class="auto-send-toggle__input" id="auto-send-checkbox" type="checkbox" aria-label="Auto-send toggle">
+      <span class="auto-send-toggle__track"></span>
+      <span class="auto-send-toggle__text" id="auto-send-label">Auto-send OFF — paused; manual Send now still works</span>
+    </label>
   </div>
 
   <header class="topbar" role="banner">
