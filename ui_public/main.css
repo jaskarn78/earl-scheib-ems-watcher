@@ -132,6 +132,30 @@ body {
   outline-offset: -2px;
 }
 
+/* ============== Mobile bottom navigation (≤720px) ============== */
+/* Reuses .topnav-link for JS wiring; .bn-link adds the bottom-bar layout.
+   Hidden on desktop; revealed in the 720px media query below. */
+.bottomnav { display: none; }
+.bottomnav .bn-link {
+  flex: 1 1 0;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  height: auto;
+  padding: 9px 2px 7px;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: rgba(255,255,255,0.6);
+}
+.bottomnav .bn-link svg { width: 23px; height: 23px; display: block; }
+.bottomnav .bn-link .bn-label { line-height: 1; font-weight: 600; }
+.bottomnav .bn-link:hover { background: rgba(255,255,255,0.06); color: #fff; }
+.bottomnav .bn-link.is-active { color: #fff; background: transparent; }
+.bottomnav .bn-link.is-active svg { color: var(--red); }
+.bottomnav .bn-link::after { display: none !important; } /* kill the topnav underline */
+
 .brand {
   display: inline-flex;
   align-items: center;
@@ -1288,12 +1312,27 @@ body {
 
 @media (max-width: 720px) {
   .topbar {
-    grid-template-columns: 1fr auto;
-    padding: 12px 18px;
+    padding: 10px 18px;
     gap: 14px;
+    min-height: 56px;
   }
   .stats { display: none; } /* keep topbar clean on mobile; stats visible in diag below */
-  .topnav { grid-column: 1 / -1; order: 2; gap: 16px; }
+  .topnav { display: none; }  /* nav moves to the fixed bottom bar */
+  /* fixed app-style bottom tab bar */
+  .bottomnav {
+    display: flex;
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    z-index: 40;
+    background: var(--navy);
+    border-top: 1px solid rgba(255,255,255,0.12);
+    box-shadow: 0 -2px 14px rgba(26,45,77,0.28);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  /* clearance so the fixed bar never covers the last row of any view */
+  #view-queue, #view-templates, #view-schedules, #view-logs {
+    padding-bottom: calc(64px + env(safe-area-inset-bottom));
+  }
   .templates { padding: 24px 18px 60px; }
   .tpl-card { padding: 20px 18px; }
   .templates-title { font-size: 26px; }
