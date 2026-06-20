@@ -70,6 +70,7 @@
          Work Sans uppercase with letter-spacing for the chips; oxblood selected
          state. Search uses canvas bg + oxblood focus accent. -->
     <section class="controls" aria-label="Queue filters">
+      <div class="filters-rail">
       <nav class="filters" role="tablist" aria-label="Filter jobs">
         <button class="filter" type="button" data-filter="estimates" role="tab" aria-selected="true">Estimates</button>
         <button class="filter" type="button" data-filter="completed" role="tab" aria-selected="false">Work Completed</button>
@@ -81,6 +82,7 @@
         <button class="filter filter--test" type="button" data-filter="test-completed" role="tab" aria-selected="false">Test Work Compl.</button>
         <button class="test-reset-btn" type="button" title="Reset test jobs (re-seed fresh)" aria-label="Reset test jobs">↺</button>
       </nav>
+      </div>
       <!-- Sort selector: persists in localStorage["eswSort"]; affects estimate-card order. -->
       <div class="sort-wrap">
         <label for="sort-by" class="sort-label">Sort</label>

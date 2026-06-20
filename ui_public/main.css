@@ -1335,6 +1335,9 @@ body {
     border-top: 1px solid rgba(255,255,255,0.12);
     box-shadow: 0 -2px 14px rgba(26,45,77,0.28);
     padding-bottom: env(safe-area-inset-bottom);
+    transform: translateZ(0);
+    will-change: transform;
+    backface-visibility: hidden;
   }
   /* clearance so the fixed bar never covers the last row of any view */
   #view-queue, #view-templates, #view-schedules, #view-logs {
@@ -1846,4 +1849,369 @@ body {
 @media (max-width: 720px) {
   .logs { padding: 24px 18px 60px; }
   .logs-title { font-size: 26px; }
+}
+
+/* =====================================================================
+   MOBILE REDESIGN — QUEUE CONTROL DECK  (≤720px)
+   Earl Scheib Concord · one mobile design language
+   Collapses the wrapping filter pills into the shared horizontal
+   segment scroller, then sets sort+search on one tight line.
+   Scoped to .controls:not(.logs-controls) so the Logs filters are
+   untouched. Desktop (>720px) is not affected.
+   ===================================================================== */
+@media (max-width: 720px) {
+
+  /* ---- The Queue deck: two physical rows, tight top space ---- */
+  .controls:not(.logs-controls) {
+    padding: 10px 14px 2px;          /* was 20px 18px 4px */
+    flex-flow: row wrap;             /* override existing flex-direction:column */
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* ---- Row 1: full-width filter rail (the scroller lives inside) ---- */
+  .controls:not(.logs-controls) .filters-rail {
+    order: 1;
+    flex: 1 1 100%;
+    width: 100%;
+    margin: 0;
+    min-width: 0;
+  }
+
+  /* ---- keystone: the horizontal segment scroller ---- */
+  .controls:not(.logs-controls) .filters {
+    display: flex;
+    flex-wrap: nowrap;               /* core fix: kill the ~3-row wrap */
+    align-items: center;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity;
+    gap: 6px;
+    margin: 0 -14px;                 /* bleed to screen edges */
+    padding: 0 14px;                 /* first/last chip clears the gutter */
+    scrollbar-width: none;           /* Firefox: hidden scrollbar */
+    -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 14px,
+                        #000 calc(100% - 18px), transparent 100%);
+            mask-image: linear-gradient(90deg, transparent 0, #000 14px,
+                        #000 calc(100% - 18px), transparent 100%);
+  }
+  .controls:not(.logs-controls) .filters::-webkit-scrollbar {
+    display: none;                   /* WebKit/Blink: hidden scrollbar */
+  }
+
+  /* ---- Chips: never shrink, never wrap, 40px tap floor ---- */
+  .controls:not(.logs-controls) .filter {
+    flex: 0 0 auto;
+    scroll-snap-align: start;
+    padding: 10px 14px;              /* ~40px tall hit target */
+    font-size: 11.5px;               /* keep existing chip type scale */
+    white-space: nowrap;
+  }
+  /* separator + test-reset just scroll along with the rail */
+  .controls:not(.logs-controls) .filter-sep {
+    flex: 0 0 auto;
+    height: 22px;
+    margin: 0 2px;
+  }
+  .controls:not(.logs-controls) .test-reset-btn {
+    flex: 0 0 auto;
+    width: 36px;
+    height: 36px;
+    font-size: 15px;
+  }
+
+  /* ---- Row 2 left: search flexes to fill ---- */
+  .controls:not(.logs-controls) .search-wrap {
+    order: 2;
+    flex: 1 1 60%;
+    min-width: 0;
+    width: auto;                     /* override existing width:100% */
+  }
+  .controls:not(.logs-controls) .search {
+    height: 40px;
+    padding-top: 0;
+    padding-bottom: 0;
+    font-size: 14px;
+  }
+
+  /* ---- Row 2 right: sort is intrinsic, right-aligned ---- */
+  .controls:not(.logs-controls) .sort-wrap {
+    order: 3;
+    flex: 1 1 38%;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+  }
+  .controls:not(.logs-controls) .sort-label {
+    font-size: 10px;                 /* shrink to icon-ish gutter */
+    flex: 0 0 auto;
+  }
+  .controls:not(.logs-controls) .sort-select {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 40px;
+    padding: 0 26px 0 10px;
+    font-size: 12px;
+    background-position: right 9px center;
+  }
+}
+
+/* ============================================================
+   MOBILE REDESIGN — SCHEDULES (≤720px)
+   "compact control deck" density pass. Additive; reuses tokens.
+   Desktop (>720px) untouched.
+   ============================================================ */
+@media (max-width: 720px) {
+  /* Header rhythm — shared scale */
+  .schedules { padding: 16px 14px 60px; }
+  .schedules-header { margin-bottom: 14px; }
+  .schedules-title { font-size: 22px; line-height: 1.15; margin: 0 0 6px; }
+  .schedules-sub { font-size: 13px; line-height: 1.45; }
+  .schedules-list { gap: 10px; }
+
+  /* Card — de-bloat to the shared recipe */
+  .sched-card {
+    padding: 14px 16px;
+    gap: 10px;
+    border-radius: 12px;
+  }
+
+  /* Header → explicit 2-line grid (kills baseline-wrap crowding).
+     Row 1: title | enabled toggle.   Row 2: when + badge + dirty-dot. */
+  .sched-card__head {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "title  toggle"
+      "meta   meta";
+    align-items: center;
+    flex-wrap: nowrap;
+    column-gap: 10px;
+    row-gap: 4px;
+  }
+  .sched-card__title {
+    grid-area: title;
+    font-size: 17px;
+    min-width: 0;
+  }
+
+  .sched-card__toggle {
+    grid-area: toggle;
+    margin: 0;                  /* was margin-left:auto + margin-right:12px */
+    align-self: center;
+  }
+  .sched-card__toggle-label { min-width: 0; }
+
+  .sched-card__when {
+    grid-area: meta;
+    justify-self: start;
+    font-size: 12px;
+    line-height: 1.3;
+  }
+  .sched-card__badge {
+    grid-area: meta;
+    justify-self: end;
+    align-self: center;
+  }
+  .sched-card__dirty-dot {
+    grid-area: meta;
+    justify-self: end;
+    margin: 0 0 0 6px;          /* override desktop margin-left:auto */
+    align-self: center;
+  }
+
+  /* Delay row — compact single line; (X days) drops below if tight */
+  .sched-card__row {
+    gap: 8px;
+    margin-top: 2px;
+  }
+  .sched-card__label {
+    min-width: 0;
+    flex: 0 0 auto;
+  }
+  .sched-card__input {
+    width: 72px;
+    padding: 8px 10px;
+    height: 40px;
+    box-sizing: border-box;
+    font-size: 15px;
+  }
+  .sched-card__unit { font-size: 12.5px; flex: 0 0 auto; }
+  .sched-card__days {
+    flex: 1 1 100%;
+    margin-top: -2px;
+    font-size: 12.5px;
+  }
+
+  /* Actions — Save reads as the clear primary; Reset stays a tight ghost. */
+  .sched-card__actions {
+    gap: 8px;
+    margin-top: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .sched-card__actions .btn {
+    height: 40px;
+    padding: 0 16px;
+    font-size: 14px;
+    justify-content: center;
+  }
+  .sched-card .sched-save  { flex: 1 1 auto; }   /* primary stretches */
+  .sched-card .sched-reset { flex: 0 0 auto; }   /* ghost stays tight  */
+  .sched-card__status { flex: 1 1 100%; font-size: 12px; }
+
+  .sched-card .sched-save:not(:disabled) {
+    background-color: var(--red);
+    border-color: var(--red);
+    color: #fff;
+    box-shadow: var(--shadow-sm);
+  }
+  .sched-card .sched-save:disabled { opacity: 0.45; }
+}
+
+/* ============================================================
+   MOBILE LOGS (≤720px) — shared seg-scroll filter rail + 2-line
+   scannable log card. Additive, token-only, desktop + 1100px
+   breakpoint untouched. No markup/JS change — maps the 8 flat
+   .log-row children onto a 3-col x 3-row named-area grid.
+   ============================================================ */
+@media (max-width: 720px) {
+
+  /* ---- Header rhythm ---- */
+  .logs { padding: 16px 14px 60px; }
+  .logs-header { margin-bottom: 14px; }
+  .logs-title { font-size: 22px; line-height: 1.15; margin: 0 0 4px 0; }
+  .logs-sub {
+    font-size: 13px;
+    line-height: 1.45;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;            /* tame the long intro paragraph */
+  }
+
+  /* ---- Control deck: 3 labeled groups -> tight stacked rows ---- */
+  .logs-controls {
+    display: flex;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    gap: 8px;                    /* was 18px/28px — the vertical-space killer */
+    padding: 10px 0 2px;
+    align-items: stretch;
+  }
+
+  .logs-controls .logs-filter-group {
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+  .logs-controls .logs-filter-label {
+    flex: 0 0 52px;              /* fixed gutter so all 3 labels align */
+    margin: 0;
+    font-size: 10px;
+    line-height: 1.1;
+  }
+
+  .logs-controls .filters {
+    display: flex;
+    flex-wrap: nowrap;          /* never wrap — single swipeable rail */
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity;
+    gap: 6px;
+    margin: 0;
+    padding: 0 2px;             /* labeled-row variant: no -14px bleed */
+    min-width: 0;
+    scrollbar-width: none;      /* Firefox */
+    -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 8px,
+                        #000 calc(100% - 14px), transparent 100%);
+  }
+  .logs-controls .filters::-webkit-scrollbar { display: none; }
+
+  .logs-controls .filters .filter {
+    flex: 0 0 auto;             /* never shrink, never wrap */
+    scroll-snap-align: start;
+    padding: 9px 14px;
+    font-size: 11.5px;
+    white-space: nowrap;
+  }
+
+  .logs-controls .logs-freshness {
+    margin: 2px 0 0 52px;
+    padding: 0;
+    align-self: flex-start;
+  }
+
+  /* ---- Log row -> 2-line scannable card ---- */
+  .logs-list { gap: 10px; margin-top: 12px; }
+
+  .log-row {
+    grid-template-columns: auto 1fr auto;
+    grid-template-rows: auto auto auto;
+    grid-template-areas:
+      "dir  who   meta"
+      "dir  who2  meta2"
+      "body body  body";
+    align-items: center;
+    gap: 2px 10px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    font-size: 13.5px;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .log-row__direction {
+    grid-area: dir;
+    align-self: center;
+    font-size: 16px;
+    text-align: left;
+    width: 1.2em;
+  }
+
+  .log-row__customer {
+    grid-area: who;
+    align-self: end;
+    font-weight: 600;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .log-row__phone {
+    grid-area: who2;
+    align-self: start;
+    font-size: 11.5px;
+    color: var(--ink-soft);
+  }
+
+  .log-row__status {
+    grid-area: meta;
+    justify-self: end;
+    align-self: end;
+  }
+  .log-row__ts {
+    grid-area: meta2;
+    justify-self: end;
+    align-self: start;
+    font-size: 11px;
+  }
+
+  .log-row__body {
+    grid-area: body;
+    margin-top: 2px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    white-space: normal;
+    line-height: 1.4;
+    font-size: 13px;
+  }
+  .log-row__body small { margin-top: 2px; }
+
+  .log-row__job-type,
+  .log-row__sid { display: none; }
 }

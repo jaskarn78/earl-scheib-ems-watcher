@@ -181,7 +181,15 @@
     .back-btn{display:flex;}
     .topbar{display:none;}
     .mob-brand{display:flex !important;}
-    .list-head{padding-top:var(--s4);}
+    /* ===== Slim mobile header — compact navy/cream chrome (~48px), matches the Queue topbar ===== */
+    .list-head{padding:10px var(--s5) var(--s3);}
+    .mob-brand{margin-bottom:var(--s2);gap:8px;align-items:center;}
+    .mob-brand .logo{width:26px;height:26px;border-radius:8px;font-size:11px;}
+    .mob-brand .mb-text .name{font-size:13px;line-height:1.05;}
+    .mob-brand .mb-text .sub{display:none;}            /* drop the duplicate "Messages" under the brand */
+    .list-title-row{margin-bottom:var(--s3);align-items:center;}
+    .list-title{font-size:16px;font-weight:600;}        /* shrink the tall Fraunces title to a compact label */
+    .list-count{font-size:11.5px;}
   }
   .mob-brand{display:none;align-items:center;gap:10px;margin-bottom:var(--s4);}
   .mob-brand .logo{width:30px;height:30px;border-radius:9px;font-size:12px;}
@@ -195,7 +203,7 @@
   .bn-link.is-active svg{color:var(--red);}
   .bn-link:hover{color:#fff;background:rgba(255,255,255,.06);}
   @media (max-width:880px){
-    .bottomnav{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:60;background:var(--navy);border-top:1px solid rgba(255,255,255,.12);box-shadow:0 -2px 14px rgba(26,45,77,.28);padding-bottom:env(safe-area-inset-bottom);}
+    .bottomnav{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:60;background:var(--navy);border-top:1px solid rgba(255,255,255,.12);box-shadow:0 -2px 14px rgba(26,45,77,.28);padding-bottom:env(safe-area-inset-bottom);transform:translateZ(0);will-change:transform;backface-visibility:hidden;}
     .app.show-thread ~ .bottomnav{display:none;}   /* thread open → composer owns the bottom (nav is a sibling of .app) */
     .thread-list{padding-bottom:calc(64px + env(safe-area-inset-bottom));}  /* clearance for the bar */
   }
