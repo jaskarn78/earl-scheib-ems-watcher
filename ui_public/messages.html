@@ -30,12 +30,12 @@
   :focus-visible{outline:2px solid var(--red);outline-offset:2px;border-radius:6px;}
   /* ===== App shell ===== */
   .app{height:100dvh;display:flex;flex-direction:column;background:var(--cream);}
-  /* The top header (.topbar/.brand/.logo/.sync*/.refresh-btn/.tabs/.who) is
-     now the SHARED nav, defined in /earlscheib/nav.css and injected by app.py.
-     Do not redefine it here — single source of truth with the Queue SPA. */
-  /* ≤720px the shared nav.css turns <body> into the app-shell flex column;
-     let .app share that column with the static bottom bar instead of eating
-     the whole viewport. */
+  /* The top header (topbar, brand, logo, sync, refresh-btn, tabs, who) is now
+     the SHARED nav, defined in /earlscheib/nav.css and injected by app.py.
+     Do not redefine it here — single source of truth with the Queue SPA.
+     At 720px and below, the shared nav.css turns body into the app-shell flex
+     column; let .app share that column with the static bottom bar instead of
+     eating the whole viewport. */
   @media (max-width:720px){
     .app{height:auto;flex:1 1 auto;min-height:0;}
   }
