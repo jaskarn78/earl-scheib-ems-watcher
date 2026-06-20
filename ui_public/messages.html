@@ -34,6 +34,15 @@
   .logo span{color:var(--red);}
   .brand-logo{display:none;}  /* desktop uses the ES box + tabs; wordmark shows on mobile only */
   .brand-text{min-width:0;}
+  /* Sync status (mobile navy header only — matches the main app) */
+  .sync{display:none;align-items:center;gap:8px;color:rgba(255,255,255,.6);font-size:13px;white-space:nowrap;}
+  .sync-dot{width:8px;height:8px;border-radius:50%;background:var(--amber);box-shadow:0 0 0 3px rgba(200,149,63,.18);display:inline-block;flex:0 0 auto;transition:transform .2s,box-shadow .2s;}
+  .sync-dot.pulse{animation:syncPulse .6s ease-out;}
+  @keyframes syncPulse{0%{transform:scale(1);box-shadow:0 0 0 3px rgba(200,149,63,.18);}50%{transform:scale(1.6);box-shadow:0 0 0 8px rgba(200,149,63,.02);}100%{transform:scale(1);box-shadow:0 0 0 3px rgba(200,149,63,.18);}}
+  .sync-caption{font-variant-numeric:tabular-nums;}
+  .refresh-btn{background:transparent;border:1px solid rgba(255,255,255,.2);color:rgba(255,255,255,.55);width:30px;height:30px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex:0 0 auto;transition:color .12s,border-color .12s,background .12s;}
+  .refresh-btn:hover,.refresh-btn:focus-visible{color:#fff;border-color:rgba(255,255,255,.5);background:rgba(255,255,255,.1);outline:none;}
+  .refresh-btn.spinning svg{animation:spin 700ms linear;}
   .brand-text .name{font-weight:600;font-size:14px;line-height:1.15;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .brand-text .sub{font-size:11.5px;color:var(--ink-3);line-height:1.2;}
   .tabs{display:flex;gap:2px;margin-left:var(--s6);}
@@ -194,10 +203,11 @@
     }
     /* show ONLY the white wordmark, exactly like Queue */
     .topbar .tabs,
-    .topbar .topbar-spacer,
     .topbar .who,
     .topbar .logo,
     .topbar .brand-text{display:none;}
+    .topbar .topbar-spacer{display:block;}   /* push the sync block to the right */
+    .topbar .sync{display:inline-flex;}       /* show Last synced + refresh, like Queue */
     .topbar .brand{min-width:0;height:auto;gap:0;}
     .topbar .brand-logo{
       display:block;
@@ -245,6 +255,13 @@
     <div class="who">
       <div class="meta"><b>Marco V.</b>Owner</div>
       <div class="ava">M</div>
+    </div>
+    <div class="sync" role="status" aria-live="polite">
+      <span class="sync-dot" id="syncDot" aria-hidden="true"></span>
+      <span class="sync-caption" id="syncCaption">Last synced —</span>
+      <button class="refresh-btn" id="refreshBtn" type="button" aria-label="Refresh messages">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.61-3.89"></path><path d="M13.5 2.5v3h-3"></path></svg>
+      </button>
     </div>
   </header>
   <div class="panes">
@@ -377,7 +394,17 @@
     listCountEl=$("#listCount"), unreadNumEl=$("#unreadNum"), errBannerEl=$("#errBanner"),
     messagesEl=$("#messages"), emptyEl=$("#emptyState"), composerEl=$("#composer"),
     convHeadEl=$("#convHead"), appEl=$("#app"), inputEl=$("#composerInput"), sendBtn=$("#sendBtn"),
-    linePillEl=$("#linePill"), callBtnEl=$("#callBtn");
+    linePillEl=$("#linePill"), callBtnEl=$("#callBtn"),
+    syncDotEl=$("#syncDot"), syncCaptionEl=$("#syncCaption"), refreshBtnEl=$("#refreshBtn");
+  let lastSyncAt=0;
+  function updateSync(){
+    if(!syncCaptionEl) return;
+    if(!lastSyncAt){ syncCaptionEl.textContent="Last synced —"; return; }
+    const ago=Math.max(0,Math.round((Date.now()-lastSyncAt)/1000));
+    syncCaptionEl.textContent = ago<2 ? "Last synced just now"
+      : ago<60 ? `Last synced ${ago}s ago`
+      : `Last synced ${Math.floor(ago/60)}m ago`;
+  }
 
   // ---------- Helpers ----------
   function colorFor(phone){ if(!colorByPhone.has(phone)) colorByPhone.set(phone, AVATAR_COLORS[colorByPhone.size % AVATAR_COLORS.length]); return colorByPhone.get(phone); }
@@ -591,6 +618,8 @@
     try{
       lastServerRows = await fetchRows();
       errBannerEl.hidden=true; errBannerEl.classList.remove("err"); lineUp=true;
+      lastSyncAt=Date.now(); updateSync();
+      if(syncDotEl){ syncDotEl.classList.remove("pulse"); void syncDotEl.offsetWidth; syncDotEl.classList.add("pulse"); }
       linePillEl.classList.remove("off"); linePillEl.querySelector(".live");
       linePillEl.childNodes[1] && (linePillEl.lastChild.textContent="Texting line active");
       threads=buildThreads(lastServerRows);
@@ -620,9 +649,11 @@
   inputEl.addEventListener("keydown",e=>{ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); send(); } });
 
   // ---------- Init ----------
-  renderThread(); updateSendState();
+  if(refreshBtnEl) refreshBtnEl.addEventListener("click",()=>{ refreshBtnEl.classList.remove("spinning"); void refreshBtnEl.offsetWidth; refreshBtnEl.classList.add("spinning"); refresh(); });
+  renderThread(); updateSendState(); updateSync();
   refresh();
   setInterval(refresh, POLL_MS);
+  setInterval(updateSync, 1000);
 })();
 </script>
 </body>
