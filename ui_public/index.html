@@ -11,6 +11,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
 
+  <link rel="stylesheet" href="/earlscheib/nav.css">
   <link rel="stylesheet" href="/main.css">
 </head>
 <body>
@@ -25,41 +26,8 @@
     </label>
   </div>
 
-  <header class="topbar" role="banner">
-    <div class="brand">
-      <a class="brand-link" href="https://earlscheibconcord.com" target="_blank" rel="noopener" aria-label="Earl Scheib Concord website">
-        <img class="brand-logo" src="/logo.png" alt="Earl Scheib Concord" height="32">
-      </a>
-    </div>
+  <!--SHARED_NAV_HEADER--><!-- app.py injects the canonical top header (see NAV_HEADER) -->
 
-    <!-- WMH-04 + SPN-05: view switcher. Queue (default) + Templates + Schedules. -->
-    <nav class="topnav" role="tablist" aria-label="Views">
-      <a class="topnav-link is-active" data-view="queue"     href="#queue"     role="tab" aria-selected="true">Queue</a>
-      <a class="topnav-link"           data-external         href="/earlscheib/messages" role="link">Messages</a>
-      <a class="topnav-link"           data-view="templates" href="#templates" role="tab" aria-selected="false">Templates</a>
-      <a class="topnav-link"           data-view="schedules" href="#schedules" role="tab" aria-selected="false">Schedules</a>
-      <a class="topnav-link"           data-view="logs"      href="#logs"      role="tab" aria-selected="false">Logs</a>
-    </nav>
-
-    <div class="stats" aria-label="Queue statistics">
-      <span class="stat"><b id="stat-pending">0</b><span class="stat-label">Pending</span></span>
-      <span class="stat-sep" aria-hidden="true">·</span>
-      <span class="stat"><b id="stat-sent">0</b><span class="stat-label">Sent today</span></span>
-      <span class="stat-sep" aria-hidden="true">·</span>
-      <span class="stat"><b id="stat-failed">0</b><span class="stat-label">Failed</span></span>
-    </div>
-
-    <div class="sync" role="status" aria-live="polite">
-      <span id="sync-dot" class="sync-dot" aria-hidden="true"></span>
-      <span id="sync-caption" class="sync-caption">Last synced —</span>
-      <button id="refresh-btn" class="refresh-btn" type="button" aria-label="Refresh queue (R)" title="Press R to refresh">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M13.5 8a5.5 5.5 0 1 1-1.61-3.89"></path>
-          <path d="M13.5 2.5v3h-3"></path>
-        </svg>
-      </button>
-    </div>
-  </header>
 
   <!-- WMH-04: view wrappers. Queue view (default) contains filter chips,
        queue grid, diagnostic panel. Templates view (hidden by default)
@@ -364,31 +332,10 @@
     </section>
   </template>
 
-  <!-- Mobile bottom navigation (≤720px). Mirrors the topnav and REUSES
-       .topnav-link + data-view so main.js wires clicks + active-state sync
-       with no JS changes. Hidden on desktop via CSS. -->
-  <nav class="bottomnav" role="tablist" aria-label="Sections">
-    <a class="topnav-link bn-link is-active" data-view="queue" href="#queue" role="tab" aria-selected="true" aria-label="Queue">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
-      <span class="bn-label">Queue</span>
-    </a>
-    <a class="topnav-link bn-link" data-external href="/earlscheib/messages" role="link" aria-label="Messages">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
-      <span class="bn-label">Messages</span>
-    </a>
-    <a class="topnav-link bn-link" data-view="templates" href="#templates" role="tab" aria-selected="false" aria-label="Templates">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h6"/></svg>
-      <span class="bn-label">Templates</span>
-    </a>
-    <a class="topnav-link bn-link" data-view="schedules" href="#schedules" role="tab" aria-selected="false" aria-label="Schedules">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-      <span class="bn-label">Schedules</span>
-    </a>
-    <a class="topnav-link bn-link" data-view="logs" href="#logs" role="tab" aria-selected="false" aria-label="Logs">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
-      <span class="bn-label">Logs</span>
-    </a>
-  </nav>
+  <!-- Mobile bottom navigation (≤720px) — canonical markup injected by app.py
+       (see NAV_BOTTOMNAV). REUSES .topnav-link + data-view so main.js wires
+       clicks + active-state sync with no JS changes. Hidden on desktop. -->
+  <!--SHARED_NAV_BOTTOMNAV-->
 
   <script src="/main.js" defer></script>
 </body>

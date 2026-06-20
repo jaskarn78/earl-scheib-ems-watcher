@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/earlscheib/nav.css" />
 <style>
   :root{
     --navy:#1a2d4d;--navy-700:#243b62;--navy-soft:#42597e;--red:#c8202f;--red-700:#a8121f;
@@ -27,34 +28,20 @@
   ::selection{background:rgba(200,32,47,.15);}
   .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}
   :focus-visible{outline:2px solid var(--red);outline-offset:2px;border-radius:6px;}
+  /* ===== App shell ===== */
   .app{height:100dvh;display:flex;flex-direction:column;background:var(--cream);}
-  .topbar{display:flex;align-items:center;gap:var(--s4);padding:var(--s3) clamp(var(--s4), 3vw, var(--s8));background:rgba(255,255,255,.82);backdrop-filter:saturate(140%) blur(10px);border-bottom:1px solid var(--hair);flex:0 0 auto;z-index:30;}
-  .brand{display:flex;align-items:center;gap:var(--s3);min-width:0;}
-  .logo{width:34px;height:34px;flex:0 0 auto;border-radius:10px;background:linear-gradient(160deg,var(--navy),var(--navy-700));color:#fff;display:grid;place-items:center;font-weight:700;letter-spacing:.5px;font-size:13px;box-shadow:var(--shadow-sm);position:relative;}
-  .logo span{color:var(--red);}
-  .brand-logo{display:none;}  /* desktop uses the ES box + tabs; wordmark shows on mobile only */
-  .brand-text{min-width:0;}
-  /* Sync status (mobile navy header only — matches the main app) */
-  .sync{display:none;align-items:center;gap:8px;color:rgba(255,255,255,.6);font-size:13px;white-space:nowrap;}
-  .sync-dot{width:8px;height:8px;border-radius:50%;background:var(--amber);box-shadow:0 0 0 3px rgba(200,149,63,.18);display:inline-block;flex:0 0 auto;transition:transform .2s,box-shadow .2s;}
-  .sync-dot.pulse{animation:syncPulse .6s ease-out;}
-  @keyframes syncPulse{0%{transform:scale(1);box-shadow:0 0 0 3px rgba(200,149,63,.18);}50%{transform:scale(1.6);box-shadow:0 0 0 8px rgba(200,149,63,.02);}100%{transform:scale(1);box-shadow:0 0 0 3px rgba(200,149,63,.18);}}
-  .sync-caption{font-variant-numeric:tabular-nums;}
-  .refresh-btn{background:transparent;border:1px solid rgba(255,255,255,.2);color:rgba(255,255,255,.55);width:30px;height:30px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex:0 0 auto;transition:color .12s,border-color .12s,background .12s;}
-  .refresh-btn:hover,.refresh-btn:focus-visible{color:#fff;border-color:rgba(255,255,255,.5);background:rgba(255,255,255,.1);outline:none;}
-  .refresh-btn.spinning svg{animation:spin 700ms linear;}
-  .brand-text .name{font-weight:600;font-size:14px;line-height:1.15;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .brand-text .sub{font-size:11.5px;color:var(--ink-3);line-height:1.2;}
-  .tabs{display:flex;gap:2px;margin-left:var(--s6);}
-  .tab{border:none;background:transparent;color:var(--ink-2);padding:7px 12px;border-radius:8px;font-size:13px;font-weight:500;text-decoration:none;display:inline-flex;align-items:center;}
-  .tab:hover{background:var(--hair-soft);color:var(--ink);}
-  .tab.active{background:var(--navy);color:#fff;}
-  .topbar-spacer{flex:1;}
-  .who{display:flex;align-items:center;gap:var(--s2);font-size:12.5px;color:var(--ink-2);}
-  .who .ava{width:28px;height:28px;border-radius:50%;background:var(--cream);border:1px solid var(--hair);display:grid;place-items:center;font-weight:600;font-size:12px;color:var(--navy);}
-  .who .meta{line-height:1.1;}
-  .who .meta b{color:var(--ink);font-weight:600;font-size:12.5px;display:block;}
-  @media (max-width:560px){ .who .meta, .brand-text .sub{display:none;} .tabs{margin-left:var(--s2);} }
+  /* The top header (.topbar/.brand/.logo/.sync*/.refresh-btn/.tabs/.who) is
+     now the SHARED nav, defined in /earlscheib/nav.css and injected by app.py.
+     Do not redefine it here — single source of truth with the Queue SPA. */
+  /* ≤720px the shared nav.css turns <body> into the app-shell flex column;
+     let .app share that column with the static bottom bar instead of eating
+     the whole viewport. */
+  @media (max-width:720px){
+    .app{height:auto;flex:1 1 auto;min-height:0;}
+  }
+  /* Hide the bottom bar while a thread is open so the composer owns the
+     bottom edge (messages-specific; the bar is a body-level sibling of .app). */
+  .app.show-thread ~ .bottomnav{display:none !important;}
   .panes{flex:1;min-height:0;display:grid;grid-template-columns: minmax(300px, clamp(320px, 30vw, 400px)) 1fr;gap:0;max-width:1480px;width:100%;margin:0 auto;}
   .list-pane{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--hair);background:var(--cream);}
   .list-head{padding:var(--s5) var(--s5) var(--s3);flex:0 0 auto;}
@@ -189,91 +176,20 @@
     .app.show-thread .thread-pane{transform:translateX(0);}
     .app.show-thread .list-pane{visibility:hidden;}
     .back-btn{display:flex;}
-    /* ===== Mobile header — identical to the main app's navy topbar ===== */
-    .topbar{
-      display:flex;
-      align-items:center;
-      background:var(--navy);
-      backdrop-filter:none;
-      border-bottom:none;
-      box-shadow:0 2px 8px rgba(26,45,77,.30);
-      padding:6px 16px;          /* same as the Queue topbar on mobile */
-      gap:var(--s3);
-      min-height:44px;
-    }
-    /* show ONLY the white wordmark, exactly like Queue */
-    .topbar .tabs,
-    .topbar .who,
-    .topbar .logo,
-    .topbar .brand-text{display:none;}
-    .topbar .topbar-spacer{display:block;}   /* push the sync block to the right */
-    .topbar .sync{display:inline-flex;}       /* show Last synced + refresh, like Queue */
-    .topbar .brand{min-width:0;height:auto;gap:0;}
-    .topbar .brand-logo{
-      display:block;
-      height:22px;width:auto;
-      filter:brightness(0) invert(1);   /* white wordmark on navy, same as Queue */
-    }
-    .mob-brand{display:none !important;}
     .list-head{padding:10px var(--s5) var(--s3);}
-    .list-title-row{display:none;}      /* topbar + active bottom-nav convey context */
+    .list-title-row{display:none;}      /* shared header + active bottom-nav convey context */
   }
-  .mob-brand{display:none;align-items:center;gap:10px;margin-bottom:var(--s4);}
-  .mob-brand .logo{width:30px;height:30px;border-radius:9px;font-size:12px;}
-  .mob-brand .mb-text .name{font-weight:600;font-size:13px;line-height:1.1;}
-  .mob-brand .mb-text .sub{font-size:11px;color:var(--ink-3);}
-  /* ===== Mobile bottom navigation — matches the main admin app ===== */
-  .bottomnav{display:none;}
-  .bn-link{flex:1 1 0;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:9px 2px 7px;font-size:10px;font-weight:600;letter-spacing:.02em;color:rgba(255,255,255,.6);text-decoration:none;}
-  .bn-link svg{width:23px;height:23px;display:block;}
-  .bn-link.is-active{color:#fff;}
-  .bn-link.is-active svg{color:var(--red);}
-  .bn-link:hover{color:#fff;background:rgba(255,255,255,.06);}
-  @media (max-width:880px){
-    .bottomnav{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:60;background:var(--navy);border-top:1px solid rgba(255,255,255,.12);box-shadow:0 -2px 14px rgba(26,45,77,.28);padding-bottom:env(safe-area-inset-bottom);transform:translateZ(0);will-change:transform;backface-visibility:hidden;}
-    .app.show-thread ~ .bottomnav{display:none;}   /* thread open → composer owns the bottom (nav is a sibling of .app) */
-    .thread-list{padding-bottom:calc(64px + env(safe-area-inset-bottom));}  /* clearance for the bar */
-  }
+  /* .mob-brand and the mobile bottom-nav styles previously here are GONE —
+     the brand lives in the shared nav header, and .bottomnav/.bn-link are
+     owned by /earlscheib/nav.css (single source of truth). */
 </style>
 </head>
 <body>
 <div class="app" id="app">
-  <header class="topbar">
-    <div class="brand">
-      <img class="brand-logo" src="/earlscheib/logo.png" alt="Earl Scheib Concord">
-      <div class="logo">E<span>S</span></div>
-      <div class="brand-text">
-        <div class="name">Earl Scheib Auto Body</div>
-        <div class="sub">Concord, CA</div>
-      </div>
-    </div>
-    <nav class="tabs" aria-label="Sections">
-      <a class="tab" href="/earlscheib">Queue</a>
-      <a class="tab active" href="/earlscheib/messages" aria-current="page">Messages</a>
-    </nav>
-    <div class="topbar-spacer"></div>
-    <div class="who">
-      <div class="meta"><b>Marco V.</b>Owner</div>
-      <div class="ava">M</div>
-    </div>
-    <div class="sync" role="status" aria-live="polite">
-      <span class="sync-dot" id="syncDot" aria-hidden="true"></span>
-      <span class="sync-caption" id="syncCaption">Last synced —</span>
-      <button class="refresh-btn" id="refreshBtn" type="button" aria-label="Refresh messages">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.61-3.89"></path><path d="M13.5 2.5v3h-3"></path></svg>
-      </button>
-    </div>
-  </header>
+  <!--SHARED_NAV_HEADER--><!-- app.py injects the canonical top header (see NAV_HEADER), Messages active -->
   <div class="panes">
     <section class="list-pane" aria-label="Conversations">
       <div class="list-head">
-        <div class="mob-brand">
-          <div class="logo">E<span>S</span></div>
-          <div class="mb-text">
-            <div class="name">Earl Scheib Concord</div>
-            <div class="sub">Messages</div>
-          </div>
-        </div>
         <div class="list-title-row">
           <h1 class="list-title">Messages</h1>
           <span class="list-count" id="listCount"></span>
@@ -345,31 +261,10 @@
     </section>
   </div>
 </div>
-<!-- Mobile bottom navigation (≤880px). Plain links — this is a standalone
-     page; the #hash targets are read by the main SPA on load. Hidden while a
-     thread is open so the reply composer owns the bottom edge. -->
-<nav class="bottomnav" aria-label="Sections">
-  <a class="bn-link" href="/earlscheib" aria-label="Queue">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
-    <span>Queue</span>
-  </a>
-  <a class="bn-link is-active" href="/earlscheib/messages" aria-current="page" aria-label="Messages">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
-    <span>Messages</span>
-  </a>
-  <a class="bn-link" href="/earlscheib#templates" aria-label="Templates">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h6"/></svg>
-    <span>Templates</span>
-  </a>
-  <a class="bn-link" href="/earlscheib#schedules" aria-label="Schedules">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-    <span>Schedules</span>
-  </a>
-  <a class="bn-link" href="/earlscheib#logs" aria-label="Logs">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
-    <span>Logs</span>
-  </a>
-</nav>
+<!-- Mobile bottom navigation (≤720px) — canonical markup injected by app.py
+     (see NAV_BOTTOMNAV), Messages active. Body-level sibling of .app so the
+     app-shell flex column places it after the inbox. -->
+<!--SHARED_NAV_BOTTOMNAV-->
 <div class="sr-only" id="liveRegion" aria-live="polite" role="status"></div>
 <script>
 (function(){
@@ -395,7 +290,7 @@
     messagesEl=$("#messages"), emptyEl=$("#emptyState"), composerEl=$("#composer"),
     convHeadEl=$("#convHead"), appEl=$("#app"), inputEl=$("#composerInput"), sendBtn=$("#sendBtn"),
     linePillEl=$("#linePill"), callBtnEl=$("#callBtn"),
-    syncDotEl=$("#syncDot"), syncCaptionEl=$("#syncCaption"), refreshBtnEl=$("#refreshBtn");
+    syncDotEl=$("#sync-dot"), syncCaptionEl=$("#sync-caption"), refreshBtnEl=$("#refresh-btn");
   let lastSyncAt=0;
   function updateSync(){
     if(!syncCaptionEl) return;
@@ -619,7 +514,7 @@
       lastServerRows = await fetchRows();
       errBannerEl.hidden=true; errBannerEl.classList.remove("err"); lineUp=true;
       lastSyncAt=Date.now(); updateSync();
-      if(syncDotEl){ syncDotEl.classList.remove("pulse"); void syncDotEl.offsetWidth; syncDotEl.classList.add("pulse"); }
+      if(syncDotEl){ syncDotEl.classList.remove("sync-dot--pulse"); void syncDotEl.offsetWidth; syncDotEl.classList.add("sync-dot--pulse"); }
       linePillEl.classList.remove("off"); linePillEl.querySelector(".live");
       linePillEl.childNodes[1] && (linePillEl.lastChild.textContent="Texting line active");
       threads=buildThreads(lastServerRows);

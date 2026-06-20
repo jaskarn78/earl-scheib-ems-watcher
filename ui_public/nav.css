@@ -1,0 +1,288 @@
+/* ==========================================================
+   Earl Scheib Concord — SHARED NAVIGATION (single source of truth)
+   Linked by BOTH ui_public/index.html (the Queue SPA) and
+   ui_public/messages.html (the two-way inbox). Owns the top header
+   (.topbar) and the mobile bottom tab bar (.bottomnav) so the two
+   pages can never drift apart again.
+
+   Contains ONLY nav selectors. Page content styles live in:
+     - main.css            (the SPA: queue / templates / schedules / logs)
+     - messages.html <style> (the inbox: panes / threads / bubbles / composer)
+   Those files MUST NOT redefine anything below.
+   ========================================================== */
+
+/* ---- palette aliases ----
+   main.css defines these :root vars; messages.html defines its own. Both
+   resolve --navy / --red / --amber identically, so nav.css just references
+   them. The fallbacks keep the bar styled even if a var is ever missing. */
+
+/* ============== Topbar ============== */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background-color: var(--navy, #1a2d4d);
+  min-height: 64px;
+  padding: 0 32px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 24px;
+  row-gap: 0;
+  box-shadow: 0 2px 8px rgba(26, 45, 77, 0.3);
+}
+/* Push stats + sync to the right edge so the row reads:
+   brand · nav | … | stats · sync. Auto-margin on .stats consumes all slack,
+   .sync sits flush right. When the row wraps (narrow viewports), stats and
+   sync drop to a second line together rather than spilling outside. */
+.topbar .stats { margin-left: auto; }
+
+/* ============== Topnav (WMH-04) ============== */
+.topnav {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 4px;
+  height: 64px;
+}
+.topnav-link {
+  position: relative;
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.65);
+  text-decoration: none;
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  transition: color 120ms ease, background-color 120ms ease;
+}
+.topnav-link:hover {
+  color: #ffffff;
+  background-color: rgba(255,255,255,0.08);
+}
+.topnav-link.is-active {
+  color: #ffffff;
+}
+.topnav-link.is-active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background-color: var(--red, #c8202f);
+  border-radius: 3px 3px 0 0;
+}
+.topnav-link:focus-visible {
+  outline: 2px solid rgba(255,255,255,0.5);
+  outline-offset: -2px;
+}
+
+/* ============== Mobile bottom navigation (≤720px) ============== */
+/* Reuses .topnav-link for JS wiring; .bn-link adds the bottom-bar layout.
+   Hidden on desktop; revealed in the 720px media query below. */
+.bottomnav { display: none; }
+.bottomnav .bn-link {
+  flex: 1 1 0;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  height: auto;
+  padding: 9px 2px 7px;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: rgba(255,255,255,0.6);
+}
+.bottomnav .bn-link svg { width: 23px; height: 23px; display: block; }
+.bottomnav .bn-link .bn-label { line-height: 1; font-weight: 600; }
+.bottomnav .bn-link:hover { background: rgba(255,255,255,0.06); color: #fff; }
+.bottomnav .bn-link.is-active { color: #fff; background: transparent; }
+.bottomnav .bn-link.is-active svg { color: var(--red, #c8202f); }
+.bottomnav .bn-link::after { display: none !important; } /* kill the topnav underline */
+
+/* ============== Brand ============== */
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  white-space: nowrap;
+  height: 64px;
+}
+.brand-link {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+  opacity: 1;
+  transition: opacity 120ms ease;
+}
+.brand-link:hover { opacity: 0.85; }
+.brand-logo {
+  height: 32px;
+  width: auto;
+  display: block;
+  /* The logo is on white — invert to white so it reads on navy bg */
+  filter: brightness(0) invert(1);
+}
+.brand-divider {
+  display: inline-block;
+  width: 1px;
+  height: 28px;
+  background-color: rgba(255,255,255,0.2);
+}
+.brand-mode {
+  font-family: "Inter", system-ui, sans-serif;
+  font-weight: 500;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.55);
+}
+
+/* ============== Stats ============== */
+.stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: rgba(255,255,255,0.6);
+  font-size: 13px;
+  background-color: rgba(255,255,255,0.08);
+  padding: 7px 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.12);
+}
+.stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.stat b {
+  font-family: "Inter", system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 14px;
+  color: #ffffff;
+  font-variant-numeric: tabular-nums;
+}
+.stat-label {
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+}
+.stat-sep {
+  color: rgba(255,255,255,0.2);
+}
+
+/* ============== Sync status + refresh ============== */
+.sync {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: rgba(255,255,255,0.55);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.sync-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--amber, #c8953f);
+  box-shadow: 0 0 0 3px rgba(200, 149, 63, 0.18);
+  display: inline-block;
+  transition: transform 200ms ease, box-shadow 200ms ease;
+}
+.sync-dot--pulse {
+  animation: syncPulse 600ms ease-out;
+}
+@keyframes syncPulse {
+  0%   { transform: scale(1);   box-shadow: 0 0 0 3px rgba(200, 149, 63, 0.18); }
+  50%  { transform: scale(1.6); box-shadow: 0 0 0 8px rgba(200, 149, 63, 0.02); }
+  100% { transform: scale(1);   box-shadow: 0 0 0 3px rgba(200, 149, 63, 0.18); }
+}
+.sync-caption {
+  font-variant-numeric: tabular-nums;
+}
+
+.refresh-btn {
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.2);
+  color: rgba(255,255,255,0.55);
+  width: 30px; height: 30px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+}
+.refresh-btn:hover,
+.refresh-btn:focus-visible {
+  color: #ffffff;
+  border-color: rgba(255,255,255,0.5);
+  background-color: rgba(255,255,255,0.1);
+  outline: none;
+}
+.refresh-btn.spinning svg {
+  animation: spin 700ms linear;
+}
+@keyframes spin { to { transform: rotate(-360deg); } }
+
+/* ============== Mobile nav (≤720px) ============== */
+@media (max-width: 720px) {
+  .topbar {
+    padding: 6px 16px;
+    gap: 10px;
+    min-height: 44px;
+  }
+  .brand, .brand-link { height: auto; }
+  .brand-logo { height: 22px; }
+  .sync-caption { font-size: 11px; }
+  .stats { display: none; } /* keep topbar clean on mobile */
+  .topnav { display: none; }  /* nav moves to the fixed bottom bar */
+  /* fixed app-style bottom tab bar (overridden to static by the app-shell
+     block below — kept for any context where the app-shell body flex is not
+     in effect). */
+  .bottomnav {
+    display: flex;
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    z-index: 40;
+    background: var(--navy, #1a2d4d);
+    border-top: 1px solid rgba(255,255,255,0.12);
+    box-shadow: 0 -2px 14px rgba(26,45,77,0.28);
+    padding-bottom: env(safe-area-inset-bottom);
+    transform: translateZ(0);
+    will-change: transform;
+    backface-visibility: hidden;
+  }
+  /* clearance so the fixed bar never covers the last row of any SPA view
+     (only relevant when the bar is fixed; app-shell below zeroes this out). */
+  #view-queue, #view-templates, #view-schedules, #view-logs {
+    padding-bottom: calc(64px + env(safe-area-inset-bottom));
+  }
+}
+
+/* ===== Mobile app-shell — pin the bottom nav for real (iOS-safe) =====
+   Turns the page into a flex column so the bottom bar is a real flex child
+   at the end (cannot drift on iOS Safari). Applies to BOTH pages:
+     - SPA  : body > topbar > #view-* (scrolls) > bottomnav
+     - inbox: body > .app (flex:1; see messages.html) > bottomnav
+   On the inbox, messages.html sets `.app{flex:1 1 auto;min-height:0}` at the
+   same breakpoint so .app shares the column with the static bottom bar. */
+@media (max-width: 720px) {
+  body { height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+  .topbar { position: static; flex: 0 0 auto; }
+  /* only the visible SPA view scrolls; hidden views are display:none */
+  #view-queue, #view-templates, #view-schedules, #view-logs {
+    flex: 1 1 auto; min-height: 0; overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 24px;            /* no fixed-bar clearance needed anymore */
+  }
+  /* bottom nav becomes a real flex child at the end — cannot drift */
+  .bottomnav {
+    position: static; left: auto; right: auto; bottom: auto;
+    flex: 0 0 auto; order: 100;
+    transform: none; will-change: auto;
+  }
+}

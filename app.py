@@ -2654,6 +2654,112 @@ INSTRUCTIONS_HTML = """\
 """
 
 
+# ---------------------------------------------------------------------------
+# Shared navigation (single source of truth)
+# ---------------------------------------------------------------------------
+# Both the Queue SPA (index.html) and the Messages inbox (messages.html) carry
+# the placeholder comments <!--SHARED_NAV_HEADER--> and
+# <!--SHARED_NAV_BOTTOMNAV-->. do_GET swaps these for the canonical markup
+# below (styled by ui_public/nav.css) so the two pages can never drift apart.
+#
+# The canonical markup has NO is-active anywhere; _nav_mark_active() adds the
+# active class + aria state to the matching top + bottom item for each route.
+# Cross-page links use absolute hrefs so they work from either page:
+#   Queue → /earlscheib#queue (SPA intercepts data-view, inbox navigates)
+#   Messages → /earlscheib/messages (data-external — always navigates)
+#   Templates/Schedules/Logs → /earlscheib#<view>
+
+NAV_HEADER = """<header class="topbar" role="banner">
+    <div class="brand">
+      <a class="brand-link" href="https://earlscheibconcord.com" target="_blank" rel="noopener" aria-label="Earl Scheib Concord website">
+        <img class="brand-logo" src="/earlscheib/logo.png" alt="Earl Scheib Concord" height="32">
+      </a>
+    </div>
+    <nav class="topnav" role="tablist" aria-label="Views">
+      <a class="topnav-link" data-view="queue" href="/earlscheib#queue" role="tab" aria-selected="false">Queue</a>
+      <a class="topnav-link" data-external href="/earlscheib/messages" role="link">Messages</a>
+      <a class="topnav-link" data-view="templates" href="/earlscheib#templates" role="tab" aria-selected="false">Templates</a>
+      <a class="topnav-link" data-view="schedules" href="/earlscheib#schedules" role="tab" aria-selected="false">Schedules</a>
+      <a class="topnav-link" data-view="logs" href="/earlscheib#logs" role="tab" aria-selected="false">Logs</a>
+    </nav>
+    <div class="stats" aria-label="Queue statistics">
+      <span class="stat"><b id="stat-pending">0</b><span class="stat-label">Pending</span></span>
+      <span class="stat-sep" aria-hidden="true">·</span>
+      <span class="stat"><b id="stat-sent">0</b><span class="stat-label">Sent today</span></span>
+      <span class="stat-sep" aria-hidden="true">·</span>
+      <span class="stat"><b id="stat-failed">0</b><span class="stat-label">Failed</span></span>
+    </div>
+    <div class="sync" role="status" aria-live="polite">
+      <span id="sync-dot" class="sync-dot" aria-hidden="true"></span>
+      <span id="sync-caption" class="sync-caption">Last synced —</span>
+      <button id="refresh-btn" class="refresh-btn" type="button" aria-label="Refresh (R)" title="Press R to refresh">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M13.5 8a5.5 5.5 0 1 1-1.61-3.89"></path>
+          <path d="M13.5 2.5v3h-3"></path>
+        </svg>
+      </button>
+    </div>
+  </header>"""
+
+NAV_BOTTOMNAV = """<nav class="bottomnav" role="tablist" aria-label="Sections">
+    <a class="topnav-link bn-link" data-view="queue" href="/earlscheib#queue" role="tab" aria-selected="false" aria-label="Queue">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+      <span class="bn-label">Queue</span>
+    </a>
+    <a class="topnav-link bn-link" data-external href="/earlscheib/messages" role="link" aria-label="Messages">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+      <span class="bn-label">Messages</span>
+    </a>
+    <a class="topnav-link bn-link" data-view="templates" href="/earlscheib#templates" role="tab" aria-selected="false" aria-label="Templates">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h6"/></svg>
+      <span class="bn-label">Templates</span>
+    </a>
+    <a class="topnav-link bn-link" data-view="schedules" href="/earlscheib#schedules" role="tab" aria-selected="false" aria-label="Schedules">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+      <span class="bn-label">Schedules</span>
+    </a>
+    <a class="topnav-link bn-link" data-view="logs" href="/earlscheib#logs" role="tab" aria-selected="false" aria-label="Logs">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
+      <span class="bn-label">Logs</span>
+    </a>
+  </nav>"""
+
+
+def _render_shared_nav(html: str, active: str) -> str:
+    """Replace the shared-nav placeholders with the canonical markup, then mark
+    the active item (top + bottom) for the given route.
+
+    `active` is "queue" (the /earlscheib SPA) or "messages" (the inbox). Exactly
+    one top item and one bottom item get .is-active per page.
+    """
+    html = html.replace("<!--SHARED_NAV_HEADER-->", NAV_HEADER)
+    html = html.replace("<!--SHARED_NAV_BOTTOMNAV-->", NAV_BOTTOMNAV)
+
+    if active == "queue":
+        # Top Queue tab
+        html = html.replace(
+            '<a class="topnav-link" data-view="queue" href="/earlscheib#queue" role="tab" aria-selected="false">Queue</a>',
+            '<a class="topnav-link is-active" data-view="queue" href="/earlscheib#queue" role="tab" aria-selected="true" aria-current="page">Queue</a>',
+        )
+        # Bottom Queue tab
+        html = html.replace(
+            '<a class="topnav-link bn-link" data-view="queue" href="/earlscheib#queue" role="tab" aria-selected="false" aria-label="Queue">',
+            '<a class="topnav-link bn-link is-active" data-view="queue" href="/earlscheib#queue" role="tab" aria-selected="true" aria-current="page" aria-label="Queue">',
+        )
+    elif active == "messages":
+        # Top Messages tab
+        html = html.replace(
+            '<a class="topnav-link" data-external href="/earlscheib/messages" role="link">Messages</a>',
+            '<a class="topnav-link is-active" data-external href="/earlscheib/messages" role="link" aria-current="page">Messages</a>',
+        )
+        # Bottom Messages tab
+        html = html.replace(
+            '<a class="topnav-link bn-link" data-external href="/earlscheib/messages" role="link" aria-label="Messages">',
+            '<a class="topnav-link bn-link is-active" data-external href="/earlscheib/messages" role="link" aria-current="page" aria-label="Messages">',
+        )
+    return html
+
+
 class WebhookHandler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):  # suppress default access log spam
@@ -3284,6 +3390,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
                     log.error("ui_public/index.html read failed: %s", exc)
                     self._send_json(500, {"error": "ui unavailable"})
                     return
+                # Inject the shared nav header + bottom bar (Queue active).
+                html = _render_shared_nav(html, "queue")
                 # Rewrite /main.css and /main.js to namespaced paths so they
                 # load from /earlscheib/* instead of the Go admin's root.
                 # Then inject API_BASE_PATH before main.js loads.
@@ -3318,6 +3426,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
                     log.error("ui_public/messages.html read failed: %s", exc)
                     self._send_json(500, {"error": "ui unavailable"})
                     return
+                # Inject the shared nav header + bottom bar (Messages active).
+                html = _render_shared_nav(html, "messages")
                 injection = (
                     '<script>window.API_BASE_PATH = "/earlscheibconcord";'
                     '</script>\n</head>'
@@ -3329,6 +3439,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
             # CSS + JS: simple safelist — no traversal.
             if path == "/earlscheib/main.css":
                 asset_path = _os_ui.path.join(ui_dir, "main.css")
+                content_type = "text/css; charset=utf-8"
+            elif path == "/earlscheib/nav.css":
+                asset_path = _os_ui.path.join(ui_dir, "nav.css")
                 content_type = "text/css; charset=utf-8"
             elif path == "/earlscheib/main.js":
                 asset_path = _os_ui.path.join(ui_dir, "main.js")
