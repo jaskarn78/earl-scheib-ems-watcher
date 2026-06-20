@@ -1702,6 +1702,9 @@
 
     links.forEach((a) => {
       a.addEventListener('click', (ev) => {
+        // data-external links navigate normally (e.g. the two-way inbox at
+        // /earlscheib/messages) instead of switching an in-page view.
+        if (a.hasAttribute('data-external')) return;
         ev.preventDefault();
         const target = a.getAttribute('data-view') || 'queue';
         activate(target);

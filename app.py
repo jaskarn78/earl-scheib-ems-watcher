@@ -3300,6 +3300,27 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 self._send_html(200, html)
                 return
 
+            # MSG-REPLY: Two-way conversation inbox page. Self-contained
+            # (inline CSS+JS); fetches GET /twilio-messages and POSTs replies
+            # to /messages/reply. Inject API_BASE_PATH before its inline
+            # script runs, same as the index page.
+            if path == "/earlscheib/messages":
+                msg_path = _os_ui.path.join(ui_dir, "messages.html")
+                try:
+                    with open(msg_path, "r", encoding="utf-8") as f:
+                        html = f.read()
+                except OSError as exc:
+                    log.error("ui_public/messages.html read failed: %s", exc)
+                    self._send_json(500, {"error": "ui unavailable"})
+                    return
+                injection = (
+                    '<script>window.API_BASE_PATH = "/earlscheibconcord";'
+                    '</script>\n</head>'
+                )
+                html = html.replace('</head>', injection, 1)
+                self._send_html(200, html)
+                return
+
             # CSS + JS: simple safelist — no traversal.
             if path == "/earlscheib/main.css":
                 asset_path = _os_ui.path.join(ui_dir, "main.css")
@@ -3532,6 +3553,47 @@ class WebhookHandler(BaseHTTPRequestHandler):
             set_auto_send_enabled(enabled)
             log.info("auto-send toggle: enabled=%s", enabled)
             self._send_json(200, {"enabled": enabled})
+            return
+
+        # MSG-REPLY: Two-way inbox reply. Marco types a reply to a customer in
+        # the Messages inbox; this sends an outbound SMS to that customer's
+        # number (the thread phone) via the existing send_sms path. Auth: CF
+        # Access (edge gate) — same model as send-now / auto-send, NO new auth
+        # scheme. Logged to sms_log with kind="reply" for the audit trail.
+        # Recipient redirection (TEST_PHONE_OVERRIDE / TEST_PHONE_RECIPIENTS)
+        # is handled inside send_sms, exactly like send-now.
+        if self.path.split("?")[0] == "/earlscheibconcord/messages/reply":
+            try:
+                body_json = json.loads(raw.decode("utf-8"))
+                to = clean_phone(str(body_json.get("to", "")))
+                msg_body = str(body_json.get("body", "")).strip()
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                self._send_json(400, {"error": "invalid JSON"})
+                return
+            if not to:
+                self._send_json(400, {"error": "invalid_phone"})
+                return
+            if not msg_body:
+                self._send_json(400, {"error": "empty_body"})
+                return
+            msg_body = msg_body[:1600]  # bound payload; SMS segments handled by Twilio
+            ok, send_err = send_sms(to, msg_body)
+            _log_sms(
+                job_id=None,
+                job_type="",
+                phone=to,
+                body=msg_body,
+                status=("sent" if ok else "failed"),
+                kind="reply",
+                is_test=False,
+                error=send_err,
+            )
+            if ok:
+                log.info("messages/reply: to=%s OK (%d chars)", to, len(msg_body))
+                self._send_json(200, {"sent": True})
+            else:
+                log.error("messages/reply: to=%s failed: %s", to, send_err)
+                self._send_json(502, {"error": "twilio_send_failed", "detail": send_err})
             return
 
         # GLV-01: SMS send-log read endpoint. POST (with empty body) so the
