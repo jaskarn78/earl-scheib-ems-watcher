@@ -179,15 +179,33 @@
     .app.show-thread .thread-pane{transform:translateX(0);}
     .app.show-thread .list-pane{visibility:hidden;}
     .back-btn{display:flex;}
-    .topbar{display:none;}
-    .mob-brand{display:flex !important;}
-    /* ===== Slim mobile header — compact navy/cream chrome (~48px), matches the Queue topbar ===== */
+    /* ===== Slim NAVY mobile header — matches the main admin app's topbar ===== */
+    .topbar{
+      display:flex;
+      background:var(--navy);
+      backdrop-filter:none;
+      border-bottom:1px solid rgba(255,255,255,.12);
+      box-shadow:0 2px 8px rgba(26,45,77,.30);
+      padding:8px clamp(var(--s4),3vw,var(--s6));
+      gap:var(--s3);
+      min-height:48px;
+    }
+    .topbar .tabs,
+    .topbar .topbar-spacer,
+    .topbar .who{display:none;}              /* bottom-nav handles section nav on mobile — keep the bar slim */
+    .topbar .brand{min-width:0;}
+    .topbar .brand-text .name{color:#fff;}
+    .topbar .brand-text .sub{display:block;color:rgba(255,255,255,.62);}
+    /* logo is a navy box → invisible on the navy bar. Lighten the gradient + add a
+       hairline ring so the white "E" / red "S" read cleanly on navy. */
+    .topbar .logo{
+      width:30px;height:30px;border-radius:9px;font-size:12px;
+      background:linear-gradient(160deg,#46618c,#2b4670);
+      box-shadow:inset 0 0 0 1px rgba(255,255,255,.30), 0 1px 3px rgba(0,0,0,.25);
+    }
+    .mob-brand{display:none !important;}     /* superseded by the navy topbar above */
     .list-head{padding:10px var(--s5) var(--s3);}
-    .mob-brand{margin-bottom:var(--s2);gap:8px;align-items:center;}
-    .mob-brand .logo{width:26px;height:26px;border-radius:8px;font-size:11px;}
-    .mob-brand .mb-text .name{font-size:13px;line-height:1.1;}
-    .mob-brand .mb-text .sub{display:block;font-size:11px;color:var(--ink-3);line-height:1.1;}  /* brand block carries the "Messages" page label */
-    .list-title-row{display:none;}                       /* drop the tall redundant Fraunces title + count; brand bar + active bottom-nav convey context */
+    .list-title-row{display:none;}           /* drop the tall redundant Fraunces title; topbar + active bottom-nav convey context */
   }
   .mob-brand{display:none;align-items:center;gap:10px;margin-bottom:var(--s4);}
   .mob-brand .logo{width:30px;height:30px;border-radius:9px;font-size:12px;}
