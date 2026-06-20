@@ -32,6 +32,7 @@
   .brand{display:flex;align-items:center;gap:var(--s3);min-width:0;}
   .logo{width:34px;height:34px;flex:0 0 auto;border-radius:10px;background:linear-gradient(160deg,var(--navy),var(--navy-700));color:#fff;display:grid;place-items:center;font-weight:700;letter-spacing:.5px;font-size:13px;box-shadow:var(--shadow-sm);position:relative;}
   .logo span{color:var(--red);}
+  .brand-logo{display:none;}  /* desktop uses the ES box + tabs; wordmark shows on mobile only */
   .brand-text{min-width:0;}
   .brand-text .name{font-weight:600;font-size:14px;line-height:1.15;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .brand-text .sub{font-size:11.5px;color:var(--ink-3);line-height:1.2;}
@@ -179,33 +180,33 @@
     .app.show-thread .thread-pane{transform:translateX(0);}
     .app.show-thread .list-pane{visibility:hidden;}
     .back-btn{display:flex;}
-    /* ===== Slim NAVY mobile header — matches the main admin app's topbar ===== */
+    /* ===== Mobile header — identical to the main app's navy topbar ===== */
     .topbar{
       display:flex;
+      align-items:center;
       background:var(--navy);
       backdrop-filter:none;
-      border-bottom:1px solid rgba(255,255,255,.12);
+      border-bottom:none;
       box-shadow:0 2px 8px rgba(26,45,77,.30);
-      padding:8px clamp(var(--s4),3vw,var(--s6));
+      padding:6px 16px;          /* same as the Queue topbar on mobile */
       gap:var(--s3);
-      min-height:48px;
+      min-height:44px;
     }
+    /* show ONLY the white wordmark, exactly like Queue */
     .topbar .tabs,
     .topbar .topbar-spacer,
-    .topbar .who{display:none;}              /* bottom-nav handles section nav on mobile — keep the bar slim */
-    .topbar .brand{min-width:0;}
-    .topbar .brand-text .name{color:#fff;}
-    .topbar .brand-text .sub{display:block;color:rgba(255,255,255,.62);}
-    /* logo is a navy box → invisible on the navy bar. Lighten the gradient + add a
-       hairline ring so the white "E" / red "S" read cleanly on navy. */
-    .topbar .logo{
-      width:30px;height:30px;border-radius:9px;font-size:12px;
-      background:linear-gradient(160deg,#46618c,#2b4670);
-      box-shadow:inset 0 0 0 1px rgba(255,255,255,.30), 0 1px 3px rgba(0,0,0,.25);
+    .topbar .who,
+    .topbar .logo,
+    .topbar .brand-text{display:none;}
+    .topbar .brand{min-width:0;height:auto;gap:0;}
+    .topbar .brand-logo{
+      display:block;
+      height:22px;width:auto;
+      filter:brightness(0) invert(1);   /* white wordmark on navy, same as Queue */
     }
-    .mob-brand{display:none !important;}     /* superseded by the navy topbar above */
+    .mob-brand{display:none !important;}
     .list-head{padding:10px var(--s5) var(--s3);}
-    .list-title-row{display:none;}           /* drop the tall redundant Fraunces title; topbar + active bottom-nav convey context */
+    .list-title-row{display:none;}      /* topbar + active bottom-nav convey context */
   }
   .mob-brand{display:none;align-items:center;gap:10px;margin-bottom:var(--s4);}
   .mob-brand .logo{width:30px;height:30px;border-radius:9px;font-size:12px;}
@@ -229,6 +230,7 @@
 <div class="app" id="app">
   <header class="topbar">
     <div class="brand">
+      <img class="brand-logo" src="/earlscheib/logo.png" alt="Earl Scheib Concord">
       <div class="logo">E<span>S</span></div>
       <div class="brand-text">
         <div class="name">Earl Scheib Auto Body</div>
