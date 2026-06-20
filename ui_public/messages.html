@@ -185,11 +185,9 @@
     .list-head{padding:10px var(--s5) var(--s3);}
     .mob-brand{margin-bottom:var(--s2);gap:8px;align-items:center;}
     .mob-brand .logo{width:26px;height:26px;border-radius:8px;font-size:11px;}
-    .mob-brand .mb-text .name{font-size:13px;line-height:1.05;}
-    .mob-brand .mb-text .sub{display:none;}            /* drop the duplicate "Messages" under the brand */
-    .list-title-row{margin-bottom:var(--s3);align-items:center;}
-    .list-title{font-size:16px;font-weight:600;}        /* shrink the tall Fraunces title to a compact label */
-    .list-count{font-size:11.5px;}
+    .mob-brand .mb-text .name{font-size:13px;line-height:1.1;}
+    .mob-brand .mb-text .sub{display:block;font-size:11px;color:var(--ink-3);line-height:1.1;}  /* brand block carries the "Messages" page label */
+    .list-title-row{display:none;}                       /* drop the tall redundant Fraunces title + count; brand bar + active bottom-nav convey context */
   }
   .mob-brand{display:none;align-items:center;gap:10px;margin-bottom:var(--s4);}
   .mob-brand .logo{width:30px;height:30px;border-radius:9px;font-size:12px;}
