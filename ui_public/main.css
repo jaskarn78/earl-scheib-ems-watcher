@@ -1889,12 +1889,11 @@ body {
     scroll-snap-type: x proximity;
     gap: 6px;
     margin: 0 -14px;                 /* bleed to screen edges */
-    padding: 0 18px;                 /* lead-in/out >= fade so first/last chip clears the mask */
+    padding: 0 16px;                 /* lead-in/out; a half-cut chip at the screen edge signals scroll */
     scrollbar-width: none;           /* Firefox: hidden scrollbar */
-    -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 16px,
-                        #000 calc(100% - 16px), transparent 100%);
-            mask-image: linear-gradient(90deg, transparent 0, #000 16px,
-                        #000 calc(100% - 16px), transparent 100%);
+    /* No edge-fade mask: masking reduces the navy pills' alpha and leaves a dark
+       composited fringe on the active chip's edge (visible on iOS + Chromium).
+       The bleed-to-edge half-cut chip is the scroll affordance instead. */
   }
   .controls:not(.logs-controls) .filters::-webkit-scrollbar {
     display: none;                   /* WebKit/Blink: hidden scrollbar */
@@ -2123,13 +2122,10 @@ body {
     scroll-snap-type: x proximity;
     gap: 6px;
     margin: 0;
-    padding: 0 14px;            /* lead-in/out >= fade so ALL/30D chips clear the mask */
+    padding: 0 2px;             /* labeled-row variant: no -14px bleed */
     min-width: 0;
     scrollbar-width: none;      /* Firefox */
-    -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 12px,
-                        #000 calc(100% - 12px), transparent 100%);
-            mask-image: linear-gradient(90deg, transparent 0, #000 12px,
-                        #000 calc(100% - 12px), transparent 100%);
+    /* No edge-fade mask — see Queue rail note: it fringed the active navy chips. */
   }
   .logs-controls .filters::-webkit-scrollbar { display: none; }
 
