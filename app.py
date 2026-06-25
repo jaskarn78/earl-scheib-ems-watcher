@@ -1070,7 +1070,7 @@ def _fetch_twilio_messages(
             "status": msg_status,
             "from": m.get("from") or "",
             "to": m.get("to") or "",
-            "body": (m.get("body") or "")[:500],  # bound payload size
+            "body": (m.get("body") or "")[:2000],  # cover full multi-part SMS
             "error_code": m.get("error_code"),
             "error_message": m.get("error_message"),
             "price": m.get("price"),
