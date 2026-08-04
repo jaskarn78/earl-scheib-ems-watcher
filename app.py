@@ -3420,6 +3420,20 @@ class WebhookHandler(BaseHTTPRequestHandler):
             app_dir = _os_ui.path.dirname(_os_ui.path.abspath(__file__))
             ui_dir = _os_ui.path.join(app_dir, "ui_public")
 
+            # CBS-01: cache-bust the asset URLs. Marco's phone kept a stale
+            # main.js across a deploy (fresh HTML + old JS = "the button
+            # doesn't work") — origin no-cache alone doesn't force mobile
+            # Safari/CF to revalidate reliably. Version = newest ui_public
+            # mtime, computed per request (cheap: 3 stats) so a deploy is
+            # picked up without a restart; the HTML itself is never cached.
+            try:
+                asset_ver = str(int(max(
+                    _os_ui.path.getmtime(_os_ui.path.join(ui_dir, f))
+                    for f in ("main.js", "main.css", "nav.css")
+                )))
+            except OSError:
+                asset_ver = "0"
+
             # Root → serve index.html with API_BASE_PATH injection so the
             # shared main.js knows to hit /earlscheibconcord/* instead of
             # its default /api/* base.
@@ -3438,19 +3452,26 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 # load from /earlscheib/* instead of the Go admin's root.
                 # Then inject API_BASE_PATH before main.js loads.
                 html = html.replace(
-                    'href="/main.css"', 'href="/earlscheib/main.css"'
+                    'href="/main.css"',
+                    f'href="/earlscheib/main.css?v={asset_ver}"'
                 ).replace(
                     'src="/main.js"', 'src="/earlscheib/main.js"'
                 ).replace(
                     'src="/logo.png"', 'src="/earlscheib/logo.png"'
+                ).replace(
+                    'href="/earlscheib/nav.css"',
+                    f'href="/earlscheib/nav.css?v={asset_ver}"'
                 )
                 injection = (
                     '<script>window.API_BASE_PATH = "/earlscheibconcord";'
                     '</script>\n  '
                 )
+                # Anchor consumes the unversioned src=… prefix, so this both
+                # injects API_BASE_PATH and versions the main.js URL.
                 html = html.replace(
                     '<script src="/earlscheib/main.js"',
-                    injection + '<script src="/earlscheib/main.js"',
+                    injection
+                    + f'<script src="/earlscheib/main.js?v={asset_ver}"',
                 )
                 self._send_html(200, html)
                 return
@@ -3470,6 +3491,11 @@ class WebhookHandler(BaseHTTPRequestHandler):
                     return
                 # Inject the shared nav header + bottom bar (Messages active).
                 html = _render_shared_nav(html, "messages")
+                # CBS-01: version the shared nav stylesheet here too.
+                html = html.replace(
+                    'href="/earlscheib/nav.css"',
+                    f'href="/earlscheib/nav.css?v={asset_ver}"'
+                )
                 injection = (
                     '<script>window.API_BASE_PATH = "/earlscheibconcord";'
                     '</script>\n</head>'
