@@ -219,10 +219,28 @@
           </button>
           <a class="btn btn-ghost gcal-link" target="_blank" rel="noopener" hidden>Add to Google Calendar</a>
           <button class="btn btn-ghost unbook-btn" type="button" hidden>Unmark</button>
+          <!-- BOK-02: custom branded date+time picker (Marco vetoed the
+               native datetime-local control). Rendered by main.js. -->
           <div class="schedule-form book-form" hidden>
-            <input type="datetime-local" class="book-input mono" aria-label="Appointment date and time" />
-            <button class="btn btn-primary book-save-btn" type="button">Save appointment</button>
-            <button class="btn btn-ghost book-close-btn" type="button">Back</button>
+            <div class="dtp">
+              <div class="dtp-cal">
+                <div class="dtp-head">
+                  <button class="dtp-nav dtp-prev" type="button" aria-label="Previous month">‹</button>
+                  <span class="dtp-title"></span>
+                  <button class="dtp-nav dtp-next" type="button" aria-label="Next month">›</button>
+                </div>
+                <div class="dtp-grid"></div>
+              </div>
+              <div class="dtp-time">
+                <span class="dtp-time-label">Drop-off time</span>
+                <div class="dtp-slots"></div>
+              </div>
+            </div>
+            <div class="dtp-foot">
+              <span class="dtp-picked mono"></span>
+              <button class="btn btn-primary book-save-btn" type="button">Save appointment</button>
+              <button class="btn btn-ghost book-close-btn" type="button">Back</button>
+            </div>
           </div>
           <span class="job-error book-error" hidden></span>
         </div>

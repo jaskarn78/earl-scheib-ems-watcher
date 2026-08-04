@@ -674,6 +674,102 @@
     }
   }
 
+  // ---------- Custom date+time picker (BOK-02) -------------------------
+
+  // Shop-hours drop-off slots: 8:00 AM – 5:30 PM in 30-minute steps.
+  const DTP_SLOTS = (() => {
+    const out = [];
+    for (let mins = 8 * 60; mins <= 17 * 60 + 30; mins += 30) out.push(mins);
+    return out;
+  })();
+
+  function fmtSlot(mins) {
+    const h24 = Math.floor(mins / 60);
+    const mm = mins % 60;
+    const h12 = ((h24 + 11) % 12) + 1;
+    return `${h12}:${String(mm).padStart(2, '0')} ${h24 < 12 ? 'AM' : 'PM'}`;
+  }
+
+  function openDTP(formEl, seedTs) {
+    const seed = new Date(seedTs * 1000);
+    const st = {
+      y: seed.getFullYear(), m: seed.getMonth(), day: seed.getDate(),
+      mins: seed.getHours() * 60 + seed.getMinutes(),
+      viewY: seed.getFullYear(), viewM: seed.getMonth(),
+    };
+    if (!DTP_SLOTS.includes(st.mins)) st.mins = 9 * 60;
+    formEl._dtp = st;
+    renderDTP(formEl);
+  }
+
+  function dtpPickedTs(formEl) {
+    const st = formEl._dtp;
+    if (!st) return NaN;
+    return Math.floor(new Date(
+      st.y, st.m, st.day, Math.floor(st.mins / 60), st.mins % 60,
+    ).getTime() / 1000);
+  }
+
+  function renderDTP(formEl) {
+    const st = formEl._dtp;
+    const view = new Date(st.viewY, st.viewM, 1);
+    formEl.querySelector('.dtp-title').textContent =
+      view.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const firstDow = view.getDay();
+    const daysInMonth = new Date(st.viewY, st.viewM + 1, 0).getDate();
+    const todayD = new Date();
+
+    let grid = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+      .map((d) => `<span class="dtp-dow">${d}</span>`).join('');
+    for (let i = 0; i < firstDow; i += 1) grid += '<span class="dtp-pad"></span>';
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      const cellDate = new Date(st.viewY, st.viewM, day);
+      const past = cellDate < today;
+      const sel = st.y === st.viewY && st.m === st.viewM && st.day === day;
+      const isToday = todayD.getFullYear() === st.viewY
+        && todayD.getMonth() === st.viewM && todayD.getDate() === day;
+      grid += `<button type="button" class="dtp-day${sel ? ' dtp-day--sel' : ''}`
+        + `${isToday ? ' dtp-day--today' : ''}" data-day="${day}"`
+        + `${past ? ' disabled' : ''}>${day}</button>`;
+    }
+    formEl.querySelector('.dtp-grid').innerHTML = grid;
+
+    formEl.querySelector('.dtp-slots').innerHTML = DTP_SLOTS.map((mins) =>
+      `<button type="button" class="dtp-slot${mins === st.mins ? ' dtp-slot--sel' : ''}"`
+      + ` data-mins="${mins}">${fmtSlot(mins)}</button>`,
+    ).join('');
+
+    formEl.querySelector('.dtp-picked').textContent =
+      new Date(st.y, st.m, st.day).toLocaleDateString('en-US', {
+        weekday: 'short', month: 'short', day: 'numeric',
+      }) + ' · ' + fmtSlot(st.mins);
+  }
+
+  function wireDTP(formEl) {
+    formEl.addEventListener('click', (e) => {
+      const st = formEl._dtp;
+      if (!st) return;
+      const dayBtn  = e.target.closest('.dtp-day:not([disabled])');
+      const slotBtn = e.target.closest('.dtp-slot');
+      if (e.target.closest('.dtp-prev')) {
+        const v = new Date(st.viewY, st.viewM - 1, 1);
+        st.viewY = v.getFullYear(); st.viewM = v.getMonth();
+      } else if (e.target.closest('.dtp-next')) {
+        const v = new Date(st.viewY, st.viewM + 1, 1);
+        st.viewY = v.getFullYear(); st.viewM = v.getMonth();
+      } else if (dayBtn) {
+        st.y = st.viewY; st.m = st.viewM; st.day = Number(dayBtn.dataset.day);
+      } else if (slotBtn) {
+        st.mins = Number(slotBtn.dataset.mins);
+      } else {
+        return;
+      }
+      renderDTP(formEl);
+    });
+  }
+
   // ---------- Booking flow (BOK-01) -----------------------------------
 
   // "Aug 12, 9:00 AM" (Pacific) — appointment dates are usually days out,
@@ -735,9 +831,9 @@
       unbookBtn.hidden = false;
     }
 
+    wireDTP(form);
     bookBtn.addEventListener('click', () => {
       if (!form.hidden) { form.hidden = true; return; }
-      const input = form.querySelector('.book-input');
       const nowSec = Math.floor(Date.now() / 1000);
       // Prefill: existing appointment, else tomorrow 9:00 AM.
       let seed = group.appointment_at;
@@ -747,9 +843,8 @@
         t.setHours(9, 0, 0, 0);
         seed = Math.floor(t.getTime() / 1000);
       }
-      input.value = toLocalInputValue(seed);
+      openDTP(form, seed);
       form.hidden = false;
-      input.focus();
     });
     form.querySelector('.book-close-btn').addEventListener('click', () => { form.hidden = true; });
     form.querySelector('.book-save-btn').addEventListener('click', () => handleBook(group, form, errEl));
@@ -757,11 +852,9 @@
   }
 
   async function handleBook(group, formEl, errEl) {
-    const input = formEl.querySelector('.book-input');
     const btnEl = formEl.querySelector('.book-save-btn');
-    if (!input.value) { showEntryError(errEl, 'Pick the appointment date first'); return; }
-    const ts = Math.floor(new Date(input.value).getTime() / 1000);
-    if (!Number.isFinite(ts)) { showEntryError(errEl, "That date didn't parse — try again"); return; }
+    const ts = dtpPickedTs(formEl);
+    if (!Number.isFinite(ts)) { showEntryError(errEl, 'Pick the appointment date first'); return; }
 
     btnEl.disabled = true;
     errEl.hidden = true; errEl.textContent = '';
