@@ -172,6 +172,11 @@ DEFAULT_TEMPLATES = {
         "Hi {first_name}, thank you for choosing {shop_name}! Hope you're happy "
         "with the repair on your {year} {short_model}. Would you mind leaving us a "
         "Google review? It means a lot: {review_url}",
+    # RMD-01: appointment reminder — fires ~24h before a booked drop-off.
+    "appt_reminder":
+        "Hi {first_name}, a friendly reminder from {shop_name}: your "
+        "{year} {short_model} is booked for {appt_time}. See you then! "
+        "Questions? Call {shop_phone}.",
 }
 
 SHOP_CONSTANTS = {
@@ -192,12 +197,24 @@ DEFAULT_SCHEDULES = {
 SCHEDULE_MIN_HOURS = 1
 SCHEDULE_MAX_HOURS = 720  # 30 days
 
+# RMD-01: hours BEFORE the booked appointment that the reminder text fires.
+# Deliberately NOT in DEFAULT_SCHEDULES / the Schedules tab — that tab's
+# rebase math is created_at-relative and would corrupt appointment-relative
+# times.
+APPT_REMINDER_LEAD_H = 24
+
 # Canonical order + metadata for the Templates admin UI. Drives the card
 # order on the Templates page, the display labels, and the schedule hints.
 JOB_TYPE_META = [
     {"job_type": "24h",    "label": "24-hour follow-up", "when": "~24 hours after estimate"},
     {"job_type": "3day",   "label": "3-day check-in",    "when": "~3 days after estimate"},
     {"job_type": "review", "label": "Review request",    "when": "~24 hours after job completion"},
+    # RMD-01: no_schedule keeps this off the Schedules tab — its timing is
+    # appointment-relative (24h before drop-off), not created_at-relative,
+    # so the tab's delay editor + rebase don't apply. Template stays
+    # Marco-editable on the Templates tab.
+    {"job_type": "appt_reminder", "label": "Appointment reminder",
+     "when": "~24 hours before the booked drop-off", "no_schedule": True},
 ]
 
 # Placeholder catalog — rendered as clickable chips on the Templates page.
@@ -206,6 +223,9 @@ PLACEHOLDERS_PER_ROW = [
     "first_name", "name", "phone", "vin",
     "year", "make", "model", "short_model", "vehicle_desc",
     "ro_id", "doc_id", "email",
+    # RMD-01: filled from the appointments table (not a jobs column) when
+    # the row's estimate has an active booking. Empty otherwise.
+    "appt_time",
 ]
 PLACEHOLDERS_SHOP = ["shop_name", "shop_phone", "review_url"]
 
@@ -471,6 +491,9 @@ def _seed_test_jobs_if_missing(con) -> None:
 def _reset_test_jobs(con) -> int:
     """Delete all test jobs and re-seed fresh. Returns number inserted."""
     con.execute("DELETE FROM jobs WHERE is_test = 1")
+    # BOK-01: drop test bookings too — else a re-seeded test estimate with
+    # the same estimate_key instantly reads as booked again.
+    con.execute("DELETE FROM appointments WHERE estimate_key LIKE 'test|%'")
     con.commit()
     _seed_test_jobs_if_missing(con)
     return con.execute("SELECT COUNT(*) FROM jobs WHERE is_test=1").fetchone()[0]
@@ -695,6 +718,35 @@ def render_template(job_type: str, row) -> str:
     yr = str(ctx["year"]).strip() if ctx["year"] else ""
     if yr.isdigit() and len(yr) == 2:
         ctx["year"] = ("20" if int(yr) <= 30 else "19") + yr
+
+    # RMD-01: {appt_time} comes from the appointments table, not the jobs
+    # row. Only pay the lookup when the template actually uses it. Pi local
+    # time is Pacific — matches every other timestamp in the app.
+    if "{appt_time}" in tpl and not ctx["appt_time"]:
+        ek = ""
+        if row is not None:
+            try:
+                if "estimate_key" in keys:
+                    ek = row["estimate_key"] or ""
+            except (KeyError, IndexError, TypeError):
+                ek = ""
+        if ek:
+            try:
+                _con = get_db()
+                try:
+                    _a = _con.execute(
+                        "SELECT appointment_at FROM appointments "
+                        "WHERE estimate_key = ? AND unbooked_at = 0",
+                        (ek,),
+                    ).fetchone()
+                finally:
+                    _con.close()
+                if _a:
+                    import datetime as _dt
+                    _d = _dt.datetime.fromtimestamp(int(_a["appointment_at"]))
+                    ctx["appt_time"] = _d.strftime("%a, %b %-d at %-I:%M %p")
+            except (sqlite3.Error, OSError, ValueError) as exc:
+                log.warning("render_template: appt_time lookup failed: %s", exc)
 
     try:
         return tpl.format_map(ctx)
@@ -1265,10 +1317,12 @@ def _fire_due_jobs():
         # BOK-01: booking suppresses pre-work nags, never the post-work
         # review request. The NOT EXISTS join (rather than a per-row flag)
         # means rows inserted after booking are suppressed too.
+        # RMD-01: appt_reminder is also exempt — it only EXISTS because the
+        # estimate is booked; suppressing it would be self-defeating.
         cur.execute(
             "SELECT * FROM jobs "
             "WHERE sent = 0 AND is_test = 0 AND cancelled = 0 AND send_at <= ? "
-            "  AND (job_type = 'review' OR NOT EXISTS ("
+            "  AND (job_type IN ('review', 'appt_reminder') OR NOT EXISTS ("
             "        SELECT 1 FROM appointments a "
             "        WHERE a.estimate_key = jobs.estimate_key "
             "          AND a.unbooked_at = 0))",
@@ -3234,6 +3288,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
             job_types_out = []
             for meta in JOB_TYPE_META:
                 jt = meta["job_type"]
+                # RMD-01: appointment-relative types don't get a delay card.
+                if meta.get("no_schedule"):
+                    continue
                 if jt in overrides:
                     delay_h, updated, enabled = overrides[jt]
                     job_types_out.append({
@@ -4015,13 +4072,67 @@ class WebhookHandler(BaseHTTPRequestHandler):
                     " unbooked_at = 0",
                     (estimate_key, appointment_at, now, now),
                 )
+
+                # RMD-01: create/refresh the appointment-reminder text.
+                # Fires APPT_REMINDER_LEAD_H before drop-off; if booked
+                # closer than that, fires shortly after booking. A re-book
+                # (Change date) retimes the existing row and re-arms it
+                # (sent=0) so a date moved AFTER a reminder already went
+                # out produces a fresh reminder for the new date.
+                reminder_at = appointment_at - APPT_REMINDER_LEAD_H * 3600
+                if reminder_at < now + 120:
+                    reminder_at = now + 120
+                cur.execute(
+                    "SELECT id FROM jobs "
+                    "WHERE estimate_key = ? AND job_type = 'appt_reminder' "
+                    "ORDER BY id DESC LIMIT 1",
+                    (estimate_key,),
+                )
+                existing_rem = cur.fetchone()
+                if appointment_at <= now:
+                    # Marco logging a drop-off that already happened —
+                    # a reminder would be nonsense; park any pending one.
+                    if existing_rem:
+                        cur.execute(
+                            "UPDATE jobs SET cancelled = 1 "
+                            "WHERE id = ? AND sent = 0",
+                            (existing_rem["id"],),
+                        )
+                elif existing_rem:
+                    cur.execute(
+                        "UPDATE jobs SET send_at = ?, sent = 0, sent_at = 0, "
+                        " cancelled = 0 WHERE id = ?",
+                        (reminder_at, existing_rem["id"]),
+                    )
+                else:
+                    cur.execute(
+                        "SELECT * FROM jobs WHERE estimate_key = ? "
+                        "ORDER BY id DESC LIMIT 1",
+                        (estimate_key,),
+                    )
+                    src = cur.fetchone()
+                    cur.execute(
+                        "INSERT INTO jobs "
+                        "(doc_id, job_type, phone, name, send_at, sent, "
+                        " created_at, vin, vehicle_desc, ro_id, email, "
+                        " address, sent_at, estimate_key, year, make, model, "
+                        " is_test) "
+                        "VALUES (?, 'appt_reminder', ?, ?, ?, 0, ?, ?, ?, ?, "
+                        " ?, ?, 0, ?, ?, ?, ?, ?)",
+                        (src["doc_id"], src["phone"], src["name"],
+                         reminder_at, now, src["vin"], src["vehicle_desc"],
+                         src["ro_id"], src["email"], src["address"],
+                         estimate_key, src["year"], src["make"],
+                         src["model"], src["is_test"]),
+                    )
                 con.commit()
             finally:
                 con.close()
 
             log.info(
                 "Estimate booked via admin UI: estimate_key=%s "
-                "appointment_at=%s", estimate_key, appointment_at,
+                "appointment_at=%s (reminder armed)",
+                estimate_key, appointment_at,
             )
             self._send_json(200, {"booked": 1, "appointment_at": appointment_at})
             return
@@ -4053,10 +4164,19 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 affected = cur.rowcount
                 rebased = 0
                 if affected:
+                    # RMD-01: no booking → no reminder. Soft-cancel any
+                    # pending reminder row for this estimate.
+                    cur.execute(
+                        "UPDATE jobs SET cancelled = 1 "
+                        "WHERE estimate_key = ? AND job_type = 'appt_reminder' "
+                        "  AND sent = 0",
+                        (estimate_key,),
+                    )
                     cur.execute(
                         "SELECT id, job_type FROM jobs "
                         "WHERE estimate_key = ? AND sent = 0 AND cancelled = 0 "
-                        "  AND job_type != 'review' AND send_at <= ?",
+                        "  AND job_type NOT IN ('review', 'appt_reminder') "
+                        "  AND send_at <= ?",
                         (estimate_key, now),
                     )
                     for r in cur.fetchall():
@@ -4380,7 +4500,11 @@ class WebhookHandler(BaseHTTPRequestHandler):
         # Auth: CF Access (edge gate).
 
         job_type = path[len(prefix):]
-        valid_types = {m["job_type"] for m in JOB_TYPE_META}
+        # RMD-01: no_schedule types (appt_reminder) have appointment-relative
+        # timing — the delay editor + created_at rebase here don't apply.
+        valid_types = {
+            m["job_type"] for m in JOB_TYPE_META if not m.get("no_schedule")
+        }
         if job_type not in valid_types:
             self._send_json(400, {"error": "unknown job_type"})
             return

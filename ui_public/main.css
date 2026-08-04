@@ -541,6 +541,8 @@ body {
 .job-chip[data-type="24h"]    { background-color: var(--chip-24h-bg);    color: var(--chip-24h-ink); }
 .job-chip[data-type="3day"]   { background-color: var(--chip-3day-bg);   color: var(--chip-3day-ink); }
 .job-chip[data-type="review"] { background-color: var(--chip-review-bg); color: var(--chip-review-ink); }
+/* RMD-01: appointment reminder — green family, matching the Booked pill. */
+.job-chip[data-type="appt_reminder"] { background-color: rgba(31, 122, 82, 0.12); color: #12603f; }
 
 .job-send {
   display: inline-flex;

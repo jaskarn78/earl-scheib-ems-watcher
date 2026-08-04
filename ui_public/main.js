@@ -55,6 +55,10 @@
       'Hi {first_name}, thank you for choosing {shop_name}! Hope you\'re happy ' +
       'with the repair on your {year} {make}. Would you mind leaving us a ' +
       'Google review? It means a lot: {review_url}',
+    'appt_reminder':
+      'Hi {first_name}, a friendly reminder from {shop_name}: your ' +
+      '{year} {short_model} is booked for {appt_time}. See you then! ' +
+      'Questions? Call {shop_phone}.',
   };
   const SHOP_CONSTANTS = {
     shop_name:  'Earl Scheib Auto Body Concord',
@@ -81,6 +85,16 @@
       if (/^\d{2}$/.test(yr)) {
         bag.year = (parseInt(yr, 10) <= 30 ? '20' : '19') + yr;
       }
+    }
+    // RMD-01: {appt_time} from the row's active booking ("Wed, Aug 5 at
+    // 9:00 AM") — mirrors app.py render_template.
+    if (!bag.appt_time && bag.appointment_at) {
+      const d = new Date(bag.appointment_at * 1000);
+      bag.appt_time = d.toLocaleDateString('en-US', {
+        weekday: 'short', month: 'short', day: 'numeric',
+      }) + ' at ' + d.toLocaleTimeString('en-US', {
+        hour: 'numeric', minute: '2-digit',
+      });
     }
     return tpl.replace(/\{(\w+)\}/g, (_, key) => {
       const v = bag[key];
@@ -118,6 +132,7 @@
     '24h':    '24-hour follow-up',
     '3day':   '3-day check-in',
     'review': 'Review request',
+    'appt_reminder': 'Appointment reminder',
   };
 
   // Pacific-time formatter for the absolute-time chip: "5:28 PM"
@@ -544,7 +559,8 @@
       const whenTs = job.sent_at && job.sent_at > 0 ? job.sent_at : job.send_at;
       stampEl.textContent = 'Sent · ' + formatAbsolute(whenTs);
       frag.querySelector('.job-send').hidden = true;
-    } else if (job.booked === 1 && job.job_type !== 'review') {
+    } else if (job.booked === 1
+               && (job.job_type === '24h' || job.job_type === '3day')) {
       // BOK-01: pre-work follow-up suppressed while the estimate is booked.
       // The countdown would be a lie (the scheduler skips this row), so
       // show the hold instead. Review rows keep their countdown — they
