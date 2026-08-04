@@ -418,6 +418,10 @@ body {
   text-transform: uppercase;
 }
 .timeline__sent-stamp[hidden] { display: none; }
+/* BOK-01: same GLV-01 specificity fix for the send-time chip — .job-send's
+   class-level display:inline-flex outranks the UA [hidden] rule, so the
+   countdown stayed visible next to "On hold · customer booked". */
+.job-send[hidden] { display: none; }
 
 /* Sent/cancelling visual — fade the SMS bubble but keep dot + meta legible.
    GLV-01: `.job-actions` is NOT faded here so the Resend button stays
