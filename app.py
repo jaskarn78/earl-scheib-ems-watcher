@@ -293,6 +293,12 @@ def init_db():
         # Uncancel impossible and erased the audit trail. cancelled=1 means
         # "Marco cancelled this job"; scheduler must skip these rows.
         ("cancelled", "ALTER TABLE jobs ADD COLUMN cancelled INTEGER DEFAULT 0"),
+        # SCH-01: manual scheduling. send_at_manual=1 means Marco hand-picked
+        # this row's send_at via the Schedule button. The schedules-tab delay
+        # rebase and the type-disable sweep must leave these rows alone —
+        # Marco's explicit intent is authoritative (same principle as GLV-02
+        # cancelled rows surviving CCC resaves).
+        ("send_at_manual", "ALTER TABLE jobs ADD COLUMN send_at_manual INTEGER DEFAULT 0"),
     ]
     added = 0
     for col, stmt in migrations:
@@ -2994,7 +3000,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 "SELECT id, doc_id, job_type, phone, name, send_at, sent, "
                 "       created_at, vin, vehicle_desc, ro_id, email, address, "
                 "       sent_at, estimate_key, year, make, model, is_test, "
-                "       cancelled "
+                "       cancelled, send_at_manual "
                 "FROM jobs"
             )
             # GLV-02: "pending" means literally pending — exclude cancelled
@@ -3851,6 +3857,55 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 self._send_json(404, {"error": "not_found_or_not_cancelled"})
             return
 
+        # SCH-01: Schedule — Marco picks an explicit send date/time for a
+        # pending row. Sets send_at and flags send_at_manual=1 so the
+        # schedules-tab rebase and the type-disable sweep skip this row
+        # from now on. Pending rows only — sent/cancelled rows 404.
+        if self.path.split("?")[0] == "/earlscheibconcord/queue/schedule":
+            # Auth: CF Access (edge gate) — same pattern as uncancel.
+            try:
+                body = json.loads(raw.decode("utf-8"))
+                job_id = int(body["id"])
+                new_send_at = int(body["send_at"])
+            except (ValueError, KeyError, TypeError,
+                    json.JSONDecodeError, UnicodeDecodeError):
+                self._send_json(400, {"error": "invalid JSON"})
+                return
+
+            now = int(time.time())
+            # Small past grace for clock skew / a slow form submit; the
+            # scheduler fires a barely-past send_at on its next 30s tick.
+            if new_send_at < now - 300:
+                self._send_json(400, {"error": "send_at is in the past"})
+                return
+            if new_send_at > now + 366 * 86400:
+                self._send_json(
+                    400, {"error": "send_at is more than a year out"})
+                return
+
+            con = get_db()
+            try:
+                cur = con.cursor()
+                cur.execute(
+                    "UPDATE jobs SET send_at = ?, send_at_manual = 1 "
+                    "WHERE id = ? AND sent = 0 AND cancelled = 0",
+                    (new_send_at, job_id),
+                )
+                con.commit()
+                affected = cur.rowcount
+            finally:
+                con.close()
+
+            if affected == 1:
+                log.info(
+                    "Job manually scheduled via admin UI: id=%s send_at=%s",
+                    job_id, new_send_at,
+                )
+                self._send_json(200, {"scheduled": 1, "send_at": new_send_at})
+            else:
+                self._send_json(404, {"error": "not_found_or_not_pending"})
+            return
+
         if self.path.split("?")[0] == "/earlscheibconcord/reset-test-jobs":
             # Auth: CF Access (edge gate).
             con = get_db()
@@ -4264,9 +4319,12 @@ class WebhookHandler(BaseHTTPRequestHandler):
             if not effective_enabled:
                 # Toggle-off (or upsert that ends with enabled=False):
                 # cancel ALL pending sent=0 jobs of this job_type.
+                # SCH-01: hand-scheduled rows survive a type-disable — Marco
+                # explicitly picked their send time, so "stop auto-sending
+                # this type" must not silently erase his deferrals.
                 cur.execute(
                     "UPDATE jobs SET sent=1, sent_at=? "
-                    "WHERE job_type=? AND sent=0",
+                    "WHERE job_type=? AND sent=0 AND send_at_manual=0",
                     (now_ts, job_type),
                 )
                 cancelled = cur.rowcount or 0
@@ -4280,9 +4338,11 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 # enabled=True (or unchanged-True): run rebase. Touches sent=0
                 # rows only — idempotent for unchanged delays since
                 # next_send_window(created_at + delay*3600) is deterministic.
+                # SCH-01: skip hand-scheduled rows — a global delay change
+                # must not overwrite a send time Marco picked by hand.
                 cur.execute(
                     "SELECT id, created_at FROM jobs "
-                    "WHERE job_type = ? AND sent = 0",
+                    "WHERE job_type = ? AND sent = 0 AND send_at_manual = 0",
                     (job_type,),
                 )
                 pending = cur.fetchall()

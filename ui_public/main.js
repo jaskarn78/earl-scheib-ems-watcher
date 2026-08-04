@@ -181,7 +181,7 @@
 
   function jobsRenderKey(jobs, filter, search, sort) {
     const parts = (jobs || []).map((j) =>
-      `${j.id}:${j.sent || 0}:${j.send_at || 0}:${j.sent_at || 0}`,
+      `${j.id}:${j.sent || 0}:${j.send_at || 0}:${j.sent_at || 0}:${j.send_at_manual || 0}`,
     );
     return `${filter}|${search}|${sort}|${parts.join(',')}`;
   }
@@ -203,9 +203,25 @@
     return raw;
   }
 
+  // SCH-01: manual scheduling can push send times days out, where a bare
+  // "2:30 PM" is ambiguous. Same-Pacific-day → time only (original
+  // behaviour); any other day → "Aug 12, 2:30 PM".
+  const dateTimeFmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Los_Angeles',
+    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+  });
+  const dayKeyFmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  });
+
   function formatAbsolute(unixSeconds) {
     if (!unixSeconds) return '';
-    return timeFmt.format(new Date(unixSeconds * 1000));
+    const d = new Date(unixSeconds * 1000);
+    if (dayKeyFmt.format(d) === dayKeyFmt.format(new Date())) {
+      return timeFmt.format(d);
+    }
+    return dateTimeFmt.format(d);
   }
 
   function formatRelative(unixSeconds) {
@@ -251,6 +267,11 @@
           && isPending;
       case 'completed':
         return !isTest && job.job_type === 'review' && isPending;
+      // SCH-01: hand-scheduled rows only — NOT all pending rows (that set
+      // is already the union of `estimates` + `completed`). This chip
+      // answers "what did I push out, and when is it coming back".
+      case 'scheduled':
+        return !isTest && isPending && job.send_at_manual === 1;
       case 'sent':
         return !isTest && job.sent === 1 && !isCancelled;
       case 'cancelled':
@@ -509,10 +530,20 @@
     const cancelBtn   = frag.querySelector('.cancel-btn');
     const resendBtn   = frag.querySelector('.resend-btn');
     const uncancelBtn = frag.querySelector('.uncancel-btn');
+    const scheduleBtn = frag.querySelector('.schedule-btn');
+    const schedForm   = frag.querySelector('.schedule-form');
     const errEl       = frag.querySelector('.job-error');
 
-    // GLV-01 + GLV-02 + GLV-04: pick the right action button per state.
-    //   pending   → Send-now + Cancel
+    // SCH-01: "Scheduled by you" tag on pending rows Marco hand-scheduled.
+    const manualTag = frag.querySelector('.manual-tag');
+    if (manualTag && job.send_at_manual === 1
+        && job.sent !== 1 && job.cancelled !== 1) {
+      manualTag.hidden = false;
+    }
+
+    // GLV-01 + GLV-02 + GLV-04 + SCH-01: pick the right action buttons
+    // per state.
+    //   pending   → Send-now + Schedule + Cancel
     //   sent      → Resend
     //   cancelled → Uncancel
     if (job.cancelled === 1) {
@@ -520,20 +551,32 @@
       if (cancelBtn)   cancelBtn.hidden   = true;
       if (resendBtn)   resendBtn.hidden   = true;
       if (uncancelBtn) uncancelBtn.hidden = false;
+      if (scheduleBtn) scheduleBtn.hidden = true;
     } else if (job.sent === 1) {
       if (sendBtn)     sendBtn.hidden     = true;
       if (cancelBtn)   cancelBtn.hidden   = true;
       if (resendBtn)   resendBtn.hidden   = false;
       if (uncancelBtn) uncancelBtn.hidden = true;
+      if (scheduleBtn) scheduleBtn.hidden = true;
     } else {
       if (resendBtn)   resendBtn.hidden   = true;
       if (uncancelBtn) uncancelBtn.hidden = true;
+      // SCH-01: the Go local admin has no /api/schedule proxy — Pi-only
+      // feature, same pattern as the auto-send toggle.
+      if (scheduleBtn && IS_LOCAL_ADMIN) scheduleBtn.hidden = true;
     }
 
     if (sendBtn)     sendBtn.addEventListener('click',     () => handleSendNow(job, li, sendBtn, errEl));
     if (cancelBtn)   cancelBtn.addEventListener('click',   () => handleCancel(job, li, cancelBtn, errEl));
     if (resendBtn)   resendBtn.addEventListener('click',   () => handleResend(job, li, resendBtn, errEl));
     if (uncancelBtn) uncancelBtn.addEventListener('click', () => handleUncancel(job, li, uncancelBtn, errEl));
+    if (scheduleBtn && schedForm) {
+      scheduleBtn.addEventListener('click', () => toggleScheduleForm(job, schedForm));
+      const saveBtn  = schedForm.querySelector('.schedule-save-btn');
+      const closeBtn = schedForm.querySelector('.schedule-close-btn');
+      if (closeBtn) closeBtn.addEventListener('click', () => { schedForm.hidden = true; });
+      if (saveBtn)  saveBtn.addEventListener('click', () => handleSchedule(job, schedForm, saveBtn, errEl));
+    }
 
     return frag;
   }
@@ -595,6 +638,89 @@
     } catch (e) {
       counters.failed++;
       updateStats();
+      showEntryError(errEl, 'Network error — please retry');
+      btnEl.disabled = false;
+    }
+  }
+
+  // ---------- Schedule flow (SCH-01) ----------------------------------
+
+  // datetime-local wants "YYYY-MM-DDTHH:MM" in the *browser's* local zone
+  // (Marco's browser runs Pacific, matching the scheduler's display zone).
+  function toLocalInputValue(unixSeconds) {
+    const d = new Date(unixSeconds * 1000);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+      + `T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  function toggleScheduleForm(job, formEl) {
+    if (!formEl.hidden) { formEl.hidden = true; return; }
+    const input = formEl.querySelector('.schedule-input');
+    const nowSec = Math.floor(Date.now() / 1000);
+    // Prefill with the row's current send time; if that's already past
+    // (overdue row), suggest an hour from now instead.
+    const seed = (job.send_at && job.send_at > nowSec)
+      ? job.send_at
+      : nowSec + 3600;
+    input.value = toLocalInputValue(seed);
+    input.min = toLocalInputValue(nowSec);
+    formEl.hidden = false;
+    input.focus();
+  }
+
+  async function handleSchedule(job, formEl, btnEl, errEl) {
+    const input = formEl.querySelector('.schedule-input');
+    if (!input.value) {
+      showEntryError(errEl, 'Pick a date and time first');
+      return;
+    }
+    const ts = Math.floor(new Date(input.value).getTime() / 1000);
+    if (!Number.isFinite(ts)) {
+      showEntryError(errEl, "That date didn't parse — try again");
+      return;
+    }
+    if (ts < Math.floor(Date.now() / 1000) - 60) {
+      showEntryError(errEl, 'That time is in the past — pick a future time');
+      return;
+    }
+
+    btnEl.disabled = true;
+    errEl.hidden = true;
+    errEl.textContent = '';
+
+    try {
+      const resp = await fetch(`${API_BASE}/queue/schedule`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: job.id, send_at: ts }),
+      });
+      if (resp.status === 200) {
+        btnEl.textContent = 'Scheduled ✓';
+        // Re-fetch so the row shows the new time + "Scheduled by you" tag
+        // (row rebuild also collapses the form). The fallback reset covers
+        // the no-op case (same time re-picked → render key unchanged).
+        setTimeout(fetchQueue, 600);
+        setTimeout(() => {
+          formEl.hidden = true;
+          btnEl.disabled = false;
+          btnEl.textContent = 'Set time';
+        }, 1400);
+        return;
+      }
+      if (resp.status === 404) {
+        showEntryError(errEl, 'Already sent or cancelled — refreshing list…');
+        setTimeout(fetchQueue, 600);
+        btnEl.disabled = false;
+        return;
+      }
+      const parsed = await resp.json().catch(() => ({}));
+      showEntryError(
+        errEl,
+        parsed.error ? `Schedule failed: ${parsed.error}` : `Schedule failed (${resp.status})`,
+      );
+      btnEl.disabled = false;
+    } catch (e) {
       showEntryError(errEl, 'Network error — please retry');
       btnEl.disabled = false;
     }

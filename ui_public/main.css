@@ -432,8 +432,12 @@ body {
    without a wrapping `display: none` swallowing it. */
 .timeline__entry[data-state="sent"]      .send-now-btn,
 .timeline__entry[data-state="sent"]      .cancel-btn,
+.timeline__entry[data-state="sent"]      .schedule-btn,
+.timeline__entry[data-state="sent"]      .schedule-form,
 .timeline__entry[data-state="cancelled"] .send-now-btn,
-.timeline__entry[data-state="cancelled"] .cancel-btn {
+.timeline__entry[data-state="cancelled"] .cancel-btn,
+.timeline__entry[data-state="cancelled"] .schedule-btn,
+.timeline__entry[data-state="cancelled"] .schedule-form {
   display: none;
 }
 
@@ -705,6 +709,53 @@ body {
   font-weight: 500;
   padding-left: 8px;
 }
+
+/* SCH-01: inline schedule picker — flex-basis:100% wraps it onto its own
+   row inside .job-actions, below the buttons. */
+.schedule-form {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background-color: var(--canvas);
+  border: 1px solid var(--hairline);
+  border-left: 3px solid var(--navy);
+  border-radius: 12px;
+}
+.schedule-form[hidden] { display: none; }
+.schedule-input {
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  background-color: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-button);
+  padding: 9px 12px;
+}
+.schedule-input:focus-visible {
+  outline: 2px solid var(--oxblood);
+  outline-offset: 2px;
+}
+
+/* SCH-01: "Scheduled by you" tag on hand-scheduled pending rows — navy
+   sibling of the amber sent-stamp so the two states read differently. */
+.manual-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background-color: rgba(26, 45, 77, 0.08);
+  color: var(--navy);
+  padding: 4px 10px;
+  border-radius: var(--r-chip);
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.manual-tag[hidden] { display: none; }
 
 /* Sent state — warm amber overlay pill, fades card to 55% opacity. */
 .job-card[data-state="sent"] {

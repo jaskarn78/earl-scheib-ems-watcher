@@ -42,6 +42,9 @@
       <nav class="filters" role="tablist" aria-label="Filter jobs">
         <button class="filter" type="button" data-filter="estimates" role="tab" aria-selected="true">Estimates</button>
         <button class="filter" type="button" data-filter="completed" role="tab" aria-selected="false">Work Completed</button>
+        <!-- SCH-01: hand-scheduled pending rows only (send_at_manual=1) —
+             "what did I push out, and when is it coming back". -->
+        <button class="filter" type="button" data-filter="scheduled" role="tab" aria-selected="false">Scheduled</button>
         <button class="filter" type="button" data-filter="sent" role="tab" aria-selected="false">Sent</button>
         <button class="filter" type="button" data-filter="cancelled" role="tab" aria-selected="false">Cancelled</button>
         <button class="filter" type="button" data-filter="all" role="tab" aria-selected="false">All</button>
@@ -201,6 +204,9 @@
             <span class="job-send-relative"></span>
             <span class="job-send-absolute mono"></span>
           </span>
+          <!-- SCH-01: shown on pending rows whose send time Marco picked
+               by hand (send_at_manual=1). -->
+          <span class="manual-tag" hidden>Scheduled by you</span>
           <span class="timeline__sent-stamp" hidden></span>
         </div>
         <figure class="sms-preview">
@@ -213,6 +219,16 @@
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M3 8h10"></path>
               <path d="M9 4l4 4-4 4"></path>
+            </svg>
+          </button>
+          <!-- SCH-01: Schedule — pending rows only. Opens the inline
+               date/time form below; sets a hand-picked send_at that the
+               global delay rebase won't touch. -->
+          <button class="btn btn-secondary schedule-btn" type="button">
+            <span>Schedule</span>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="8" cy="8" r="6"></circle>
+              <path d="M8 5v3l2 2"></path>
             </svg>
           </button>
           <button class="btn btn-ghost cancel-btn" type="button">Cancel</button>
@@ -237,6 +253,13 @@
             </svg>
           </button>
           <span class="job-error" hidden></span>
+          <!-- SCH-01: inline picker revealed by the Schedule button.
+               flex-basis:100% wraps it onto its own row in .job-actions. -->
+          <div class="schedule-form" hidden>
+            <input type="datetime-local" class="schedule-input mono" aria-label="Send date and time" />
+            <button class="btn btn-primary schedule-save-btn" type="button">Set time</button>
+            <button class="btn btn-ghost schedule-close-btn" type="button">Back</button>
+          </div>
         </footer>
       </div>
     </li>
