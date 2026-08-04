@@ -73,6 +73,21 @@
       </div>
     </section>
 
+    <!-- BOK-01: month calendar of booked appointments. Shown only while
+         the Scheduled chip is active; rendered by main.js from the same
+         queue payload (booked + appointment_at fields). -->
+    <section id="sched-calendar" class="sched-calendar" aria-label="Appointment calendar" hidden>
+      <header class="cal-head">
+        <h2 class="cal-title" id="cal-title"></h2>
+        <div class="cal-nav">
+          <button class="btn btn-ghost cal-prev" type="button" aria-label="Previous month">‹</button>
+          <button class="btn btn-ghost cal-today" type="button">Today</button>
+          <button class="btn btn-ghost cal-next" type="button" aria-label="Next month">›</button>
+        </div>
+      </header>
+      <div class="cal-grid" id="cal-grid"></div>
+    </section>
+
     <main id="queue" class="queue" aria-live="polite" aria-busy="true">
       <!-- Estimate cards (with nested timelines) injected by main.js -->
     </main>
@@ -188,6 +203,29 @@
         <p class="estimate-card__meta">
           <span class="estimate-date"></span>
         </p>
+        <!-- BOK-01: booking controls. Customer committed to the work →
+             Mark scheduled (with appointment date) stops the pre-work
+             follow-up texts for this estimate; review request still goes
+             out after work completes. -->
+        <div class="booking">
+          <span class="booked-pill" hidden>
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 8.5l3.5 3.5 7.5-8"/></svg>
+            <span>Booked</span>
+            <span class="booked-when mono"></span>
+          </span>
+          <button class="btn btn-secondary book-btn" type="button">
+            <span>Mark scheduled</span>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="12" height="11" rx="2"/><path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3"/></svg>
+          </button>
+          <a class="btn btn-ghost gcal-link" target="_blank" rel="noopener" hidden>Add to Google Calendar</a>
+          <button class="btn btn-ghost unbook-btn" type="button" hidden>Unmark</button>
+          <div class="schedule-form book-form" hidden>
+            <input type="datetime-local" class="book-input mono" aria-label="Appointment date and time" />
+            <button class="btn btn-primary book-save-btn" type="button">Save appointment</button>
+            <button class="btn btn-ghost book-close-btn" type="button">Back</button>
+          </div>
+          <span class="job-error book-error" hidden></span>
+        </div>
       </header>
       <ol class="timeline"></ol>
     </article>
@@ -221,16 +259,10 @@
               <path d="M9 4l4 4-4 4"></path>
             </svg>
           </button>
-          <!-- SCH-01: Schedule — pending rows only. Opens the inline
-               date/time form below; sets a hand-picked send_at that the
-               global delay rebase won't touch. -->
-          <button class="btn btn-secondary schedule-btn" type="button">
-            <span>Schedule</span>
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <circle cx="8" cy="8" r="6"></circle>
-              <path d="M8 5v3l2 2"></path>
-            </svg>
-          </button>
+          <!-- SCH-01 UI removed 2026-08-04 per Marco: his "Schedule"
+               means BOK-01 "Mark scheduled" (moves the estimate to the
+               Scheduled section). The POST /queue/schedule endpoint and
+               send_at_manual rebase protections remain server-side. -->
           <button class="btn btn-ghost cancel-btn" type="button">Cancel</button>
           <!-- GLV-01: Resend lives in the same actions footer as Send-now but
                is shown ONLY when the job is already sent. main.js toggles the
@@ -253,13 +285,6 @@
             </svg>
           </button>
           <span class="job-error" hidden></span>
-          <!-- SCH-01: inline picker revealed by the Schedule button.
-               flex-basis:100% wraps it onto its own row in .job-actions. -->
-          <div class="schedule-form" hidden>
-            <input type="datetime-local" class="schedule-input mono" aria-label="Send date and time" />
-            <button class="btn btn-primary schedule-save-btn" type="button">Set time</button>
-            <button class="btn btn-ghost schedule-close-btn" type="button">Back</button>
-          </div>
         </footer>
       </div>
     </li>

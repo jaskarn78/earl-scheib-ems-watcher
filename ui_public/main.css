@@ -739,6 +739,114 @@ body {
   outline-offset: 2px;
 }
 
+/* ============== Booking (BOK-01) ============== */
+
+.booking {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+.booked-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background-color: rgba(31, 122, 82, 0.10);
+  border: 1px solid rgba(31, 122, 82, 0.30);
+  color: #157a52;
+  padding: 6px 12px;
+  border-radius: var(--r-chip);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.booked-pill[hidden] { display: none; }
+.booked-pill .booked-when { text-transform: none; letter-spacing: 0; font-weight: 600; }
+.booking .btn { padding: 8px 14px; font-size: 13px; }
+.booking .gcal-link { text-decoration: none; }
+.booking .gcal-link[hidden] { display: none; }
+.booking .book-form { flex-basis: 100%; }
+.booking .book-error { flex-basis: 100%; padding-left: 0; }
+
+/* Calendar shown on the Scheduled view. */
+.sched-calendar {
+  max-width: 1120px;
+  margin: 0 auto 22px;
+  padding: 0 clamp(16px, 3vw, 32px);
+}
+.sched-calendar[hidden] { display: none; }
+.cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.cal-title {
+  font-family: "Inter", system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 20px;
+  color: var(--navy);
+  margin: 0;
+}
+.cal-nav { display: flex; gap: 6px; }
+.cal-nav .btn { padding: 6px 12px; font-size: 13px; }
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  background-color: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  padding: 10px;
+}
+.cal-dow {
+  text-align: center;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  padding: 4px 0 6px;
+}
+.cal-cell {
+  min-height: 72px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 5px 6px;
+  background-color: var(--canvas);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  overflow: hidden;
+}
+.cal-cell--pad { border: none; background: transparent; }
+.cal-cell--today { border-color: var(--red); box-shadow: inset 0 0 0 1px var(--red); }
+.cal-cell--busy { background-color: #fff; }
+.cal-day { font-size: 11px; font-weight: 600; color: var(--ink-soft); }
+.cal-cell--today .cal-day { color: var(--red); }
+.cal-appt {
+  display: block;
+  background-color: rgba(31, 122, 82, 0.12);
+  color: #12603f;
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cal-appt-time { font-weight: 700; }
+@media (max-width: 720px) {
+  .cal-cell { min-height: 54px; padding: 4px; }
+  .cal-appt { font-size: 9.5px; padding: 2px 4px; }
+  .cal-appt-time { display: none; }
+}
+
 /* SCH-01: "Scheduled by you" tag on hand-scheduled pending rows — navy
    sibling of the amber sent-stamp so the two states read differently. */
 .manual-tag {

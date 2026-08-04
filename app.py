@@ -327,6 +327,26 @@ def init_db():
         # Should not happen after the ALTER above; log and continue.
         log.warning("QAJ-01 backfill skipped: %s", exc)
 
+    # BOK-01: customer-booked appointments. One row per estimate_key —
+    # "the customer said yes and is bringing the car in". Booking is a
+    # per-ESTIMATE fact (not per-message), so it lives here instead of a
+    # jobs column: the scheduler suppresses pre-work follow-ups via a
+    # NOT EXISTS join, which also covers rows inserted AFTER booking
+    # (e.g. a re-enabled job_type). unbooked_at is a soft-delete
+    # (GLV-02 precedent: keep the audit trail, enable re-book).
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS appointments (
+            estimate_key   TEXT PRIMARY KEY,
+            appointment_at INTEGER NOT NULL,
+            created_at     INTEGER NOT NULL,
+            updated_at     INTEGER NOT NULL,
+            unbooked_at    INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
+    con.commit()
+
     # WMH-01: Marco-editable message templates. One row per job_type; absence
     # of a row means "use DEFAULT_TEMPLATES[job_type]". No seed INSERT — the
     # override-vs-default distinction is what makes "clear to revert" work.
@@ -1242,9 +1262,16 @@ def _fire_due_jobs():
     con = get_db()
     try:
         cur = con.cursor()
+        # BOK-01: booking suppresses pre-work nags, never the post-work
+        # review request. The NOT EXISTS join (rather than a per-row flag)
+        # means rows inserted after booking are suppressed too.
         cur.execute(
             "SELECT * FROM jobs "
-            "WHERE sent = 0 AND is_test = 0 AND cancelled = 0 AND send_at <= ?",
+            "WHERE sent = 0 AND is_test = 0 AND cancelled = 0 AND send_at <= ? "
+            "  AND (job_type = 'review' OR NOT EXISTS ("
+            "        SELECT 1 FROM appointments a "
+            "        WHERE a.estimate_key = jobs.estimate_key "
+            "          AND a.unbooked_at = 0))",
             (now,),
         )
         rows = cur.fetchall()
@@ -2996,11 +3023,20 @@ class WebhookHandler(BaseHTTPRequestHandler):
             # GLV-02: include cancelled in the projection. UI gates the
             # Cancelled chip on `job.cancelled === 1`; without this field the
             # chip would always be empty regardless of DB state.
+            # BOK-01: booked + appointment_at are computed per-row from the
+            # appointments table so the UI can group/filter booked estimates
+            # without a second endpoint.
             base_cols = (
                 "SELECT id, doc_id, job_type, phone, name, send_at, sent, "
                 "       created_at, vin, vehicle_desc, ro_id, email, address, "
                 "       sent_at, estimate_key, year, make, model, is_test, "
-                "       cancelled, send_at_manual "
+                "       cancelled, send_at_manual, "
+                "       EXISTS(SELECT 1 FROM appointments a "
+                "              WHERE a.estimate_key = jobs.estimate_key "
+                "                AND a.unbooked_at = 0) AS booked, "
+                "       (SELECT a.appointment_at FROM appointments a "
+                "         WHERE a.estimate_key = jobs.estimate_key "
+                "           AND a.unbooked_at = 0) AS appointment_at "
                 "FROM jobs"
             )
             # GLV-02: "pending" means literally pending — exclude cancelled
@@ -3904,6 +3940,123 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 self._send_json(200, {"scheduled": 1, "send_at": new_send_at})
             else:
                 self._send_json(404, {"error": "not_found_or_not_pending"})
+            return
+
+        # BOK-01: Book — customer committed to the work. Upserts the
+        # appointment for this estimate; the scheduler then suppresses this
+        # estimate's pre-work follow-ups (24h/3day) at fire time. The
+        # post-work review request is deliberately NOT suppressed.
+        if self.path.split("?")[0] == "/earlscheibconcord/queue/book":
+            # Auth: CF Access (edge gate).
+            try:
+                body = json.loads(raw.decode("utf-8"))
+                estimate_key = str(body["estimate_key"])
+                appointment_at = int(body["appointment_at"])
+            except (ValueError, KeyError, TypeError,
+                    json.JSONDecodeError, UnicodeDecodeError):
+                self._send_json(400, {"error": "invalid JSON"})
+                return
+
+            now = int(time.time())
+            # Same-day booking is normal; allow up to a day in the past
+            # (Marco marking "they came in this morning") and a year out.
+            if appointment_at < now - 86400:
+                self._send_json(
+                    400, {"error": "appointment_at is in the past"})
+                return
+            if appointment_at > now + 366 * 86400:
+                self._send_json(
+                    400, {"error": "appointment_at is more than a year out"})
+                return
+
+            con = get_db()
+            try:
+                cur = con.cursor()
+                cur.execute(
+                    "SELECT COUNT(1) AS n FROM jobs WHERE estimate_key = ?",
+                    (estimate_key,),
+                )
+                if cur.fetchone()["n"] == 0:
+                    self._send_json(404, {"error": "unknown estimate_key"})
+                    return
+                cur.execute(
+                    "INSERT INTO appointments "
+                    "(estimate_key, appointment_at, created_at, updated_at, "
+                    " unbooked_at) VALUES (?, ?, ?, ?, 0) "
+                    "ON CONFLICT(estimate_key) DO UPDATE SET "
+                    " appointment_at = excluded.appointment_at, "
+                    " updated_at = excluded.updated_at, "
+                    " unbooked_at = 0",
+                    (estimate_key, appointment_at, now, now),
+                )
+                con.commit()
+            finally:
+                con.close()
+
+            log.info(
+                "Estimate booked via admin UI: estimate_key=%s "
+                "appointment_at=%s", estimate_key, appointment_at,
+            )
+            self._send_json(200, {"booked": 1, "appointment_at": appointment_at})
+            return
+
+        # BOK-01: Unbook — the booking fell through; follow-ups resume.
+        # Burst-guard: while booked, pending pre-work rows keep sliding past
+        # due. Without a rebase they would ALL fire on the scheduler's next
+        # 30s tick — the customer gets the 24h and 3day text back-to-back,
+        # weeks late. Rebase any past-due row to now + its effective delay.
+        if self.path.split("?")[0] == "/earlscheibconcord/queue/unbook":
+            # Auth: CF Access (edge gate).
+            try:
+                body = json.loads(raw.decode("utf-8"))
+                estimate_key = str(body["estimate_key"])
+            except (ValueError, KeyError, TypeError,
+                    json.JSONDecodeError, UnicodeDecodeError):
+                self._send_json(400, {"error": "invalid JSON"})
+                return
+
+            now = int(time.time())
+            con = get_db()
+            try:
+                cur = con.cursor()
+                cur.execute(
+                    "UPDATE appointments SET unbooked_at = ? "
+                    "WHERE estimate_key = ? AND unbooked_at = 0",
+                    (now, estimate_key),
+                )
+                affected = cur.rowcount
+                rebased = 0
+                if affected:
+                    cur.execute(
+                        "SELECT id, job_type FROM jobs "
+                        "WHERE estimate_key = ? AND sent = 0 AND cancelled = 0 "
+                        "  AND job_type != 'review' AND send_at <= ?",
+                        (estimate_key, now),
+                    )
+                    for r in cur.fetchall():
+                        new_send_at = next_send_window(
+                            now + get_effective_schedule(r["job_type"]) * 3600
+                        )
+                        # send_at_manual cleared: the hand-picked time is in
+                        # the past — this row is machine-timed again.
+                        cur.execute(
+                            "UPDATE jobs SET send_at = ?, send_at_manual = 0 "
+                            "WHERE id = ?",
+                            (int(new_send_at), int(r["id"])),
+                        )
+                        rebased += 1
+                con.commit()
+            finally:
+                con.close()
+
+            if affected == 1:
+                log.info(
+                    "Estimate unbooked via admin UI: estimate_key=%s "
+                    "(%d overdue row(s) rebased)", estimate_key, rebased,
+                )
+                self._send_json(200, {"unbooked": 1, "rebased": rebased})
+            else:
+                self._send_json(404, {"error": "not_found_or_not_booked"})
             return
 
         if self.path.split("?")[0] == "/earlscheibconcord/reset-test-jobs":

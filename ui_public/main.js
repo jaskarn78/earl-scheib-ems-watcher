@@ -181,7 +181,7 @@
 
   function jobsRenderKey(jobs, filter, search, sort) {
     const parts = (jobs || []).map((j) =>
-      `${j.id}:${j.sent || 0}:${j.send_at || 0}:${j.sent_at || 0}:${j.send_at_manual || 0}`,
+      `${j.id}:${j.sent || 0}:${j.send_at || 0}:${j.sent_at || 0}:${j.send_at_manual || 0}:${j.booked || 0}:${j.appointment_at || 0}`,
     );
     return `${filter}|${search}|${sort}|${parts.join(',')}`;
   }
@@ -263,22 +263,25 @@
       case 'all':
         return !isTest;
       case 'estimates':
+        // BOK-01: booked estimates leave the pending view — their pre-work
+        // follow-ups are suppressed and they live under Scheduled instead.
         return !isTest && (job.job_type === '24h' || job.job_type === '3day')
-          && isPending;
+          && isPending && job.booked !== 1;
       case 'completed':
+        // Review requests are NOT suppressed by booking (they fire after
+        // the work is done), so no booked check here.
         return !isTest && job.job_type === 'review' && isPending;
-      // SCH-01: hand-scheduled rows only — NOT all pending rows (that set
-      // is already the union of `estimates` + `completed`). This chip
-      // answers "what did I push out, and when is it coming back".
+      // BOK-01: Scheduled = the customer committed to the work. Shows every
+      // row of a booked estimate (any state) so the full timeline reads.
       case 'scheduled':
-        return !isTest && isPending && job.send_at_manual === 1;
+        return !isTest && job.booked === 1;
       case 'sent':
         return !isTest && job.sent === 1 && !isCancelled;
       case 'cancelled':
         return !isTest && isCancelled;
       case 'test-estimates':
         return isTest && (job.job_type === '24h' || job.job_type === '3day')
-          && isPending;
+          && isPending && job.booked !== 1;
       case 'test-completed':
         return isTest && job.job_type === 'review' && isPending;
       default:
@@ -320,6 +323,10 @@
           vin:          job.vin || '',
           ro_id:        job.ro_id || '',
           created_at:   job.created_at || 0,
+          // BOK-01: per-estimate booking state (same value on every row).
+          booked:         job.booked === 1 ? 1 : 0,
+          appointment_at: job.appointment_at || 0,
+          is_test:        job.is_test === 1 ? 1 : 0,
           jobs:         [],
         });
       }
@@ -389,6 +396,9 @@
 
   function renderQueue(jobs) {
     const needle = currentSearch.trim().toLowerCase();
+    // BOK-01: month calendar rides above the cards on the Scheduled view.
+    // Rendered outside the renderKey skip so filter flips always toggle it.
+    renderCalendar();
     const renderKey = jobsRenderKey(jobs, currentFilter, needle, currentSort);
     if (renderKey === lastRenderKey) {
       // Data + view unchanged — skip the rebuild so animations don't replay.
@@ -427,11 +437,21 @@
       const titleEl = queueEl.querySelector('.empty-title');
       const subEl   = queueEl.querySelector('.empty-sub');
       if (titleEl && (currentFilter !== 'all' || needle)) {
-        titleEl.textContent = 'No matches';
-        if (subEl) {
-          subEl.textContent = needle
-            ? `No jobs match "${currentSearch.trim()}".`
-            : 'No jobs in this view right now.';
+        if (currentFilter === 'scheduled' && !needle) {
+          // BOK-01: teach the empty Scheduled view.
+          titleEl.textContent = 'No booked jobs yet';
+          if (subEl) {
+            subEl.textContent = 'When a customer books their work, hit '
+              + '"Mark scheduled" on their card — it moves here and their '
+              + 'follow-up texts stop.';
+          }
+        } else {
+          titleEl.textContent = 'No matches';
+          if (subEl) {
+            subEl.textContent = needle
+              ? `No jobs match "${currentSearch.trim()}".`
+              : 'No jobs in this view right now.';
+          }
         }
       }
     }
@@ -473,6 +493,8 @@
       const d = new Date(group.created_at * 1000);
       dateEl.textContent = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
     }
+
+    wireBookingUI(frag, group);
 
     const timeline = frag.querySelector('.timeline');
     // Sort DESC by most-recent activity so freshly sent / soonest-scheduled
@@ -521,6 +543,15 @@
       stampEl.hidden = false;
       const whenTs = job.sent_at && job.sent_at > 0 ? job.sent_at : job.send_at;
       stampEl.textContent = 'Sent · ' + formatAbsolute(whenTs);
+      frag.querySelector('.job-send').hidden = true;
+    } else if (job.booked === 1 && job.job_type !== 'review') {
+      // BOK-01: pre-work follow-up suppressed while the estimate is booked.
+      // The countdown would be a lie (the scheduler skips this row), so
+      // show the hold instead. Review rows keep their countdown — they
+      // still fire after the work is done.
+      const stampEl = frag.querySelector('.timeline__sent-stamp');
+      stampEl.hidden = false;
+      stampEl.textContent = 'On hold · customer booked';
       frag.querySelector('.job-send').hidden = true;
     }
 
@@ -641,6 +672,228 @@
       showEntryError(errEl, 'Network error — please retry');
       btnEl.disabled = false;
     }
+  }
+
+  // ---------- Booking flow (BOK-01) -----------------------------------
+
+  // "Aug 12, 9:00 AM" (Pacific) — appointment dates are usually days out,
+  // so always include the date.
+  function formatAppt(unixSeconds) {
+    if (!unixSeconds) return '';
+    return dateTimeFmt.format(new Date(unixSeconds * 1000));
+  }
+
+  // Prefilled Google Calendar event link — creates the event in whatever
+  // Google account Marco is signed into. Zero-setup v1 of "connect my
+  // Google Calendar"; floating local times (no Z) land in his calendar's
+  // own zone (Pacific).
+  function gcalHref(group) {
+    const fmtG = (unixSeconds) => {
+      const d = new Date(unixSeconds * 1000);
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`
+        + `T${pad(d.getHours())}${pad(d.getMinutes())}00`;
+    };
+    const title = `Earl Scheib: ${group.name || 'Customer'}`
+      + (group.vehicle_desc ? ` (${group.vehicle_desc})` : '');
+    const detailLines = [
+      'Booked repair work.',
+      group.name ? `Customer: ${group.name} ${formatPhone(group.phone)}` : `Customer: ${formatPhone(group.phone)}`,
+      group.vehicle_desc ? `Vehicle: ${group.vehicle_desc}` : '',
+      group.ro_id ? `RO ${group.ro_id}` : '',
+    ].filter(Boolean);
+    const params = new URLSearchParams({
+      action: 'TEMPLATE',
+      text: title,
+      dates: `${fmtG(group.appointment_at)}/${fmtG(group.appointment_at + 3600)}`,
+      details: detailLines.join('\n'),
+      location: 'Earl Scheib Auto Body, Concord CA',
+    });
+    return `https://calendar.google.com/calendar/render?${params.toString()}`;
+  }
+
+  function wireBookingUI(frag, group) {
+    const bookingEl = frag.querySelector('.booking');
+    if (!bookingEl) return;
+    // Pi-only feature (Go local admin has no proxy for /queue/book).
+    if (IS_LOCAL_ADMIN) { bookingEl.hidden = true; return; }
+
+    const pill      = bookingEl.querySelector('.booked-pill');
+    const whenEl    = bookingEl.querySelector('.booked-when');
+    const bookBtn   = bookingEl.querySelector('.book-btn');
+    const gcalEl    = bookingEl.querySelector('.gcal-link');
+    const unbookBtn = bookingEl.querySelector('.unbook-btn');
+    const form      = bookingEl.querySelector('.book-form');
+    const errEl     = bookingEl.querySelector('.book-error');
+
+    if (group.booked === 1) {
+      pill.hidden = false;
+      whenEl.textContent = '· ' + formatAppt(group.appointment_at);
+      bookBtn.querySelector('span').textContent = 'Change date';
+      gcalEl.hidden = false;
+      gcalEl.href = gcalHref(group);
+      unbookBtn.hidden = false;
+    }
+
+    bookBtn.addEventListener('click', () => {
+      if (!form.hidden) { form.hidden = true; return; }
+      const input = form.querySelector('.book-input');
+      const nowSec = Math.floor(Date.now() / 1000);
+      // Prefill: existing appointment, else tomorrow 9:00 AM.
+      let seed = group.appointment_at;
+      if (!seed || seed < nowSec - 86400) {
+        const t = new Date();
+        t.setDate(t.getDate() + 1);
+        t.setHours(9, 0, 0, 0);
+        seed = Math.floor(t.getTime() / 1000);
+      }
+      input.value = toLocalInputValue(seed);
+      form.hidden = false;
+      input.focus();
+    });
+    form.querySelector('.book-close-btn').addEventListener('click', () => { form.hidden = true; });
+    form.querySelector('.book-save-btn').addEventListener('click', () => handleBook(group, form, errEl));
+    unbookBtn.addEventListener('click', () => handleUnbook(group, unbookBtn, errEl));
+  }
+
+  async function handleBook(group, formEl, errEl) {
+    const input = formEl.querySelector('.book-input');
+    const btnEl = formEl.querySelector('.book-save-btn');
+    if (!input.value) { showEntryError(errEl, 'Pick the appointment date first'); return; }
+    const ts = Math.floor(new Date(input.value).getTime() / 1000);
+    if (!Number.isFinite(ts)) { showEntryError(errEl, "That date didn't parse — try again"); return; }
+
+    btnEl.disabled = true;
+    errEl.hidden = true; errEl.textContent = '';
+    try {
+      const resp = await fetch(`${API_BASE}/queue/book`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ estimate_key: group.key, appointment_at: ts }),
+      });
+      if (resp.status === 200) {
+        btnEl.textContent = 'Booked ✓';
+        setTimeout(fetchQueue, 600);
+        setTimeout(() => {
+          formEl.hidden = true;
+          btnEl.disabled = false;
+          btnEl.textContent = 'Save appointment';
+        }, 1400);
+        return;
+      }
+      const parsed = await resp.json().catch(() => ({}));
+      showEntryError(errEl, parsed.error ? `Booking failed: ${parsed.error}` : `Booking failed (${resp.status})`);
+      btnEl.disabled = false;
+    } catch (e) {
+      showEntryError(errEl, 'Network error — please retry');
+      btnEl.disabled = false;
+    }
+  }
+
+  async function handleUnbook(group, btnEl, errEl) {
+    const who = group.name || formatPhone(group.phone) || 'this customer';
+    if (!window.confirm(`Un-mark ${who} as scheduled? Their follow-up texts will resume.`)) return;
+    btnEl.disabled = true;
+    errEl.hidden = true; errEl.textContent = '';
+    try {
+      const resp = await fetch(`${API_BASE}/queue/unbook`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ estimate_key: group.key }),
+      });
+      if (resp.status === 200) { setTimeout(fetchQueue, 400); return; }
+      const parsed = await resp.json().catch(() => ({}));
+      showEntryError(errEl, parsed.error ? `Failed: ${parsed.error}` : `Failed (${resp.status})`);
+      btnEl.disabled = false;
+    } catch (e) {
+      showEntryError(errEl, 'Network error — please retry');
+      btnEl.disabled = false;
+    }
+  }
+
+  // ---------- Appointment calendar (BOK-01) ----------------------------
+
+  const calEl      = document.getElementById('sched-calendar');
+  const calGridEl  = document.getElementById('cal-grid');
+  const calTitleEl = document.getElementById('cal-title');
+  // First day of the displayed month, local time.
+  let calMonth = (() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); })();
+
+  function activeAppointments() {
+    const seen = new Set();
+    const out = [];
+    (lastJobs || []).forEach((j) => {
+      if (j.booked !== 1 || !j.appointment_at || j.is_test === 1) return;
+      if (seen.has(j.estimate_key)) return;
+      seen.add(j.estimate_key);
+      out.push({
+        key: j.estimate_key,
+        name: j.name || formatPhone(j.phone),
+        at: j.appointment_at,
+      });
+    });
+    return out;
+  }
+
+  function renderCalendar() {
+    if (!calEl) return;
+    if (currentFilter !== 'scheduled') { calEl.hidden = true; return; }
+    calEl.hidden = false;
+
+    const appts = activeAppointments();
+    const byDay = new Map();   // "YYYY-M-D" (local) -> [{name, at}]
+    appts.forEach((a) => {
+      const d = new Date(a.at * 1000);
+      const k = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+      if (!byDay.has(k)) byDay.set(k, []);
+      byDay.get(k).push(a);
+    });
+
+    const y = calMonth.getFullYear(), m = calMonth.getMonth();
+    calTitleEl.textContent = calMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+    const today = new Date();
+    const firstDow = new Date(y, m, 1).getDay();
+    const daysInMonth = new Date(y, m + 1, 0).getDate();
+
+    let html = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+      .map((d) => `<div class="cal-dow">${d}</div>`).join('');
+    for (let i = 0; i < firstDow; i += 1) html += '<div class="cal-cell cal-cell--pad"></div>';
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      const k = `${y}-${m}-${day}`;
+      const isToday = today.getFullYear() === y && today.getMonth() === m && today.getDate() === day;
+      const dayAppts = (byDay.get(k) || []).slice().sort((a, b) => a.at - b.at);
+      const chips = dayAppts.map((a) =>
+        `<span class="cal-appt" title="${escapeHTML(a.name)} — ${escapeHTML(formatAppt(a.at))}">`
+        + `<span class="cal-appt-time mono">${escapeHTML(timeFmt.format(new Date(a.at * 1000)))}</span> `
+        + `${escapeHTML(a.name)}</span>`,
+      ).join('');
+      html += `<div class="cal-cell${isToday ? ' cal-cell--today' : ''}${dayAppts.length ? ' cal-cell--busy' : ''}">`
+        + `<span class="cal-day">${day}</span>${chips}</div>`;
+    }
+    calGridEl.innerHTML = html;
+  }
+
+  function escapeHTML(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
+  }
+
+  if (calEl) {
+    calEl.querySelector('.cal-prev').addEventListener('click', () => {
+      calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() - 1, 1);
+      renderCalendar();
+    });
+    calEl.querySelector('.cal-next').addEventListener('click', () => {
+      calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 1);
+      renderCalendar();
+    });
+    calEl.querySelector('.cal-today').addEventListener('click', () => {
+      const d = new Date();
+      calMonth = new Date(d.getFullYear(), d.getMonth(), 1);
+      renderCalendar();
+    });
   }
 
   // ---------- Schedule flow (SCH-01) ----------------------------------
