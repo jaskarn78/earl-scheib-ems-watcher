@@ -883,6 +883,9 @@ body {
   text-transform: uppercase;
 }
 .booked-pill[hidden] { display: none; }
+/* BOK-03: the pill is an <a> to Google Calendar — keep the chip look. */
+a.booked-pill { text-decoration: none; cursor: pointer; transition: background-color 140ms ease, box-shadow 140ms ease; }
+a.booked-pill:hover { background-color: rgba(31, 122, 82, 0.18); box-shadow: 0 1px 6px rgba(31, 122, 82, 0.25); }
 .booked-pill .booked-when { text-transform: none; letter-spacing: 0; font-weight: 600; }
 .booking .btn { padding: 8px 14px; font-size: 13px; }
 .booking .gcal-link { text-decoration: none; }

@@ -208,11 +208,13 @@
              follow-up texts for this estimate; review request still goes
              out after work completes. -->
         <div class="booking">
-          <span class="booked-pill" hidden>
+          <!-- BOK-03: the pill IS a Google Calendar link — Marco asked to
+               "just click on the date and time to add it to your calendar". -->
+          <a class="booked-pill" hidden target="_blank" rel="noopener" title="Tap to add to your calendar">
             <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 8.5l3.5 3.5 7.5-8"/></svg>
             <span>Booked</span>
             <span class="booked-when mono"></span>
-          </span>
+          </a>
           <button class="btn btn-secondary book-btn" type="button">
             <span>Mark scheduled</span>
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="12" height="11" rx="2"/><path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3"/></svg>

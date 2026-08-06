@@ -844,6 +844,8 @@
       bookBtn.querySelector('span').textContent = 'Change date';
       gcalEl.hidden = false;
       gcalEl.href = gcalHref(group);
+      // BOK-03: tapping the date/time pill itself adds to the calendar.
+      pill.href = gcalHref(group);
       unbookBtn.hidden = false;
     }
 
