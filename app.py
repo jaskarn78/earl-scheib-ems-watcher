@@ -3715,10 +3715,13 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 if cur.rowcount != 1:
                     self._send_json(404, {"error": "not_found_or_already_sent"})
                     return
+                # RMD-02: SELECT * (not an explicit column list) — the old
+                # list omitted estimate_key, so render_template's
+                # {appt_time} lookup came up empty and manual Send-now
+                # texted reminders with a blank date. Matches the
+                # scheduler's SELECT *.
                 cur.execute(
-                    "SELECT job_type, phone, name, vin, vehicle_desc, "
-                    "       ro_id, email, doc_id, year, make, model "
-                    "FROM jobs WHERE id = ?",
+                    "SELECT * FROM jobs WHERE id = ?",
                     (job_id,),
                 )
                 row = cur.fetchone()
@@ -3902,10 +3905,10 @@ class WebhookHandler(BaseHTTPRequestHandler):
             con = get_db()
             try:
                 cur = con.cursor()
+                # RMD-02: SELECT * — same estimate_key omission as send-now;
+                # {appt_time} needs it. See the send-now comment above.
                 cur.execute(
-                    "SELECT id, job_type, phone, name, vin, vehicle_desc, "
-                    "       ro_id, email, doc_id, year, make, model, is_test "
-                    "FROM jobs WHERE id = ?",
+                    "SELECT * FROM jobs WHERE id = ?",
                     (job_id,),
                 )
                 row = cur.fetchone()
