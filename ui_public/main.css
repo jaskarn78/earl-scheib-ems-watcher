@@ -451,6 +451,15 @@ body {
 .timeline__entry[data-state="cancelled"] .sms-preview {
   opacity: 0.45;
 }
+/* BOK-04: booked-suppressed follow-ups present as cancelled — faded
+   preview, buttons hidden by main.js. */
+.timeline__entry[data-suppressed="1"] .sms-preview {
+  opacity: 0.45;
+}
+.timeline__entry[data-suppressed="1"] .send-now-btn,
+.timeline__entry[data-suppressed="1"] .cancel-btn {
+  display: none;
+}
 .timeline__entry[data-state="cancelled"] .timeline__sent-stamp {
   background-color: rgba(200, 149, 63, 0.16);
   color: #7a5a20;

@@ -561,14 +561,20 @@
       frag.querySelector('.job-send').hidden = true;
     } else if (job.booked === 1
                && (job.job_type === '24h' || job.job_type === '3day')) {
-      // BOK-01: pre-work follow-up suppressed while the estimate is booked.
-      // The countdown would be a lie (the scheduler skips this row), so
-      // show the hold instead. Review rows keep their countdown — they
-      // still fire after the work is done.
+      // BOK-01 + BOK-04 (per Marco): pre-work follow-ups are CANCELLED
+      // once the customer books — present them exactly like cancelled
+      // rows (label, no action buttons, faded preview). The scheduler
+      // was already skipping them; this makes the UI say so. They come
+      // back automatically if the booking is unmarked.
       const stampEl = frag.querySelector('.timeline__sent-stamp');
       stampEl.hidden = false;
-      stampEl.textContent = 'On hold · customer booked';
+      stampEl.textContent = 'Cancelled · customer booked';
       frag.querySelector('.job-send').hidden = true;
+      li.dataset.suppressed = '1';
+      const sBtn = frag.querySelector('.send-now-btn');
+      const cBtn = frag.querySelector('.cancel-btn');
+      if (sBtn) sBtn.hidden = true;
+      if (cBtn) cBtn.hidden = true;
     }
 
     frag.querySelector('.sms-bubble').textContent = previewSMS(job.job_type, job);
