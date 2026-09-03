@@ -3309,6 +3309,7 @@ NAV_HEADER = """<header class="topbar" role="banner">
       <a class="topnav-link" data-view="templates" href="/earlscheib#templates" role="tab" aria-selected="false">Templates</a>
       <a class="topnav-link" data-view="schedules" href="/earlscheib#schedules" role="tab" aria-selected="false">Schedules</a>
       <a class="topnav-link" data-view="logs" href="/earlscheib#logs" role="tab" aria-selected="false">Logs</a>
+      <a class="topnav-link" data-view="insights" href="/earlscheib#insights" role="tab" aria-selected="false">Insights</a>
     </nav>
     <div class="stats" aria-label="Queue statistics">
       <span class="stat"><b id="stat-pending">0</b><span class="stat-label">Pending</span></span>
@@ -3349,6 +3350,10 @@ NAV_BOTTOMNAV = """<nav class="bottomnav" role="tablist" aria-label="Sections">
     <a class="topnav-link bn-link" data-view="logs" href="/earlscheib#logs" role="tab" aria-selected="false" aria-label="Logs">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
       <span class="bn-label">Logs</span>
+    </a>
+    <a class="topnav-link bn-link" data-view="insights" href="/earlscheib#insights" role="tab" aria-selected="false" aria-label="Insights">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M4 20h16v-2H4v2zm2-4h3V9H6v7zm5 0h3V4h-3v12zm5 0h3v-6h-3v6z"/></svg>
+      <span class="bn-label">Insights</span>
     </a>
   </nav>"""
 

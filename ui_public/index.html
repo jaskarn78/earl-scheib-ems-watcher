@@ -48,10 +48,13 @@
         <button class="filter" type="button" data-filter="sent" role="tab" aria-selected="false">Sent</button>
         <button class="filter" type="button" data-filter="cancelled" role="tab" aria-selected="false">Cancelled</button>
         <button class="filter" type="button" data-filter="all" role="tab" aria-selected="false">All</button>
-        <span class="filter-sep" aria-hidden="true"></span>
-        <button class="filter filter--test" type="button" data-filter="test-estimates" role="tab" aria-selected="false">Test Est.</button>
-        <button class="filter filter--test" type="button" data-filter="test-completed" role="tab" aria-selected="false">Test Work Compl.</button>
-        <button class="test-reset-btn" type="button" title="Reset test jobs (re-seed fresh)" aria-label="Reset test jobs">↺</button>
+        <!-- INS-01: the test-mode affordances are dev tooling, not Marco's.
+             main.js hides everything marked data-test-chip unless the URL
+             carries ?test (see wireFilters()). -->
+        <span class="filter-sep" data-test-chip aria-hidden="true"></span>
+        <button class="filter filter--test" type="button" data-test-chip data-filter="test-estimates" role="tab" aria-selected="false">Test Est.</button>
+        <button class="filter filter--test" type="button" data-test-chip data-filter="test-completed" role="tab" aria-selected="false">Test Work Compl.</button>
+        <button class="test-reset-btn" type="button" data-test-chip title="Reset test jobs (re-seed fresh)" aria-label="Reset test jobs">↺</button>
       </nav>
       </div>
       <!-- Sort selector: persists in localStorage["eswSort"]; affects estimate-card order. -->
@@ -181,6 +184,30 @@
         <!-- One .log-row per Twilio message, injected by main.js. -->
       </div>
     </section>
+  </div>
+
+  <!-- INS-01: Insights view. Marco-facing "what should I do today" board on
+       top (warm leads, this week's bookings, no-shows) with the period
+       numbers underneath. Populated by loadInsights() in main.js from
+       GET /insights?days=30|90|ytd. Every customer name is a button that
+       opens the timeline drawer (see #tl-drawer at the end of this file). -->
+  <div id="view-insights" data-view="insights" hidden>
+    <div class="ins-toolbar">
+      <div class="chips" role="tablist" aria-label="Period">
+        <button class="chip is-active" data-days="30" role="tab">30 days</button>
+        <button class="chip" data-days="90" role="tab">90 days</button>
+        <button class="chip" data-days="ytd" role="tab">Year to date</button>
+      </div>
+      <button class="btn btn-ghost" id="ins-refresh" type="button">Refresh</button>
+      <span class="ins-synced" id="ins-synced"></span>
+    </div>
+    <section class="ins-card" id="ins-warm"><h2>Call today</h2><div class="ins-list"></div></section>
+    <section class="ins-card" id="ins-upcoming"><h2>This week</h2><div class="ins-list"></div></section>
+    <section class="ins-card" id="ins-noshows" hidden><h2>No-shows</h2><div class="ins-list"></div></section>
+    <section class="ins-card" id="ins-tiles"><h2>This period</h2><div class="ins-tiles"></div></section>
+    <section class="ins-card" id="ins-funnel"><h2>Follow-ups</h2><div class="ins-bars"></div><div class="ins-tpl"></div></section>
+    <section class="ins-card" id="ins-revenue"><h2>Revenue per CCC, by month</h2><div class="ins-cols"></div></section>
+    <p class="ins-foot" id="ins-foot"></p>
   </div>
 
   <!-- Estimate card = one customer + one vehicle with ALL their pending/sent
@@ -404,6 +431,17 @@
        (see NAV_BOTTOMNAV). REUSES .topnav-link + data-view so main.js wires
        clicks + active-state sync with no JS changes. Hidden on desktop. -->
   <!--SHARED_NAV_BOTTOMNAV-->
+
+  <!-- INS-01: customer timeline drawer. Opened by window.openTimeline(key)
+       from any [data-timeline-key] button (Insights lists today). Bottom
+       sheet on mobile, right-hand rail ≥720px. -->
+  <div class="drawer" id="tl-drawer" hidden role="dialog" aria-modal="true" aria-labelledby="tl-name">
+    <div class="drawer-scrim" data-close></div>
+    <div class="drawer-panel">
+      <div class="drawer-head"><div><div class="drawer-name" id="tl-name"></div><div class="drawer-sub" id="tl-sub"></div></div><button class="btn btn-ghost" type="button" data-close aria-label="Close">✕</button></div>
+      <ol class="tl" id="tl-list"></ol>
+    </div>
+  </div>
 
   <script src="/main.js" defer></script>
 </body>

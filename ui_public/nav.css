@@ -258,7 +258,7 @@
   }
   /* clearance so the fixed bar never covers the last row of any SPA view
      (only relevant when the bar is fixed; app-shell below zeroes this out). */
-  #view-queue, #view-templates, #view-schedules, #view-logs {
+  #view-queue, #view-templates, #view-schedules, #view-logs, #view-insights {
     padding-bottom: calc(64px + env(safe-area-inset-bottom));
   }
 }
@@ -274,7 +274,7 @@
   body { height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
   .topbar { position: static; flex: 0 0 auto; }
   /* only the visible SPA view scrolls; hidden views are display:none */
-  #view-queue, #view-templates, #view-schedules, #view-logs {
+  #view-queue, #view-templates, #view-schedules, #view-logs, #view-insights {
     flex: 1 1 auto; min-height: 0; overflow-y: auto;
     -webkit-overflow-scrolling: touch;
     padding-bottom: 24px;            /* no fixed-bar clearance needed anymore */

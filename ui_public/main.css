@@ -2278,3 +2278,88 @@ a.booked-pill:hover { background-color: rgba(31, 122, 82, 0.18); box-shadow: 0 1
 /* ===== Mobile app-shell — MOVED to ui_public/nav.css =====
    (body flex column / #view-* scroll / .bottomnav static) now lives in the
    shared nav stylesheet so the SPA and the inbox share one app-shell. */
+
+/* ==========================================================
+   INS-01 — Insights view
+   Palette maps onto the existing tokens: primary = --navy,
+   muted = --ink-soft, hairline = --hairline, card = --surface.
+   The literal fallbacks are kept so the block still reads on
+   its own if a token is ever renamed.
+   ========================================================== */
+
+/* Period chips. Same visual language as .filter, but a separate class so the
+   queue's filter wiring (which grabs every .filter) never picks them up.
+   NOTE: the class-level display below outranks the UA [hidden] rule, so the
+   explicit .chip[hidden] at the bottom of this block is load-bearing. */
+.chips { display: inline-flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  background-color: var(--surface, #fff);
+  border: 1px solid var(--hairline, #e5e7eb);
+  color: var(--ink-soft, #6b7280);
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 7px 14px;
+  border-radius: var(--r-chip, 999px);
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.chip:hover { color: var(--navy, #1f3a68); border-color: var(--navy, #1f3a68); }
+.chip.is-active {
+  background-color: var(--navy, #1f3a68);
+  border-color: var(--navy, #1f3a68);
+  color: #fff;
+  box-shadow: var(--shadow-sm);
+}
+.chip:focus-visible { outline: 2px solid var(--amber, #c8953f); outline-offset: 2px; }
+
+/* Small pill button used by the Reply / Text links in the insights lists. */
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 12.5px;
+  border-radius: 8px;
+  text-decoration: none;
+  white-space: nowrap;
+  background-color: var(--surface, #fff);
+  color: var(--navy, #1f3a68);
+  border: 1px solid var(--navy, #1f3a68);
+}
+.btn-sm:hover { background-color: var(--navy, #1f3a68); color: #fff; }
+
+/* Page gutter — matches .queue / .controls so the Insights view lines up
+   with the rest of the SPA and never overflows the viewport. */
+#view-insights{max-width:1200px;margin:0 auto;padding:16px 20px 0}
+@media(min-width:720px){#view-insights{padding:20px 32px 0}}
+.ins-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 0 14px}
+.ins-synced{font-size:12px;color:var(--ink-soft,#6b7280)}
+.ins-card{background:var(--surface,#fff);border:1px solid var(--hairline,#e5e7eb);border-radius:12px;padding:14px 16px;margin-bottom:14px}
+.ins-card h2{font-size:15px;font-weight:700;margin:0 0 10px}
+.ins-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:9px 0;border-top:1px solid var(--hairline,#e5e7eb)}
+.ins-row:first-child{border-top:0}
+.ins-name{background:none;border:0;padding:0;font:inherit;font-weight:600;color:inherit;text-align:left;cursor:pointer;text-decoration:underline dotted}
+.ins-sub{font-size:13px;color:var(--ink-soft,#6b7280);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:52vw}
+.ins-meta{font-size:12px;color:var(--ink-soft,#6b7280);text-align:right;white-space:nowrap}
+.ins-empty{font-size:13px;color:var(--ink-soft,#6b7280);padding:6px 0}
+.ins-tiles{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+@media(min-width:720px){.ins-tiles{grid-template-columns:repeat(4,1fr)}}
+.ins-tile{padding:8px 0}.ins-v{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums}.ins-l{font-size:12px;color:var(--ink-soft,#6b7280)}.ins-d{font-size:11px;margin-top:2px}.ins-d.up{color:#2f7d4f}.ins-d.down{color:#b4552d}
+.ins-bar{display:grid;grid-template-columns:104px minmax(0,1fr) auto;gap:10px;align-items:center;margin:6px 0;font-size:13px}
+@media(min-width:720px){.ins-bar{grid-template-columns:140px minmax(0,1fr) auto}}
+.ins-bar-l{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ins-bar-t{display:block;height:14px}.ins-bar-f{display:block;height:14px;border-radius:0 4px 4px 0;background:var(--navy,#1f3a68)}
+.ins-bar-v{font-variant-numeric:tabular-nums;white-space:nowrap}
+.ins-tpl{font-size:12px;color:var(--ink-soft,#6b7280);margin-top:8px}
+.ins-cols{display:flex;align-items:flex-end;gap:12px;height:140px;border-bottom:1px solid var(--hairline,#e5e7eb);overflow-x:auto}
+.ins-col{flex:1 0 44px;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%}
+.ins-col-b{width:100%;background:var(--navy,#1f3a68);border-radius:4px 4px 0 0}.ins-col-v{font-size:12px;font-weight:600;margin-bottom:4px}.ins-col-l{font-size:11px;color:var(--ink-soft,#6b7280);margin-top:5px}
+.ins-foot{font-size:12px;color:var(--ink-soft,#6b7280);margin:4px 0 80px}
+#view-insights[hidden]{display:none}
+
+/* INS-01: hideable elements whose class-level display would otherwise beat
+   the UA [hidden] rule (same trap as .btn[hidden] above). */
+.chip[hidden]{display:none}
+[data-test-chip][hidden]{display:none}

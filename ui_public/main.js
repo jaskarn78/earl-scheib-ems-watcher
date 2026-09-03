@@ -1516,6 +1516,13 @@
   // ---------- Filter + search wiring (QAJ-02) -------------------------
 
   function wireFilters() {
+    // INS-01: the test-mode chips (and their separator + re-seed button) are
+    // dev tooling. Marco never needs them, so they are hidden unless the URL
+    // carries ?test — e.g. /earlscheib?test=1#queue.
+    if (!new URLSearchParams(window.location.search).has('test')) {
+      document.querySelectorAll('[data-test-chip]').forEach((c) => { c.hidden = true; });
+    }
+
     document.querySelectorAll('.filter').forEach((btn) => {
       btn.addEventListener('click', () => {
         const f = btn.getAttribute('data-filter') || 'all';
@@ -2179,6 +2186,7 @@
     const viewTpl   = document.getElementById('view-templates');
     const viewSched = document.getElementById('view-schedules');
     const viewLogs  = document.getElementById('view-logs');
+    const viewIns   = document.getElementById('view-insights');
     if (!links.length || !viewQueue || !viewTpl) return;
 
     const activate = (target) => {
@@ -2191,9 +2199,11 @@
       viewTpl.hidden   = target !== 'templates';
       if (viewSched) viewSched.hidden = target !== 'schedules';
       if (viewLogs)  viewLogs.hidden  = target !== 'logs';
+      if (viewIns)   viewIns.hidden   = target !== 'insights';
       if (target === 'templates') loadTemplates(false);
       if (target === 'schedules') loadSchedules(false);
       if (target === 'logs')      loadTwilioMessages();
+      if (target === 'insights')  loadInsights();
     };
 
     links.forEach((a) => {
@@ -2211,6 +2221,7 @@
     if (window.location.hash === '#templates') activate('templates');
     if (window.location.hash === '#schedules') activate('schedules');
     if (window.location.hash === '#logs')      activate('logs');
+    if (window.location.hash === '#insights')  activate('insights');
   }
 
   // ---------- Logs view (USH-01) --------------------------------------
@@ -2352,6 +2363,74 @@
       });
     });
   }
+
+  // ---------- Insights view (INS-01) --------------------------------
+  // Marco-facing board: warm leads / this week / no-shows on top, period
+  // numbers underneath. All of it comes from one GET /insights?days= call.
+  let insDays = '30';
+  // esc(): HTML-escape for the template literals below. escapeHTML() above is
+  // declared twice in this file (queue + logs sections) so it is deliberately
+  // not reused here — this one is null-safe and single-sourced.
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+  // Copied from messages.html (the two pages do not share JS).
+  const fmtPhone = (e164) => {
+    const m = String(e164 || '').match(/^\+1(\d{3})(\d{3})(\d{4})$/);
+    return m ? `(${m[1]}) ${m[2]}-${m[3]}` : (e164 || '');
+  };
+  const money = (n) => '$' + Math.round(n).toLocaleString('en-US');
+  // ts === 0 means "this sync has never run" (e.g. no Twilio creds yet) —
+  // without the guard that renders as "20700 days ago".
+  const rel = (ts) => { if (!ts) return 'never'; const d = Math.floor((Date.now() / 1000 - ts) / 86400); return d <= 0 ? 'today' : d === 1 ? '1 day ago' : d + ' days ago'; };
+  const when = (ts) => new Date(ts * 1000).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const nameBtn = (row) => `<button class="ins-name" type="button" data-timeline-key="${esc(row.key)}">${esc(row.name || fmtPhone(row.phone))}</button>`;
+
+  async function loadInsights(refresh) {
+    const root = document.getElementById('view-insights');
+    if (!root) return;
+    if (refresh) { try { await fetch(`${API_BASE}/insights/sync`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); } catch (_) {} }
+    let data;
+    try {
+      const resp = await fetch(`${API_BASE}/insights?days=${insDays}`);
+      data = await resp.json();
+    } catch (err) { root.querySelector('#ins-foot').textContent = 'Could not load insights.'; return; }
+    renderInsights(data);
+  }
+
+  function renderInsights(d) {
+    const list = (id, rows, fmt, empty) => {
+      const el = document.querySelector(`#${id} .ins-list`);
+      el.innerHTML = rows.length ? rows.map(fmt).join('') : `<div class="ins-empty">${empty}</div>`;
+    };
+    list('ins-warm', d.warm_leads, (w) => `<div class="ins-row"><div>${nameBtn(w)}<div class="ins-sub">${esc(w.last_reply)}</div></div><div class="ins-meta">${rel(w.last_reply_at)}<br>${w.estimate_total ? money(w.estimate_total) : ''}</div><a class="btn btn-sm" href="/earlscheib/messages#${encodeURIComponent(w.phone)}">Reply</a></div>`, 'Nobody waiting on you.');
+    list('ins-upcoming', d.bookings_upcoming, (b) => `<div class="ins-row"><div>${nameBtn(b)}<div class="ins-sub">${when(b.appointment_at)}</div></div><div class="ins-meta">${b.estimate_total ? money(b.estimate_total) : ''}</div></div>`, 'Nothing booked yet.');
+    const ns = document.getElementById('ins-noshows'); ns.hidden = d.no_shows.length === 0;
+    list('ins-noshows', d.no_shows, (n) => `<div class="ins-row"><div>${nameBtn(n)}<div class="ins-sub">was due ${when(n.appointment_at)}</div></div><div class="ins-meta">${n.days_overdue} days</div><a class="btn btn-sm" href="/earlscheib/messages#${encodeURIComponent(n.phone)}">Text</a></div>`, '');
+    const t = d.tiles;
+    const tile = (label, v, prev, fmt) => { const delta = prev ? Math.round((v - prev) / prev * 100) : null; return `<div class="ins-tile"><div class="ins-v">${fmt(v)}</div><div class="ins-l">${label}</div>${delta === null ? '' : `<div class="ins-d ${delta >= 0 ? 'up' : 'down'}">${delta >= 0 ? '▲' : '▼'} ${Math.abs(delta)}% vs prior</div>`}</div>`; };
+    document.querySelector('#ins-tiles .ins-tiles').innerHTML = [
+      tile('estimates', t.estimates.value, t.estimates.prev, String), tile('texted', t.texted.value, t.texted.prev, String),
+      tile('replies', t.replies.value, t.replies.prev, String), tile('bookings', t.bookings.value, t.bookings.prev, String),
+      tile('closed ROs', t.closed_ros.value, t.closed_ros.prev, String), tile('revenue per CCC', t.revenue.value, t.revenue.prev, money),
+      tile('avg ticket', t.avg_ticket.value, t.avg_ticket.prev, money), tile('your median reply', t.marco_reply_median_min.value, t.marco_reply_median_min.prev, (m) => m ? (m < 90 ? Math.round(m) + ' min' : (m / 60).toFixed(1) + ' h') : '–'),
+    ].join('');
+    const max = Math.max(1, d.funnel[0].n);
+    document.querySelector('#ins-funnel .ins-bars').innerHTML = d.funnel.map((f) => `<div class="ins-bar"><span class="ins-bar-l">${esc(f.label)}</span><span class="ins-bar-t"><span class="ins-bar-f" style="width:${(f.n / max * 100).toFixed(1)}%"></span></span><span class="ins-bar-v">${f.n}${f.revenue ? ' · ' + money(f.revenue) : ''}</span></div>`).join('');
+    const tp = d.template_reply_rate;
+    document.querySelector('#ins-funnel .ins-tpl').innerHTML = ['24h', '3day', 'review'].map((k) => `<span>${k === '24h' ? '24-hour' : k === '3day' ? '3-day' : 'Review'}: ${tp[k].replied}/${tp[k].sent} replied</span>`).join(' · ');
+    const mmax = Math.max(1, ...d.revenue_by_month.map((m) => m.revenue));
+    document.querySelector('#ins-revenue .ins-cols').innerHTML = d.revenue_by_month.map((m) => `<div class="ins-col"><div class="ins-col-v">${money(m.revenue)}</div><div class="ins-col-b" style="height:${(m.revenue / mmax * 100).toFixed(0)}%"></div><div class="ins-col-l">${m.month.slice(5)}/${m.month.slice(2, 4)} · ${m.closed_ros}</div></div>`).join('') || '<div class="ins-empty">No closed repair orders yet.</div>';
+    document.getElementById('ins-foot').textContent = `Twilio cost ${money(d.twilio_cost)} this period · ${d.placeholder_estimates.n} of ${d.placeholder_estimates.of} open estimates still at the $472.50 placeholder`;
+    const s = d.synced_at; document.getElementById('ins-synced').textContent = `exports synced ${rel(s.ro_exports)} · texts synced ${rel(s.inbound_sms)}`;
+    document.querySelectorAll('[data-timeline-key]').forEach((b) => b.addEventListener('click', () => window.openTimeline && window.openTimeline(b.dataset.timelineKey)));
+  }
+
+  document.querySelectorAll('#view-insights .chip[data-days]').forEach((c) => c.addEventListener('click', () => {
+    document.querySelectorAll('#view-insights .chip').forEach((x) => x.classList.toggle('is-active', x === c));
+    insDays = c.dataset.days; loadInsights();
+  }));
+  const insRefresh = document.getElementById('ins-refresh'); if (insRefresh) insRefresh.addEventListener('click', () => loadInsights(true));
 
   // ---------- Wire up --------------------------------------------------
 
