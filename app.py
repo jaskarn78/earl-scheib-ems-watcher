@@ -73,6 +73,7 @@ TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
 TWILIO_API_KEY = os.getenv("TWILIO_API_KEY", "")
 TWILIO_API_SECRET = os.getenv("TWILIO_API_SECRET", "")
 TWILIO_FROM = os.getenv("TWILIO_FROM", "")
+EXPORTS_DIR = os.getenv("CCC_EXPORTS_DIR", "/opt/esw/ccc-exports")
 PORT = int(os.getenv("PORT", "8200"))
 DB_PATH = os.getenv("DB_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "jobs.db"))
 TELEMETRY_LOG_PATH = os.getenv(
@@ -376,6 +377,29 @@ def init_db():
             job_type   TEXT PRIMARY KEY,
             body       TEXT NOT NULL,
             updated_at INTEGER NOT NULL
+        )
+        """
+    )
+    con.commit()
+
+    # INS-01: one row per CCC EMS export set, refreshed hourly from
+    # CCC_EXPORTS_DIR by sync_ro_exports(). closed = DATE_OUT set AND G_TTL_AMT > 0.
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ro_exports (
+            doc_id     TEXT PRIMARY KEY,
+            phone      TEXT NOT NULL DEFAULT '',
+            vin        TEXT NOT NULL DEFAULT '',
+            owner      TEXT NOT NULL DEFAULT '',
+            trans_type TEXT NOT NULL DEFAULT '',
+            supp_no    TEXT NOT NULL DEFAULT '',
+            create_dt  TEXT NOT NULL DEFAULT '',
+            ro_in      TEXT NOT NULL DEFAULT '',
+            date_out   TEXT NOT NULL DEFAULT '',
+            g_ttl      REAL NOT NULL DEFAULT 0,
+            closed     INTEGER NOT NULL DEFAULT 0,
+            file_mtime INTEGER NOT NULL DEFAULT 0,
+            parsed_at  INTEGER NOT NULL DEFAULT 0
         )
         """
     )
@@ -1461,6 +1485,98 @@ def _dbf_read(path: str) -> list[dict]:
                 row[name] = txt
         rows.append(row)
     return rows
+
+
+def _get_setting(key: str, default: str) -> str:
+    con = get_db()
+    try:
+        row = con.execute("SELECT value FROM app_settings WHERE key = ?", (key,)).fetchone()
+        return str(row[0]) if row else default
+    finally:
+        con.close()
+
+
+def _set_setting(key: str, value: str) -> None:
+    con = get_db()
+    try:
+        con.execute(
+            "INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+            (key, value, int(time.time())),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+
+def _parse_export_set(base: str) -> dict | None:
+    """Read <base>.env/.ad1/.ad2/.veh/.ttl and return the ro_exports row dict."""
+    env = _dbf_read(base + ".env")
+    if not env:
+        return None
+    e = env[0]
+    ad1 = (_dbf_read(base + ".ad1") or [{}])[0]
+    ad2 = (_dbf_read(base + ".ad2") or [{}])[0]
+    veh = (_dbf_read(base + ".veh") or [{}])[0]
+    ttl = (_dbf_read(base + ".ttl") or [{}])[0]
+    phone = ""
+    for k in ("OWNR_PH1", "OWNR_PH2", "INSD_PH1"):
+        phone = clean_phone(str(ad1.get(k, "")))
+        if phone:
+            break
+    g_ttl = float(ttl.get("G_TTL_AMT", 0.0) or 0.0)
+    date_out = str(ad2.get("DATE_OUT", "") or "")
+    return {
+        "doc_id": str(e.get("UNQFILE_ID", "") or os.path.basename(base)),
+        "phone": phone,
+        "vin": str(veh.get("V_VIN", "") or "").upper(),
+        "owner": " ".join(p for p in (str(ad1.get("OWNR_FN", "")), str(ad1.get("OWNR_LN", ""))) if p).strip(),
+        "trans_type": str(e.get("TRANS_TYPE", "") or ""),
+        "supp_no": str(e.get("SUPP_NO", "") or ""),
+        "create_dt": str(e.get("CREATE_DT", "") or ""),
+        "ro_in": str(ad2.get("RO_IN_DATE", "") or ""),
+        "date_out": date_out,
+        "g_ttl": g_ttl,
+        "closed": 1 if (date_out and g_ttl > 0) else 0,
+    }
+
+
+def sync_ro_exports(exports_dir: str | None = None) -> int:
+    """Parse new/changed CCC export sets into ro_exports. Returns rows upserted."""
+    import glob as _glob
+    d = exports_dir or EXPORTS_DIR
+    con = get_db()
+    upserted = 0
+    try:
+        known = {r[0]: r[1] for r in con.execute("SELECT doc_id, file_mtime FROM ro_exports")}
+        for envp in sorted(_glob.glob(os.path.join(d, "*.env"))):
+            base = envp[:-4]
+            try:
+                mtime = int(os.path.getmtime(envp))
+                stem = os.path.basename(base)
+                if known.get(stem, -1) >= mtime:
+                    continue
+                row = _parse_export_set(base)
+                if not row:
+                    continue
+                if known.get(row["doc_id"], -1) >= mtime:
+                    continue
+                con.execute(
+                    "INSERT INTO ro_exports (doc_id, phone, vin, owner, trans_type, supp_no, create_dt, ro_in, date_out, g_ttl, closed, file_mtime, parsed_at) "
+                    "VALUES (:doc_id, :phone, :vin, :owner, :trans_type, :supp_no, :create_dt, :ro_in, :date_out, :g_ttl, :closed, :file_mtime, :parsed_at) "
+                    "ON CONFLICT(doc_id) DO UPDATE SET phone=excluded.phone, vin=excluded.vin, owner=excluded.owner, trans_type=excluded.trans_type, "
+                    "supp_no=excluded.supp_no, create_dt=excluded.create_dt, ro_in=excluded.ro_in, date_out=excluded.date_out, g_ttl=excluded.g_ttl, "
+                    "closed=excluded.closed, file_mtime=excluded.file_mtime, parsed_at=excluded.parsed_at",
+                    dict(row, file_mtime=mtime, parsed_at=int(time.time())),
+                )
+                upserted += 1
+            except Exception as exc:  # one bad set never stops the sweep
+                log.warning("ro_exports: skipped %s: %s", base, exc)
+        con.commit()
+    finally:
+        con.close()
+    _set_setting("ro_exports_synced_at", str(int(time.time())))
+    return upserted
 
 
 def parse_bms(xml_bytes: bytes) -> dict:
