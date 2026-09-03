@@ -2389,10 +2389,19 @@
   async function loadInsights(refresh) {
     const root = document.getElementById('view-insights');
     if (!root) return;
-    if (refresh) { try { await fetch(`${API_BASE}/insights/sync`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); } catch (_) {} }
+    // /insights/sync answers 202 the moment the background sync starts, so the
+    // response body says nothing about the data. Give it a beat to land before
+    // reading — whatever misses this window shows up on the next load.
+    if (refresh) {
+      try {
+        await fetch(`${API_BASE}/insights/sync`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        await new Promise((r) => setTimeout(r, 1500));
+      } catch (_) {}
+    }
     let data;
     try {
       const resp = await fetch(`${API_BASE}/insights?days=${insDays}`);
+      if (!resp.ok) throw new Error(resp.status);
       data = await resp.json();
     } catch (err) { root.querySelector('#ins-foot').textContent = 'Could not load insights.'; return; }
     renderInsights(data);
@@ -2406,7 +2415,7 @@
     list('ins-warm', d.warm_leads, (w) => `<div class="ins-row"><div>${nameBtn(w)}<div class="ins-sub">${esc(w.last_reply)}</div></div><div class="ins-meta">${rel(w.last_reply_at)}<br>${w.estimate_total ? money(w.estimate_total) : ''}</div><a class="btn btn-sm" href="/earlscheib/messages#${encodeURIComponent(w.phone)}">Reply</a></div>`, 'Nobody waiting on you.');
     list('ins-upcoming', d.bookings_upcoming, (b) => `<div class="ins-row"><div>${nameBtn(b)}<div class="ins-sub">${when(b.appointment_at)}</div></div><div class="ins-meta">${b.estimate_total ? money(b.estimate_total) : ''}</div></div>`, 'Nothing booked yet.');
     const ns = document.getElementById('ins-noshows'); ns.hidden = d.no_shows.length === 0;
-    list('ins-noshows', d.no_shows, (n) => `<div class="ins-row"><div>${nameBtn(n)}<div class="ins-sub">was due ${when(n.appointment_at)}</div></div><div class="ins-meta">${n.days_overdue} days</div><a class="btn btn-sm" href="/earlscheib/messages#${encodeURIComponent(n.phone)}">Text</a></div>`, '');
+    list('ins-noshows', d.no_shows, (n) => `<div class="ins-row"><div>${nameBtn(n)}<div class="ins-sub">was due ${when(n.appointment_at)}</div></div><div class="ins-meta">${n.days_overdue} ${n.days_overdue === 1 ? 'day' : 'days'}</div><a class="btn btn-sm" href="/earlscheib/messages#${encodeURIComponent(n.phone)}">Text</a></div>`, '');
     const t = d.tiles;
     const tile = (label, v, prev, fmt) => { const delta = prev ? Math.round((v - prev) / prev * 100) : null; return `<div class="ins-tile"><div class="ins-v">${fmt(v)}</div><div class="ins-l">${label}</div>${delta === null ? '' : `<div class="ins-d ${delta >= 0 ? 'up' : 'down'}">${delta >= 0 ? '▲' : '▼'} ${Math.abs(delta)}% vs prior</div>`}</div>`; };
     document.querySelector('#ins-tiles .ins-tiles').innerHTML = [
@@ -2421,7 +2430,9 @@
     document.querySelector('#ins-funnel .ins-tpl').innerHTML = ['24h', '3day', 'review'].map((k) => `<span>${k === '24h' ? '24-hour' : k === '3day' ? '3-day' : 'Review'}: ${tp[k].replied}/${tp[k].sent} replied</span>`).join(' · ');
     const mmax = Math.max(1, ...d.revenue_by_month.map((m) => m.revenue));
     document.querySelector('#ins-revenue .ins-cols').innerHTML = d.revenue_by_month.map((m) => `<div class="ins-col"><div class="ins-col-v">${money(m.revenue)}</div><div class="ins-col-b" style="height:${(m.revenue / mmax * 100).toFixed(0)}%"></div><div class="ins-col-l">${m.month.slice(5)}/${m.month.slice(2, 4)} · ${m.closed_ros}</div></div>`).join('') || '<div class="ins-empty">No closed repair orders yet.</div>';
-    document.getElementById('ins-foot').textContent = `Twilio cost ${money(d.twilio_cost)} this period · ${d.placeholder_estimates.n} of ${d.placeholder_estimates.of} open estimates still at the $472.50 placeholder`;
+    // Cents matter here and nowhere else: the whole period's texting bill is a
+    // couple of dollars, so money()'s rounding would print "$1" for $0.83.
+    document.getElementById('ins-foot').textContent = `Twilio cost $${Number(d.twilio_cost).toFixed(2)} this period · ${d.placeholder_estimates.n} of ${d.placeholder_estimates.of} open estimates still at the $472.50 placeholder`;
     const s = d.synced_at; document.getElementById('ins-synced').textContent = `exports synced ${rel(s.ro_exports)} · texts synced ${rel(s.inbound_sms)}`;
     document.querySelectorAll('[data-timeline-key]').forEach((b) => b.addEventListener('click', () => window.openTimeline && window.openTimeline(b.dataset.timelineKey)));
   }

@@ -497,6 +497,15 @@
     setTimeout(()=>inputEl.focus(),60);
   }
 
+  // INS-01: the Insights tab links here as /earlscheib/messages#<phone>.
+  // Called after every load and on hashchange; a phone we do not have a thread
+  // for yet is simply ignored (the next refresh may bring it in).
+  function openThreadFromHash(){
+    let phone=""; try{ phone=decodeURIComponent(location.hash.slice(1)); }catch(e){ return; }
+    if(!phone||phone===activephone) return;
+    if(threads.some(t=>t.phone===phone)) openThread(phone);
+  }
+
   async function send(){
     const text=inputEl.value.trim(); if(!text||!activephone) return;
     const phone=activephone;
@@ -547,6 +556,7 @@
       firstLoad=false;
       renderList();
       if(activephone) renderThread();  // patches respect scroll position
+      openThreadFromHash();            // deep link wins over the auto-open below
       // auto-open newest unread on first wide-screen load
       if(!activephone && window.matchMedia("(min-width:881px)").matches){
         const fu=threads.find(isUnread); if(fu) openThread(fu.phone);
@@ -565,6 +575,7 @@
   $("#searchInput").addEventListener("input",e=>{ query=e.target.value; renderList(); });
   document.querySelectorAll(".chip[data-filter]").forEach(c=>{ c.addEventListener("click",()=>{ document.querySelectorAll(".chip[data-filter]").forEach(x=>{x.classList.remove("active");x.setAttribute("aria-selected","false");}); c.classList.add("active"); c.setAttribute("aria-selected","true"); filter=c.dataset.filter; renderList(); }); });
   $("#backBtn").addEventListener("click",()=>{ appEl.classList.remove("show-thread"); activephone=null; renderList(); });
+  window.addEventListener("hashchange",openThreadFromHash);
   sendBtn.addEventListener("click",send);
   inputEl.addEventListener("input",()=>{ autoSize(); updateSendState(); });
   inputEl.addEventListener("keydown",e=>{ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); send(); } });

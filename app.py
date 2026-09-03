@@ -1,3 +1,4 @@
+import bisect
 import os
 import sqlite3
 import threading
@@ -1654,6 +1655,12 @@ def _twilio_get_json(url: str) -> dict:
         return json.loads(resp.read().decode("utf-8"))
 
 
+# A ceiling on Twilio pagination. At PageSize=1000 that is 50k messages in one
+# pass, far more than this shop will ever have; the cap exists so a malformed
+# or self-referential next_page_uri cannot spin the sync thread forever.
+_TWILIO_MAX_PAGES = 50
+
+
 def sync_inbound_sms(fetch=None) -> int:
     """Pull inbound Twilio messages since (last sync - 1 day) into inbound_sms."""
     from email.utils import parsedate_to_datetime
@@ -1668,9 +1675,11 @@ def sync_inbound_sms(fetch=None) -> int:
         params["To"] = TWILIO_FROM
     url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json?{urlencode(params)}"
     inserted = 0
+    pages = 0
     con = get_db()
     try:
-        while url:
+        while url and pages < _TWILIO_MAX_PAGES:
+            pages += 1
             try:
                 payload = fetch(url)
             except Exception as exc:
@@ -1691,6 +1700,8 @@ def sync_inbound_sms(fetch=None) -> int:
                 inserted += cur.rowcount
             nxt = payload.get("next_page_uri")
             url = ("https://api.twilio.com" + nxt) if nxt else None
+        if url:
+            log.warning("inbound_sms sync stopped at the %d-page cap — next tick resumes", _TWILIO_MAX_PAGES)
         con.commit()
     finally:
         con.close()
@@ -1845,14 +1856,32 @@ def compute_insights(con, days, now: int) -> dict:
     rev_cur = sum(r["g_ttl"] for r in ro_cur); rev_prev = sum(r["g_ttl"] for r in ro_prev)
 
     def reply_median(a, b):
+        """Median minutes from a customer's inbound text to Marco's next reply.
+
+        Two queries total (inbound rows in the window, then every one of
+        Marco's replies to those phones) and the "first reply at or after this
+        inbound" match is a bisect over per-phone sorted lists — the previous
+        version ran one indexed lookup per inbound message.
+        """
+        inbound = [(m["from_phone"], m["date_sent"])
+                   for m in con.execute("SELECT from_phone, date_sent FROM inbound_sms WHERE date_sent >= ? AND date_sent <= ?", (a, b))
+                   if m["from_phone"] not in TEST_PHONES]
+        if not inbound:
+            return 0.0
+        phones = sorted({p for p, _ in inbound})
+        replies: dict = {p: [] for p in phones}
+        marks = ",".join("?" * len(phones))
+        for r in con.execute(
+            f"SELECT phone, created_at FROM sms_log WHERE kind = 'reply' AND is_test = 0 AND phone IN ({marks}) ORDER BY created_at",
+            phones,
+        ):
+            replies[r["phone"]].append(r["created_at"])
         gaps = []
-        for m in con.execute("SELECT from_phone, date_sent FROM inbound_sms WHERE date_sent >= ? AND date_sent <= ?", (a, b)):
-            if m["from_phone"] in TEST_PHONES:
-                continue
-            nxt = con.execute("SELECT created_at FROM sms_log WHERE kind = 'reply' AND is_test = 0 AND phone = ? AND created_at >= ? ORDER BY created_at LIMIT 1",
-                              (m["from_phone"], m["date_sent"])).fetchone()
-            if nxt and nxt[0] - m["date_sent"] <= 7 * 86400:
-                gaps.append((nxt[0] - m["date_sent"]) / 60.0)
+        for phone, sent_at in inbound:
+            times = replies[phone]
+            i = bisect.bisect_left(times, sent_at)
+            if i < len(times) and times[i] - sent_at <= 7 * 86400:
+                gaps.append((times[i] - sent_at) / 60.0)
         if not gaps:
             return 0.0
         gaps.sort()
@@ -1881,15 +1910,23 @@ def compute_insights(con, days, now: int) -> dict:
     months: dict = {}
     for r in con.execute("SELECT substr(date_out,1,7) m, COUNT(*) n, SUM(g_ttl) s FROM ro_exports WHERE closed = 1 AND date_out >= '2026-05' GROUP BY m ORDER BY m"):
         months[r["m"]] = {"month": r["m"], "closed_ros": r["n"], "revenue": round(r["s"], 2)}
-    tpl = {}
-    for jt in ("24h", "3day", "review"):
-        sent_keys = [c for c in cur if con.execute("SELECT 1 FROM jobs WHERE estimate_key = ? AND job_type = ? AND sent = 1 AND is_test = 0", (c["key"], jt)).fetchone()]
-        rep = 0
-        for c in sent_keys:
-            row = con.execute("SELECT COALESCE(NULLIF(sent_at,0), send_at) FROM jobs WHERE estimate_key = ? AND job_type = ? AND sent = 1 AND is_test = 0", (c["key"], jt)).fetchone()
-            if row and any(r["t"] >= row[0] - 60 for r in c["replies"]):
-                rep += 1
-        tpl[jt] = {"sent": len(sent_keys), "replied": rep}
+    # Reply rate per template. One query for every sent follow-up in the whole
+    # jobs table, then the sent/replied counts are tallied in Python against
+    # the replies _customer_index already collected — the previous version ran
+    # two per-estimate queries for each of the three job types.
+    tpl = {jt: {"sent": 0, "replied": 0} for jt in ("24h", "3day", "review")}
+    cur_by_key = {c["key"]: c for c in cur}
+    first_sent_at: dict = {}
+    for j in con.execute("SELECT estimate_key, job_type, COALESCE(NULLIF(sent_at,0), send_at) AS t FROM jobs "
+                         "WHERE sent = 1 AND is_test = 0 AND job_type IN ('24h','3day','review')"):
+        pair = (j["estimate_key"], j["job_type"])
+        if j["estimate_key"] in cur_by_key and pair not in first_sent_at:
+            first_sent_at[pair] = j["t"]
+    for (key, jt), t in first_sent_at.items():
+        c = cur_by_key[key]
+        tpl[jt]["sent"] += 1
+        if any(r["t"] >= t - 60 for r in c["replies"]):
+            tpl[jt]["replied"] += 1
     cost_row = con.execute("SELECT COUNT(*) FROM sms_log WHERE is_test = 0 AND status = 'sent' AND created_at >= ? AND created_at <= ?", (start, now)).fetchone()
     twilio_cost = round(0.0083 * cost_row[0], 2)   # Twilio US SMS list price; replace with summed price once stored
     warm = []
@@ -1943,7 +1980,12 @@ def compute_timeline(con, key: str, now: int) -> dict | None:
     if c["booking"]:
         ev.append({"t": c["booking"]["created"], "kind": "booking", "label": "Booked", "detail": datetime.fromtimestamp(c["booking"]["at"]).strftime("%a %b %d, %I:%M %p")})
     for r in c["ros"]:
-        t = int(datetime.strptime(r["date_out"], "%Y-%m-%d").timestamp()) + 12 * 3600
+        # date_out comes straight out of a CCC export and is occasionally blank
+        # or malformed; one bad row must not 500 the whole drawer.
+        try:
+            t = int(datetime.strptime(r["date_out"], "%Y-%m-%d").timestamp()) + 12 * 3600
+        except (ValueError, TypeError):
+            continue
         ev.append({"t": t, "kind": "ro_closed", "label": "Repair order closed", "detail": f"${r['g_ttl']:,.0f} per CCC"})
     ev.sort(key=lambda e: e["t"])
     status = "closed" if c["ros"] else "booked" if c["booking"] else "replied" if c["replies"] else "texted" if c["first_sent"] else "estimate"
@@ -4610,21 +4652,17 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
         # INS-01: manual "sync now" for the Insights page. The scheduler
         # already runs this hourly; this is the operator's impatience button.
-        # Each sync is independently guarded so a CCC share outage never
-        # blocks the Twilio pull (and vice versa).
+        # It hands off to the same _run_insights_sync daemon thread the
+        # scheduler uses and answers 202 straight away: the server is a
+        # single-threaded HTTPServer, so running a CCC share walk plus Twilio
+        # pagination inline would freeze every other request (including this
+        # page's own /insights fetch) for as long as it takes. Going through
+        # _run_insights_sync also means a click while a sync is already
+        # running is skipped by _INSIGHTS_SYNC_LOCK instead of stacking.
         if self.path.split("?")[0] == "/earlscheibconcord/insights/sync":
             # Auth: CF Access (edge gate).
-            try:
-                n_ro = sync_ro_exports()
-            except Exception as exc:
-                log.warning("insights/sync ro_exports: %s", exc)
-                n_ro = 0
-            try:
-                n_sms = sync_inbound_sms()
-            except Exception as exc:
-                log.warning("insights/sync inbound_sms: %s", exc)
-                n_sms = 0
-            self._send_json(200, {"ro_exports": n_ro, "inbound_sms": n_sms})
+            threading.Thread(target=_run_insights_sync, daemon=True).start()
+            self._send_json(202, {"started": True})
             return
 
         # BOK-01: Book — customer committed to the work. Upserts the

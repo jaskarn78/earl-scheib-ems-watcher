@@ -207,3 +207,39 @@ def test_insights_sync_never_raises(tmp_path, monkeypatch):
     app._run_insights_sync()          # must swallow, and must free the lock
     assert app._INSIGHTS_SYNC_LOCK.acquire(blocking=False)
     app._INSIGHTS_SYNC_LOCK.release()
+
+
+def test_compute_insights_is_set_based_on_a_full_month(tmp_path, monkeypatch):
+    """50 estimates, all texted, every other one replied to.
+
+    The counts are hand-computable, and the query count is asserted flat: the
+    reply-rate and reply-median passes used to issue a query per estimate (per
+    job type) and per inbound message, so a regression there shows up here as
+    a query count that scales with the number of customers.
+    """
+    app, con = _boot(tmp_path, monkeypatch)
+    n = 50
+    for i in range(n):
+        phone = f"+1925555{7000 + i:04d}"
+        vin = f"VIN{i:014d}"
+        _add_job(con, f"P{i}", phone, vin, NOW - 10 * DAY, sent=1, sent_at=NOW - 9 * DAY)
+        if i % 2 == 0:
+            con.execute("INSERT INTO inbound_sms (sid, from_phone, to_phone, body, date_sent, synced_at) VALUES (?,?,?,?,?,?)",
+                        (f"P{i}", phone, "+19256033934", "sounds good", NOW - 9 * DAY + 3600, NOW))
+    con.commit()
+
+    queries = []
+    con.set_trace_callback(queries.append)
+    out = app.compute_insights(con, 30, NOW)
+    con.set_trace_callback(None)
+
+    f = {row["label"]: row["n"] for row in out["funnel"]}
+    assert f == {"Estimates": n, "Texted": n, "Replied": n // 2, "Won after text": 0, "Closed RO": 0}
+    assert out["tiles"]["estimates"] == {"value": n, "prev": 0}
+    assert out["tiles"]["texted"]["value"] == n
+    assert out["tiles"]["replies"]["value"] == n // 2
+    assert out["template_reply_rate"]["24h"] == {"sent": n, "replied": n // 2}
+    assert out["template_reply_rate"]["3day"] == {"sent": 0, "replied": 0}
+    # Nobody at the shop answered any of them, so there is no median to take.
+    assert out["tiles"]["marco_reply_median_min"]["value"] == 0.0
+    assert len(queries) < 25, f"{len(queries)} queries for {n} customers — not set-based"

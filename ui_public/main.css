@@ -2337,6 +2337,9 @@ a.booked-pill:hover { background-color: rgba(31, 122, 82, 0.18); box-shadow: 0 1
 .ins-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 0 14px}
 .ins-synced{font-size:12px;color:var(--ink-soft,#6b7280)}
 .ins-card{background:var(--surface,#fff);border:1px solid var(--hairline,#e5e7eb);border-radius:12px;padding:14px 16px;margin-bottom:14px}
+/* The no-shows card sets [hidden] when the list is empty; the display rule
+   above would otherwise win over the UA's default hidden styling. */
+.ins-card[hidden]{display:none}
 .ins-card h2{font-size:15px;font-weight:700;margin:0 0 10px}
 .ins-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:9px 0;border-top:1px solid var(--hairline,#e5e7eb)}
 .ins-row:first-child{border-top:0}

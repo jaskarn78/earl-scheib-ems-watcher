@@ -12,11 +12,15 @@ def _post(qs, path, body=b""):
 
 
 def test_insights_sync_route(queue_server, monkeypatch, tmp_path):
+    """The route hands the work to a daemon thread and answers immediately —
+    the server is single-threaded, so an inline sync would block every other
+    request for as long as CCC and Twilio take."""
     import app
     monkeypatch.setattr(app, "EXPORTS_DIR", str(tmp_path / "empty-exports"))
+    monkeypatch.setattr(app, "sync_ro_exports", lambda *a, **k: 0)
     monkeypatch.setattr(app, "sync_inbound_sms", lambda fetch=None: 0)
     status, body = _post(queue_server, "/earlscheibconcord/insights/sync")
-    assert status == 200 and body == {"ro_exports": 0, "inbound_sms": 0}
+    assert status == 202 and body == {"started": True}
 
 
 def _get(qs, path):
