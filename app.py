@@ -1225,7 +1225,7 @@ def _fetch_twilio_messages(
             # all jobs at that phone share the same customer name (otherwise
             # ambiguous, leave un-enriched).
             cur.execute(
-                "SELECT id, phone, name, job_type FROM jobs "
+                "SELECT id, phone, name, job_type, estimate_key FROM jobs "
                 "ORDER BY created_at DESC, id DESC"
             )
             jobs_by_phone: dict[str, list[dict]] = {}
@@ -1236,6 +1236,9 @@ def _fetch_twilio_messages(
                     "job_id": jr["id"],
                     "customer_name": jr["name"],
                     "job_type": jr["job_type"],
+                    # INS-01: lets the Messages page open the timeline drawer
+                    # for the thread it is showing.
+                    "estimate_key": jr["estimate_key"],
                 })
             unambiguous_by_phone: dict[str, dict] = {}
             for phone, jobs_at_phone in jobs_by_phone.items():
@@ -1247,7 +1250,7 @@ def _fetch_twilio_messages(
             # attempt, so this resolves correctly even when fan-out scattered
             # the same body to multiple phone numbers.
             cur.execute(
-                "SELECT s.body, s.job_id, j.name, j.job_type "
+                "SELECT s.body, s.job_id, j.name, j.job_type, j.estimate_key "
                 "FROM sms_log s LEFT JOIN jobs j ON s.job_id = j.id "
                 "WHERE s.created_at >= ? "
                 "ORDER BY s.created_at DESC",
@@ -1261,6 +1264,7 @@ def _fetch_twilio_messages(
                         "job_id": sr["job_id"],
                         "customer_name": sr["name"],
                         "job_type": sr["job_type"],
+                        "estimate_key": sr["estimate_key"],
                     }
         finally:
             con.close()
@@ -1297,10 +1301,12 @@ def _fetch_twilio_messages(
             r["customer_name"] = enrich.get("customer_name") or None
             r["job_id"] = enrich.get("job_id")
             r["job_type"] = enrich.get("job_type") or None
+            r["estimate_key"] = enrich.get("estimate_key") or None
         else:
             r["customer_name"] = None
             r["job_id"] = None
             r["job_type"] = None
+            r["estimate_key"] = None
 
     rows.sort(key=lambda r: r["date_sent"], reverse=True)
     return rows, ""

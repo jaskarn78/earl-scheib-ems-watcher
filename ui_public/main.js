@@ -2432,6 +2432,31 @@
   }));
   const insRefresh = document.getElementById('ins-refresh'); if (insRefresh) insRefresh.addEventListener('click', () => loadInsights(true));
 
+  // ---------- Customer timeline drawer (INS-01) ------------------------
+  // One customer's whole history in order: estimate → texts → replies →
+  // booking → closed RO. Opened from any [data-timeline-key] button.
+  // Duplicated (deliberately) inside messages.html — the two pages share no JS.
+  window.openTimeline = async function (key) {
+    const dr = document.getElementById('tl-drawer'); if (!dr) return;
+    dr.hidden = false; document.getElementById('tl-list').innerHTML = '<li class="tl-empty">Loading…</li>';
+    try {
+      const resp = await fetch(`${API_BASE}/customer?key=${encodeURIComponent(key)}`);
+      if (!resp.ok) throw new Error(resp.status);
+      const d = await resp.json();
+      document.getElementById('tl-name').textContent = d.header.name || d.header.phone;
+      document.getElementById('tl-sub').textContent = [d.header.vehicle, d.header.estimate_total ? '$' + Math.round(d.header.estimate_total).toLocaleString('en-US') + ' est.' : '', d.header.status].filter(Boolean).join(' · ');
+      const icon = { estimate: '📄', text: '💬', reply: '↩︎', booking: '📅', ro_closed: '✅' };
+      document.getElementById('tl-list').innerHTML = d.events.map((e) => `<li class="tl-ev tl-${e.kind}"><span class="tl-ic">${icon[e.kind] || '•'}</span><div><div class="tl-l">${esc(e.label)}</div>${e.detail ? `<div class="tl-d">${esc(e.detail)}</div>` : ''}<div class="tl-t">${new Date(e.t * 1000).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</div></div></li>`).join('') || '<li class="tl-empty">No events.</li>';
+    } catch (err) { document.getElementById('tl-list').innerHTML = '<li class="tl-empty">Could not load this customer.</li>'; }
+  };
+  document.querySelectorAll('#tl-drawer [data-close]').forEach((b) => b.addEventListener('click', () => { document.getElementById('tl-drawer').hidden = true; }));
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { const dr = document.getElementById('tl-drawer'); if (dr) dr.hidden = true; } });
+
+  // Support/debug hook: /earlscheib?tl=<estimate_key>#insights opens the
+  // drawer straight away. Also how the headless screenshots are taken.
+  const tlAuto = new URLSearchParams(window.location.search).get('tl');
+  if (tlAuto) window.openTimeline(tlAuto);
+
   // ---------- Wire up --------------------------------------------------
 
   document.addEventListener('DOMContentLoaded', () => {

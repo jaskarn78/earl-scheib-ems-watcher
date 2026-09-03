@@ -182,6 +182,25 @@
   /* .mob-brand and the mobile bottom-nav styles previously here are GONE —
      the brand lives in the shared nav header, and .bottomnav/.bn-link are
      owned by /earlscheib/nav.css (single source of truth). */
+
+  /* ---- INS-01 customer timeline drawer. Copy of the block in main.css;
+     the two pages share no stylesheet, so this must stay in sync. ---- */
+  .btn.btn-sm{border:1px solid var(--hair);background:var(--white);color:var(--ink-2);height:36px;padding:0 12px;border-radius:10px;font:inherit;font-size:12.5px;font-weight:600;white-space:nowrap;cursor:pointer;}
+  .btn.btn-sm:hover{color:var(--navy);border-color:var(--navy-soft);}
+  .btn.btn-sm[hidden]{display:none;}
+  .drawer{position:fixed;inset:0;z-index:60}.drawer[hidden]{display:none}
+  .drawer-scrim{position:absolute;inset:0;background:rgba(0,0,0,.35)}
+  .drawer-panel{position:absolute;left:0;right:0;bottom:0;max-height:82vh;overflow:auto;background:#fff;border-radius:16px 16px 0 0;padding:16px 16px 28px;box-shadow:0 -8px 30px rgba(0,0,0,.2)}
+  @media(min-width:720px){.drawer-panel{left:auto;top:0;bottom:0;width:420px;max-height:none;border-radius:0}}
+  .drawer-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:12px}
+  .drawer-name{font-size:18px;font-weight:700}.drawer-sub{font-size:13px;color:#6b7280}
+  /* main.css supplies .btn/.btn-ghost on the SPA; this page has neither. */
+  .drawer-head .btn-ghost{border:1px solid var(--hair);background:var(--white);color:var(--ink-2);width:34px;height:34px;border-radius:10px;font-size:14px;line-height:1;cursor:pointer;flex:0 0 auto;}
+  .drawer-head .btn-ghost:hover{color:var(--navy);border-color:var(--navy-soft);}
+  .tl{list-style:none;margin:0;padding:0 0 0 4px;border-left:2px solid #e5e7eb}
+  .tl-ev{display:flex;gap:10px;padding:8px 0 8px 10px;position:relative}
+  .tl-ic{width:22px;text-align:center;flex:0 0 22px}.tl-l{font-weight:600;font-size:14px}.tl-d{font-size:13px;color:#374151;margin-top:2px}.tl-t{font-size:11px;color:#6b7280;margin-top:2px}
+  .tl-ro_closed .tl-l{color:#2f7d4f}.tl-empty{padding:8px 10px;color:#6b7280;font-size:13px}
 </style>
 </head>
 <body>
@@ -232,6 +251,7 @@
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 17h14M5 17a2 2 0 0 1-2-2v-3l2-5h12l2 5v3a2 2 0 0 1-2 2M7 17v2M17 17v2"/><circle cx="7.5" cy="14.5" r="1"/><circle cx="16.5" cy="14.5" r="1"/></svg>
             <span id="chCtxText"></span>
           </div>
+          <button class="btn btn-sm" id="chTimeline" type="button" hidden>Timeline</button>
           <a class="ch-action" id="callBtn" aria-label="Call customer" title="Call customer" href="#">
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3.1-8.6A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.3 1.8.6 2.6a2 2 0 0 1-.5 2.1L8.1 9.6a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.8.3 1.7.5 2.6.6a2 2 0 0 1 1.7 2z"/></svg>
           </a>
@@ -348,6 +368,7 @@
       t.msgs.push(r);
       if(r.customer_name) t.name = r.customer_name;
       if(r.job_type && !t.job_type) t.job_type = r.job_type;
+      if(r.estimate_key && !t.estimate_key) t.estimate_key = r.estimate_key;   // INS-01
     });
     const list = [...map.values()].map(t=>{
       t.msgs.sort((a,b)=>a.date_sent-b.date_sent);
@@ -446,6 +467,11 @@
     $("#chName").textContent=displayName(t); $("#chPhone").textContent=fmtPhone(t.phone)+(t.name?"":" · not in jobs");
     callBtnEl.href = "tel:"+t.phone;
     const ctx=$("#chCtx"); if(t.ctx){ ctx.style.display="inline-flex"; $("#chCtxText").textContent=t.ctx; } else { ctx.style.display="none"; }
+    // INS-01: timeline drawer. Only offered when the thread resolves to a job
+    // (unknown numbers have no estimate_key, so there is nothing to show).
+    const tlKey = t.estimate_key || (t.msgs.find(m=>m.estimate_key)||{}).estimate_key || "";
+    const tlBtn = $("#chTimeline");
+    if(tlBtn){ tlBtn.hidden = !tlKey; tlBtn.onclick = () => window.openTimeline(tlKey); }
     const stick=opts.forceBottom||atBottom();
     messagesEl.innerHTML=""; let lastDay=null;
     t.msgs.forEach((m,i)=>{
@@ -549,6 +575,41 @@
   refresh();
   setInterval(refresh, POLL_MS);
   setInterval(updateSync, 1000);
+})();
+</script>
+
+<!-- INS-01: customer timeline drawer — same markup as ui_public/index.html. -->
+<div class="drawer" id="tl-drawer" hidden role="dialog" aria-modal="true" aria-labelledby="tl-name">
+  <div class="drawer-scrim" data-close></div>
+  <div class="drawer-panel">
+    <div class="drawer-head"><div><div class="drawer-name" id="tl-name"></div><div class="drawer-sub" id="tl-sub"></div></div><button class="btn btn-ghost" type="button" data-close aria-label="Close">✕</button></div>
+    <ol class="tl" id="tl-list"></ol>
+  </div>
+</div>
+<script>
+// ---------- INS-01 customer timeline drawer ----------
+// Verbatim copy of the openTimeline block in ui_public/main.js (the SPA and
+// this inbox share no JS). Keep the two in sync.
+(function(){
+  const API_BASE = (window.API_BASE_PATH || "/earlscheibconcord");
+  function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+  window.openTimeline = async function (key) {
+    const dr = document.getElementById('tl-drawer'); if (!dr) return;
+    dr.hidden = false; document.getElementById('tl-list').innerHTML = '<li class="tl-empty">Loading…</li>';
+    try {
+      const resp = await fetch(`${API_BASE}/customer?key=${encodeURIComponent(key)}`);
+      if (!resp.ok) throw new Error(resp.status);
+      const d = await resp.json();
+      document.getElementById('tl-name').textContent = d.header.name || d.header.phone;
+      document.getElementById('tl-sub').textContent = [d.header.vehicle, d.header.estimate_total ? '$' + Math.round(d.header.estimate_total).toLocaleString('en-US') + ' est.' : '', d.header.status].filter(Boolean).join(' · ');
+      const icon = { estimate: '\u{1F4C4}', text: '\u{1F4AC}', reply: '↩︎', booking: '\u{1F4C5}', ro_closed: '✅' };
+      document.getElementById('tl-list').innerHTML = d.events.map((e) => `<li class="tl-ev tl-${e.kind}"><span class="tl-ic">${icon[e.kind] || '•'}</span><div><div class="tl-l">${esc(e.label)}</div>${e.detail ? `<div class="tl-d">${esc(e.detail)}</div>` : ''}<div class="tl-t">${new Date(e.t * 1000).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</div></div></li>`).join('') || '<li class="tl-empty">No events.</li>';
+    } catch (err) { document.getElementById('tl-list').innerHTML = '<li class="tl-empty">Could not load this customer.</li>'; }
+  };
+  document.querySelectorAll('#tl-drawer [data-close]').forEach((b) => b.addEventListener('click', () => { document.getElementById('tl-drawer').hidden = true; }));
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { const dr = document.getElementById('tl-drawer'); if (dr) dr.hidden = true; } });
+  const tlAuto = new URLSearchParams(window.location.search).get('tl');
+  if (tlAuto) window.openTimeline(tlAuto);
 })();
 </script>
 </body>

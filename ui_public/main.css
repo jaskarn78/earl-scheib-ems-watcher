@@ -2363,3 +2363,20 @@ a.booked-pill:hover { background-color: rgba(31, 122, 82, 0.18); box-shadow: 0 1
    the UA [hidden] rule (same trap as .btn[hidden] above). */
 .chip[hidden]{display:none}
 [data-test-chip][hidden]{display:none}
+
+/* ==========================================================
+   INS-01 — customer timeline drawer (#tl-drawer)
+   Bottom sheet on mobile, right-hand rail ≥720px. The markup is
+   duplicated in messages.html, which carries its own copy of this
+   block inline (the two pages share no stylesheet).
+   ========================================================== */
+.drawer{position:fixed;inset:0;z-index:60}.drawer[hidden]{display:none}
+.drawer-scrim{position:absolute;inset:0;background:rgba(0,0,0,.35)}
+.drawer-panel{position:absolute;left:0;right:0;bottom:0;max-height:82vh;overflow:auto;background:#fff;border-radius:16px 16px 0 0;padding:16px 16px 28px;box-shadow:0 -8px 30px rgba(0,0,0,.2)}
+@media(min-width:720px){.drawer-panel{left:auto;top:0;bottom:0;width:420px;max-height:none;border-radius:0}}
+.drawer-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:12px}
+.drawer-name{font-size:18px;font-weight:700}.drawer-sub{font-size:13px;color:#6b7280}
+.tl{list-style:none;margin:0;padding:0 0 0 4px;border-left:2px solid #e5e7eb}
+.tl-ev{display:flex;gap:10px;padding:8px 0 8px 10px;position:relative}
+.tl-ic{width:22px;text-align:center;flex:0 0 22px}.tl-l{font-weight:600;font-size:14px}.tl-d{font-size:13px;color:#374151;margin-top:2px}.tl-t{font-size:11px;color:#6b7280;margin-top:2px}
+.tl-ro_closed .tl-l{color:#2f7d4f}.tl-empty{padding:8px 10px;color:#6b7280;font-size:13px}
