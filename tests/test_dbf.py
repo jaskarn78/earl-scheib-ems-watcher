@@ -31,3 +31,11 @@ def test_dbf_read_skips_deleted_and_tolerates_missing(tmp_path):
     app = _app()
     assert [r["OWNR_FN"] for r in app._dbf_read(str(p))] == ["B"]
     assert app._dbf_read(str(tmp_path / "missing.ad1")) == []
+
+
+def test_dbf_read_returns_empty_on_truncated_header(tmp_path):
+    p = tmp_path / "trunc.ad1"
+    raw = bytearray(50)
+    raw[8:10] = (200).to_bytes(2, "little")  # declared header_len=200, file is only 50 bytes
+    p.write_bytes(bytes(raw))
+    assert _app()._dbf_read(str(p)) == []

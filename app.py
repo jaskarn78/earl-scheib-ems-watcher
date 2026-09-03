@@ -1478,46 +1478,50 @@ def _dbf_read(path: str) -> list[dict]:
         return []
     if len(data) < 32:
         return []
-    n_records, header_len, record_len = struct.unpack("<IHH", data[4:12])
-    fields = []
-    pos = 32
-    while pos + 32 <= header_len and data[pos] != 0x0D:
-        name = data[pos:pos + 11].split(b"\0", 1)[0].decode("latin-1").strip()
-        ftype = chr(data[pos + 11])
-        length = data[pos + 16]
-        dec = data[pos + 17]
-        fields.append((name, ftype, length, dec))
-        pos += 32
-    rows: list[dict] = []
-    pos = header_len
-    for _ in range(n_records):
-        rec = data[pos:pos + record_len]
-        pos += record_len
-        if len(rec) < record_len:
-            break
-        if rec[0:1] == b"*":
-            continue
-        row = {}
-        off = 1
-        for name, ftype, length, dec in fields:
-            raw = rec[off:off + length]
-            off += length
-            txt = raw.decode("latin-1").strip("\0 ")
-            if ftype in ("N", "F"):
-                try:
-                    row[name] = float(txt) if txt else 0.0
-                except ValueError:
-                    row[name] = 0.0
-            elif ftype == "D":
-                row[name] = f"{txt[0:4]}-{txt[4:6]}-{txt[6:8]}" if len(txt) == 8 and txt.isdigit() else ""
-            elif ftype == "L":
-                row[name] = txt[:1].upper() in ("T", "Y")
-            elif ftype == "M":
-                row[name] = ""
-            else:
-                row[name] = txt
-        rows.append(row)
-    return rows
+    try:
+        n_records, header_len, record_len = struct.unpack("<IHH", data[4:12])
+        limit = min(header_len, len(data))
+        fields = []
+        pos = 32
+        while pos + 32 <= limit and data[pos] != 0x0D:
+            name = data[pos:pos + 11].split(b"\0", 1)[0].decode("latin-1").strip()
+            ftype = chr(data[pos + 11])
+            length = data[pos + 16]
+            dec = data[pos + 17]
+            fields.append((name, ftype, length, dec))
+            pos += 32
+        rows: list[dict] = []
+        pos = header_len
+        for _ in range(n_records):
+            rec = data[pos:pos + record_len]
+            pos += record_len
+            if len(rec) < record_len:
+                break
+            if rec[0:1] == b"*":
+                continue
+            row = {}
+            off = 1
+            for name, ftype, length, dec in fields:
+                raw = rec[off:off + length]
+                off += length
+                txt = raw.decode("latin-1").strip("\0 ")
+                if ftype in ("N", "F"):
+                    try:
+                        row[name] = float(txt) if txt else 0.0
+                    except ValueError:
+                        row[name] = 0.0
+                elif ftype == "D":
+                    row[name] = f"{txt[0:4]}-{txt[4:6]}-{txt[6:8]}" if len(txt) == 8 and txt.isdigit() else ""
+                elif ftype == "L":
+                    row[name] = txt[:1].upper() in ("T", "Y")
+                elif ftype == "M":
+                    row[name] = ""
+                else:
+                    row[name] = txt
+            rows.append(row)
+        return rows
+    except (struct.error, IndexError, ValueError):
+        return []
 
 
 def _get_setting(key: str, default: str) -> str:
