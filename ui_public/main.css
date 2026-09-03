@@ -2383,3 +2383,5 @@ a.booked-pill:hover { background-color: rgba(31, 122, 82, 0.18); box-shadow: 0 1
 .tl-ev{display:flex;gap:10px;padding:8px 0 8px 10px;position:relative}
 .tl-ic{width:22px;text-align:center;flex:0 0 22px}.tl-l{font-weight:600;font-size:14px}.tl-d{font-size:13px;color:#374151;margin-top:2px}.tl-t{font-size:11px;color:#6b7280;margin-top:2px}
 .tl-ro_closed .tl-l{color:#2f7d4f}.tl-empty{padding:8px 10px;color:#6b7280;font-size:13px}
+
+.ins-hint{font-size:12px;color:var(--muted,#6b7280);margin:-6px 0 10px}

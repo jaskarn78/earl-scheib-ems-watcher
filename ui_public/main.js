@@ -2412,7 +2412,7 @@
       const el = document.querySelector(`#${id} .ins-list`);
       el.innerHTML = rows.length ? rows.map(fmt).join('') : `<div class="ins-empty">${empty}</div>`;
     };
-    list('ins-warm', d.warm_leads, (w) => `<div class="ins-row"><div>${nameBtn(w)}<div class="ins-sub">${esc(w.last_reply)}</div></div><div class="ins-meta">${rel(w.last_reply_at)}<br>${w.estimate_total ? money(w.estimate_total) : ''}</div><a class="btn btn-sm" href="/earlscheib/messages#${encodeURIComponent(w.phone)}">Reply</a></div>`, 'Nobody waiting on you.');
+    list('ins-warm', d.warm_leads, (w) => `<div class="ins-row"><div>${nameBtn(w)}<div class="ins-sub">${esc(w.last_reply)}</div></div><div class="ins-meta">${rel(w.last_reply_at)}<br>${w.estimate_total ? money(w.estimate_total) : ''}</div><a class="btn btn-sm" href="/earlscheib/messages#${encodeURIComponent(w.phone)}">Reply</a></div>`, 'No open replies right now.');
     list('ins-upcoming', d.bookings_upcoming, (b) => `<div class="ins-row"><div>${nameBtn(b)}<div class="ins-sub">${when(b.appointment_at)}</div></div><div class="ins-meta">${b.estimate_total ? money(b.estimate_total) : ''}</div></div>`, 'Nothing booked yet.');
     const ns = document.getElementById('ins-noshows'); ns.hidden = d.no_shows.length === 0;
     list('ins-noshows', d.no_shows, (n) => `<div class="ins-row"><div>${nameBtn(n)}<div class="ins-sub">was due ${when(n.appointment_at)}</div></div><div class="ins-meta">${n.days_overdue} ${n.days_overdue === 1 ? 'day' : 'days'}</div><a class="btn btn-sm" href="/earlscheib/messages#${encodeURIComponent(n.phone)}">Text</a></div>`, '');
