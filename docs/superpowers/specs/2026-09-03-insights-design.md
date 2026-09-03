@@ -15,8 +15,8 @@ Numbers must reproduce the 2026-09-03 audit for its window: 154 estimates, 95 te
 | Audience | Marco, day to day. Action lists first; ROI section below. |
 | Revenue | CCC closed-RO grand total (`TTL.G_TTL_AMT`), labelled "per CCC". Closed = `AD2.DATE_OUT` set **and** total > 0 (same rule as the Go watcher). |
 | History | From 2026-05-13 (first export on the Pi). No backfill from Marco's PC. |
-| Extras in v1 | Customer timeline drawer, Marco's reply-time stat, Google review link click tracking. |
-| Out of scope (v2) | Monday digest text, CSV export, real collected amounts. |
+| Extras in v1 | Customer timeline drawer, Marco's reply-time stat. |
+| Out of scope (v2) | Monday digest text, CSV export, real collected amounts, Google review click tracking (dropped 2026-09-03: it would need a public short-link host; Jas chose to keep the plain Google link). |
 
 ## 3. Architecture
 
@@ -30,7 +30,6 @@ CCC exports (/opt/esw/ccc-exports/*.{env,ad1,ad2,veh,ttl})
         │                       │                        │
         └──────────► GET /insights?days=N ◄──────────────┘
                      GET /customer?key=K
-                     GET /r/<token>  (public host; logs review_clicks, 302 → Google)
                               │
                          Insights tab (index.html + main.js) · timeline drawer
 ```
@@ -45,8 +44,6 @@ CCC exports (/opt/esw/ccc-exports/*.{env,ad1,ad2,veh,ttl})
 `sid TEXT PK, from_phone TEXT, to_phone TEXT, body TEXT, date_sent INTEGER, synced_at INTEGER`.
 Forward copies (`From +NNN:` outbound to Marco) are never stored; only `direction = inbound`.
 
-**`review_clicks`** — `token TEXT PK, estimate_key TEXT, job_id INTEGER, created_at INTEGER, clicked_at INTEGER DEFAULT 0, ua TEXT`.
-
 ### 3.2 DBF reader
 
 `_dbf_read(path) -> list[dict]`: pure-Python dBase III/IV reader (header: record count, header length, record length; field descriptors 32 bytes each; types C/N/F/D/L; memo fields ignored; `latin-1`). ~60 lines. Only ENV, AD1, AD2, VEH, TTL are read; LIN and the profile files are ignored.
@@ -59,12 +56,9 @@ Fields used: ENV `UNQFILE_ID, TRANS_TYPE, SUPP_NO, CREATE_DT`; AD1 `OWNR_FN, OWN
 - `sync_inbound_sms()`: Twilio `Messages.json?To=<shop>&DateSent>=<last synced day - 1>` paginated; insert-or-ignore. Uses the same credentials as `send_sms()`. If Twilio is unreachable the page still serves from local data.
 - Both are also callable via `POST /insights/sync` (admin, CF-Access gated) for a manual refresh button.
 
-### 3.4 Review link tracking
+### 3.4 (removed) Review link tracking
 
-- `render_template()` gets a new placeholder `{review_link}`. The stored review template is updated once (data migration) to use it instead of the literal Google URL; Marco can still edit the wording.
-- On send, a token (12 url-safe chars) is minted into `review_clicks` and `{review_link}` becomes `https://support.jjagpal.me/earlscheibconcord/r/<token>`.
-- `GET /earlscheibconcord/r/<token>` on the public webhook host: sets `clicked_at` if 0, records UA, responds `302` to `https://g.page/r/CcTxiBCbBDlEEBM/review`. Unknown token → 302 to the same Google link (never a dead end). No auth, no secret: the token is the capability.
-- Must be verified reachable without Cloudflare Access before the template migration runs (the admin hosts are Access-gated; the webhook host is public).
+Dropped from v1; see §2.
 
 ### 3.5 `GET /earlscheibconcord/insights?days=30|90|ytd`
 
@@ -79,7 +73,6 @@ Returns one JSON object. All amounts are floats, all dates ISO strings, all coun
   "funnel": [{"label":"Estimates","n":..},{"label":"Texted","n":..},{"label":"Replied","n":..},{"label":"Won after text","n":..},{"label":"Closed RO","n":..,"revenue":..}],
   "revenue_by_month": [{"month":"2026-08","closed_ros":11,"revenue":31677.0}],
   "template_reply_rate": {"24h": {"sent":72,"replied":30}, "3day": {...}, "review": {...}},
-  "review_clicks": {"sent":n,"clicked":n},
   "twilio_cost": 6.62,
   "warm_leads": [{"key","name","phone","last_reply_at","last_reply","estimate_total","days_since"}],   // replied after a text, no booking, no closed RO; newest first
   "bookings_upcoming": [{"key","name","phone","appointment_at","estimate_total","texted":bool}],
@@ -99,12 +92,12 @@ Rules:
 
 ### 3.6 `GET /earlscheibconcord/customer?key=<estimate_key>`
 
-Returns the timeline: `[{"t": iso, "kind": "estimate|text|delivery|reply|booking|ro_closed|review_click", "label": "...", "detail": "..."}]` sorted by time, plus the header (name, phone, vehicle, estimate total, status). Sources: `jobs`, `sms_log`, `inbound_sms`, `appointments`, `ro_exports`, `review_clicks`.
+Returns the timeline: `[{"t": iso, "kind": "estimate|text|delivery|reply|booking|ro_closed", "label": "...", "detail": "..."}]` sorted by time, plus the header (name, phone, vehicle, estimate total, status). Sources: `jobs`, `sms_log`, `inbound_sms`, `appointments`, `ro_exports`.
 
 ### 3.7 UI
 
 - **Tab**: "Insights" added to the top nav and the mobile bottom bar (sixth item; bar icons shrink to fit). Route `#insights` in `main.js`, same pattern as Schedules/Logs.
-- **Layout (mobile-first, in this order)**: period chips (30 · 90 · YTD) with a refresh button → **Call today** (warm leads, each row: name, days since reply, last reply snippet, estimate total, tap → opens Messages thread) → **This week** (upcoming bookings) → **No-shows** (hidden when empty) → **This month** tiles with prior-window delta arrows → **Follow-ups** funnel bars + template reply rates → **Revenue per CCC** monthly bars → footer line: Twilio cost, review clicks, placeholder-estimate count.
+- **Layout (mobile-first, in this order)**: period chips (30 · 90 · YTD) with a refresh button → **Call today** (warm leads, each row: name, days since reply, last reply snippet, estimate total, tap → opens Messages thread) → **This week** (upcoming bookings) → **No-shows** (hidden when empty) → **This month** tiles with prior-window delta arrows → **Follow-ups** funnel bars + template reply rates → **Revenue per CCC** monthly bars → footer line: Twilio cost, placeholder-estimate count.
 - **Charts**: plain HTML/CSS bars (no library), one accent hue plus gray, direct labels on every bar, table fallback not needed because bars are labelled.
 - **Timeline drawer**: opened from any customer name in Insights and from the Messages thread header; slides up on mobile, side panel on desktop; closes with the existing `[hidden]` rule pattern (explicit `.drawer[hidden]{display:none}`).
 - **Empty states**: every list has a one-line empty message; never a blank box.
@@ -116,19 +109,16 @@ Returns the timeline: `[{"t": iso, "kind": "estimate|text|delivery|reply|booking
 - Sync failures never break the page; the response carries `"synced_at"` for each source so the UI can show "exports synced 2h ago · texts synced 5m ago".
 - A malformed export set is skipped and logged once (by doc_id) — no retries every hour.
 - Twilio auth failure logs a warning and leaves `inbound_sms` as is.
-- `/r/<token>` never errors to the customer: any failure still redirects to Google.
 
 ### 3.9 Testing
 
 - `tests/test_dbf.py`: reads a fixture export set (copied from a real, anonymised set) and asserts the parsed fields.
 - `tests/test_insights.py`: seeds an in-memory `jobs.db` with a handful of estimates, sms_log rows, inbound_sms rows, appointments and ro_exports and asserts funnel counts, attribution, revenue, reply-time median, warm-lead and no-show membership, and period windows.
 - Acceptance: run the endpoint against a copy of the production DB for window 2026-05-13 → 2026-09-03 and match the audit numbers above.
-- Manual: send a review test to Jas's number, click the link, confirm `review_clicks.clicked_at` set and redirect lands on Google.
 
 ### 3.10 Rollout
 
 1. Migrations + DBF reader + syncs (no UI yet); deploy; confirm tables fill on the Pi.
 2. `/insights` + `/customer` endpoints; verify against audit numbers.
 3. Insights tab + timeline drawer; deploy.
-4. Review-link migration last, after confirming the public `/r/` route works through Cloudflare.
-5. Rollback per existing flow: `git reset --hard <sha>` + restart; new tables are additive and harmless if unused.
+4. Rollback per existing flow: `git reset --hard <sha>` + restart; new tables are additive and harmless if unused.
