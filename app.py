@@ -1666,6 +1666,191 @@ def sync_inbound_sms(fetch=None) -> int:
     return inserted
 
 
+# ---------------------------------------------------------------------------
+# INS-01: Insights
+# ---------------------------------------------------------------------------
+
+# Numbers that are the shop's own, not a customer's: the watcher's test
+# recipient and Marco's forwarding line. They never count as estimates,
+# replies or leads.
+TEST_PHONES = {"+15308450190", OPERATOR_FORWARD_NUMBER}
+# CCC's default "we haven't priced it yet" estimate total. An open export
+# still sitting at this number means nobody has written the real estimate.
+PLACEHOLDER_ESTIMATE = 472.5
+
+
+def _estimate_key_for(phone: str, vin: str, doc_id: str) -> str:
+    return f"{phone}|{vin}" if len(vin or "") == 17 else f"{phone}|{doc_id}"
+
+
+def _customer_index(con) -> dict:
+    """One record per real estimate_key with everything the insights need."""
+    con.row_factory = sqlite3.Row
+    idx: dict = {}
+    for j in con.execute("SELECT * FROM jobs WHERE is_test = 0 AND estimate_key NOT LIKE 'test|%' ORDER BY created_at, id"):
+        if j["phone"] in TEST_PHONES:
+            continue
+        c = idx.setdefault(j["estimate_key"], {
+            "key": j["estimate_key"], "name": j["name"], "phone": j["phone"], "vin": j["vin"] or "",
+            "vehicle": j["vehicle_desc"] or "", "created": j["created_at"], "first_sent": None, "texts_sent": 0,
+            "review_created": None, "booking": None, "replies": [], "ros": [], "estimate_total": 0.0,
+        })
+        c["created"] = min(c["created"], j["created_at"])
+        if j["job_type"] in ("24h", "3day") and j["sent"]:
+            c["texts_sent"] += 1
+            t = j["sent_at"] or j["send_at"]
+            c["first_sent"] = t if c["first_sent"] is None else min(c["first_sent"], t)
+        if j["job_type"] == "review" and c["review_created"] is None:
+            c["review_created"] = j["created_at"]
+    for a in con.execute("SELECT * FROM appointments WHERE unbooked_at = 0"):
+        if a["estimate_key"] in idx:
+            idx[a["estimate_key"]]["booking"] = {"at": a["appointment_at"], "created": a["created_at"]}
+    by_phone: dict = {}
+    for c in idx.values():
+        by_phone.setdefault(c["phone"], []).append(c)
+    for m in con.execute("SELECT from_phone, body, date_sent FROM inbound_sms ORDER BY date_sent"):
+        for c in by_phone.get(m["from_phone"], []):
+            if m["date_sent"] >= c["created"] - 86400:
+                c["replies"].append({"t": m["date_sent"], "body": m["body"]})
+    by_pv = {(c["phone"], c["vin"]): c for c in idx.values() if c["vin"]}
+    by_vin = {c["vin"]: c for c in idx.values() if c["vin"]}
+    for r in con.execute("SELECT * FROM ro_exports"):
+        c = by_pv.get((r["phone"], r["vin"])) or by_vin.get(r["vin"])
+        if not c:
+            continue
+        if r["closed"]:
+            c["ros"].append({"doc_id": r["doc_id"], "ro_in": r["ro_in"], "date_out": r["date_out"], "g_ttl": r["g_ttl"]})
+        elif r["g_ttl"] > c["estimate_total"]:
+            c["estimate_total"] = r["g_ttl"]
+    return idx
+
+
+def _day(ts: int) -> str:
+    return datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+
+
+def _won_after_text(c: dict) -> bool:
+    fs = c["first_sent"]
+    if fs is None:
+        return False
+    d0 = _day(fs)
+    if any((r["ro_in"] or r["date_out"]) >= d0 for r in c["ros"]):
+        return True
+    if c["booking"] and c["booking"]["created"] >= fs:
+        return True
+    if c["review_created"] and c["review_created"] >= fs:
+        return True
+    return False
+
+
+def _converted(c: dict) -> bool:
+    return bool(c["ros"] or c["booking"] or c["review_created"])
+
+
+def compute_insights(con, days, now: int) -> dict:
+    """Pure computation of the Insights payload (spec §3.5)."""
+    if days is None:
+        start = int(datetime(datetime.fromtimestamp(now).year, 1, 1).timestamp())
+        days_eff = max(1, (now - start) // 86400)
+    else:
+        days_eff = int(days)
+        start = now - days_eff * 86400
+    prev_start = start - days_eff * 86400
+    idx = _customer_index(con)
+    cur = [c for c in idx.values() if start <= c["created"] <= now]
+    prev = [c for c in idx.values() if prev_start <= c["created"] < start]
+
+    def texted(cs): return [c for c in cs if c["first_sent"] is not None]
+    def replied(cs): return [c for c in cs if any(r["t"] >= c["first_sent"] - 60 for r in c["replies"])]
+    def won(cs): return [c for c in cs if _won_after_text(c)]
+    def closed_after(cs): return [c for c in won(cs) if any((r["ro_in"] or r["date_out"]) >= _day(c["first_sent"]) for r in c["ros"])]
+
+    # shop totals by date_out inside the window (all closed ROs, matched or not)
+    def ro_rows(a, b):
+        return con.execute("SELECT g_ttl, date_out FROM ro_exports WHERE closed = 1 AND date_out >= ? AND date_out <= ?", (_day(a), _day(b))).fetchall()
+    ro_cur, ro_prev = ro_rows(start, now), ro_rows(prev_start, start - 1)
+    rev_cur = sum(r["g_ttl"] for r in ro_cur); rev_prev = sum(r["g_ttl"] for r in ro_prev)
+
+    def reply_median(a, b):
+        gaps = []
+        for m in con.execute("SELECT from_phone, date_sent FROM inbound_sms WHERE date_sent >= ? AND date_sent <= ?", (a, b)):
+            if m["from_phone"] in TEST_PHONES:
+                continue
+            nxt = con.execute("SELECT created_at FROM sms_log WHERE kind = 'reply' AND phone = ? AND created_at >= ? ORDER BY created_at LIMIT 1",
+                              (m["from_phone"], m["date_sent"])).fetchone()
+            if nxt and nxt[0] - m["date_sent"] <= 7 * 86400:
+                gaps.append((nxt[0] - m["date_sent"]) / 60.0)
+        if not gaps:
+            return 0.0
+        gaps.sort()
+        mid = len(gaps) // 2
+        return float(gaps[mid] if len(gaps) % 2 else (gaps[mid - 1] + gaps[mid]) / 2)
+
+    def bookings(cs): return [c for c in cs if c["booking"] and start <= c["booking"]["created"] <= now]
+    tiles = {
+        "estimates": {"value": len(cur), "prev": len(prev)},
+        "texted": {"value": len(texted(cur)), "prev": len(texted(prev))},
+        "replies": {"value": len(replied(texted(cur))), "prev": len(replied(texted(prev)))},
+        "bookings": {"value": len(bookings(idx.values())), "prev": len([c for c in idx.values() if c["booking"] and prev_start <= c["booking"]["created"] < start])},
+        "closed_ros": {"value": len(ro_cur), "prev": len(ro_prev)},
+        "revenue": {"value": round(rev_cur, 2), "prev": round(rev_prev, 2)},
+        "avg_ticket": {"value": round(rev_cur / len(ro_cur), 2) if ro_cur else 0.0, "prev": round(rev_prev / len(ro_prev), 2) if ro_prev else 0.0},
+        "marco_reply_median_min": {"value": round(reply_median(start, now), 1), "prev": round(reply_median(prev_start, start - 1), 1)},
+    }
+    t_cur, r_cur, w_cur, c_cur = texted(cur), replied(texted(cur)), won(cur), closed_after(cur)
+    funnel = [
+        {"label": "Estimates", "n": len(cur)},
+        {"label": "Texted", "n": len(t_cur)},
+        {"label": "Replied", "n": len(r_cur)},
+        {"label": "Won after text", "n": len(w_cur)},
+        {"label": "Closed RO", "n": len(c_cur), "revenue": round(sum(r["g_ttl"] for c in c_cur for r in c["ros"] if (r["ro_in"] or r["date_out"]) >= _day(c["first_sent"])), 2)},
+    ]
+    months: dict = {}
+    for r in con.execute("SELECT substr(date_out,1,7) m, COUNT(*) n, SUM(g_ttl) s FROM ro_exports WHERE closed = 1 AND date_out >= '2026-05' GROUP BY m ORDER BY m"):
+        months[r["m"]] = {"month": r["m"], "closed_ros": r["n"], "revenue": round(r["s"], 2)}
+    tpl = {}
+    for jt in ("24h", "3day", "review"):
+        sent_keys = [c for c in cur if con.execute("SELECT 1 FROM jobs WHERE estimate_key = ? AND job_type = ? AND sent = 1 AND is_test = 0", (c["key"], jt)).fetchone()]
+        rep = 0
+        for c in sent_keys:
+            row = con.execute("SELECT COALESCE(NULLIF(sent_at,0), send_at) FROM jobs WHERE estimate_key = ? AND job_type = ? AND sent = 1 AND is_test = 0", (c["key"], jt)).fetchone()
+            if row and any(r["t"] >= row[0] - 60 for r in c["replies"]):
+                rep += 1
+        tpl[jt] = {"sent": len(sent_keys), "replied": rep}
+    cost_row = con.execute("SELECT COUNT(*) FROM sms_log WHERE is_test = 0 AND status = 'sent' AND created_at >= ? AND created_at <= ?", (start, now)).fetchone()
+    twilio_cost = round(0.0083 * cost_row[0], 2)   # Twilio US SMS list price; replace with summed price once stored
+    warm = []
+    for c in idx.values():
+        if c["first_sent"] is None or _converted(c):
+            continue
+        rs = [r for r in c["replies"] if r["t"] >= c["first_sent"] - 60]
+        if not rs:
+            continue
+        last = rs[-1]
+        warm.append({"key": c["key"], "name": c["name"], "phone": c["phone"], "last_reply_at": last["t"], "last_reply": last["body"][:160],
+                     "estimate_total": c["estimate_total"], "days_since": int((now - last["t"]) // 86400)})
+    warm.sort(key=lambda w: -w["last_reply_at"])
+    upcoming, no_shows = [], []
+    for c in idx.values():
+        b = c["booking"]
+        if not b or c["ros"]:
+            continue
+        row = {"key": c["key"], "name": c["name"], "phone": c["phone"], "appointment_at": b["at"], "estimate_total": c["estimate_total"], "texted": c["first_sent"] is not None}
+        if b["at"] >= now - 86400:
+            upcoming.append(row)
+        else:
+            no_shows.append({**row, "days_overdue": int((now - b["at"]) // 86400)})
+    upcoming.sort(key=lambda r: r["appointment_at"]); no_shows.sort(key=lambda r: r["appointment_at"])
+    open_est = con.execute("SELECT COUNT(*), SUM(CASE WHEN ABS(g_ttl - ?) < 0.01 THEN 1 ELSE 0 END) FROM ro_exports WHERE closed = 0", (PLACEHOLDER_ESTIMATE,)).fetchone()
+    return {
+        "period": {"from": datetime.fromtimestamp(start).isoformat(timespec="seconds"), "to": datetime.fromtimestamp(now).isoformat(timespec="seconds"), "days": days_eff},
+        "tiles": tiles, "funnel": funnel, "revenue_by_month": list(months.values()), "template_reply_rate": tpl,
+        "twilio_cost": twilio_cost, "warm_leads": warm, "bookings_upcoming": upcoming, "no_shows": no_shows,
+        "placeholder_estimates": {"n": int(open_est[1] or 0), "of": int(open_est[0] or 0)},
+        "synced_at": {"ro_exports": int(_get_setting("ro_exports_synced_at", "0")), "inbound_sms": int(_get_setting("inbound_sms_synced_at", "0"))},
+    }
+
+
 def parse_bms(xml_bytes: bytes) -> dict:
     """Parse CCC BMS XML and return a dict with extracted fields."""
     try:
