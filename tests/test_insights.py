@@ -87,3 +87,21 @@ def test_ytd_includes_old_estimate_and_prev_window(tmp_path, monkeypatch):
     assert out["funnel"][0]["n"] == 5          # F now inside
     out30 = app.compute_insights(con, 30, NOW)
     assert out30["tiles"]["estimates"] == {"value": 4, "prev": 1}   # F sits in the previous 30-day window
+
+
+def test_timeline_orders_events(tmp_path, monkeypatch):
+    app, con = _boot(tmp_path, monkeypatch)
+    _seed(con)
+    tl = app.compute_timeline(con, "+19255550001|VINA00000000000A1", NOW)
+    assert tl["header"]["name"] == "Cust A" and tl["header"]["status"] == "closed"
+    kinds = [e["kind"] for e in tl["events"]]
+    labels = [e["label"] for e in tl["events"]]
+    # estimate, cancelled 3-day, 24h text, customer reply, Marco reply, RO closed.
+    # A's seeded 3-day follow-up is cancelled, and a cancelled follow-up is part
+    # of the story the timeline tells ("we did not keep nagging them"), so it is
+    # an event too — the brief's expected list omitted it.
+    assert kinds == ["estimate", "text", "text", "reply", "text", "ro_closed"]
+    assert labels[1] == "3day follow-up cancelled"
+    assert labels[2] == "24-hour follow-up sent"
+    assert tl["events"][-1]["detail"] == "$3,000 per CCC"
+    assert app.compute_timeline(con, "nope|nope", NOW) is None

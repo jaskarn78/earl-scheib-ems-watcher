@@ -1851,6 +1851,32 @@ def compute_insights(con, days, now: int) -> dict:
     }
 
 
+def compute_timeline(con, key: str, now: int) -> dict | None:
+    idx = _customer_index(con)
+    c = idx.get(key)
+    if not c:
+        return None
+    ev = [{"t": c["created"], "kind": "estimate", "label": "Estimate written", "detail": c["vehicle"] or ""}]
+    for j in con.execute("SELECT job_type, sent, sent_at, send_at, cancelled FROM jobs WHERE estimate_key = ? AND is_test = 0 ORDER BY id", (key,)):
+        if j["sent"]:
+            names = {"24h": "24-hour follow-up sent", "3day": "3-day check-in sent", "review": "Review request sent", "appt_reminder": "Appointment reminder sent"}
+            ev.append({"t": j["sent_at"] or j["send_at"], "kind": "text", "label": names.get(j["job_type"], j["job_type"]), "detail": ""})
+        elif j["cancelled"] and j["job_type"] in ("24h", "3day"):
+            ev.append({"t": j["send_at"], "kind": "text", "label": f"{j['job_type']} follow-up cancelled", "detail": "no longer needed"})
+    for r in c["replies"]:
+        ev.append({"t": r["t"], "kind": "reply", "label": "Customer replied", "detail": r["body"][:200]})
+    for m in con.execute("SELECT created_at, body FROM sms_log WHERE kind = 'reply' AND phone = ? AND is_test = 0 ORDER BY created_at", (c["phone"],)):
+        ev.append({"t": m["created_at"], "kind": "text", "label": "Marco replied", "detail": m["body"][:200]})
+    if c["booking"]:
+        ev.append({"t": c["booking"]["created"], "kind": "booking", "label": "Booked", "detail": datetime.fromtimestamp(c["booking"]["at"]).strftime("%a %b %d, %I:%M %p")})
+    for r in c["ros"]:
+        t = int(datetime.strptime(r["date_out"], "%Y-%m-%d").timestamp()) + 12 * 3600
+        ev.append({"t": t, "kind": "ro_closed", "label": "Repair order closed", "detail": f"${r['g_ttl']:,.0f} per CCC"})
+    ev.sort(key=lambda e: e["t"])
+    status = "closed" if c["ros"] else "booked" if c["booking"] else "replied" if c["replies"] else "texted" if c["first_sent"] else "estimate"
+    return {"header": {"name": c["name"], "phone": c["phone"], "vehicle": c["vehicle"], "estimate_total": c["estimate_total"], "status": status}, "events": ev}
+
+
 def parse_bms(xml_bytes: bytes) -> dict:
     """Parse CCC BMS XML and return a dict with extracted fields."""
     try:
@@ -3704,6 +3730,34 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 },
                 "sample_row":   sample_row,
             })
+            return
+
+        # INS-01: GET /insights?days=30|90|ytd — the whole Insights payload.
+        # Auth: CF Access (edge gate). Read-only aggregate over the local DB.
+        if path == "/earlscheibconcord/insights":
+            qs = parse_qs(parsed.query)
+            raw_days = qs.get("days", ["30"])[0].lower()
+            days = None if raw_days == "ytd" else max(1, min(int(raw_days) if raw_days.isdigit() else 30, 400))
+            con = get_db()
+            try:
+                self._send_json(200, compute_insights(con, days, int(time.time())))
+            finally:
+                con.close()
+            return
+
+        # INS-01: GET /customer?key=<estimate_key> — one customer's timeline.
+        # Auth: CF Access (edge gate).
+        if path == "/earlscheibconcord/customer":
+            key = parse_qs(parsed.query).get("key", [""])[0]
+            con = get_db()
+            try:
+                tl = compute_timeline(con, key, int(time.time()))
+            finally:
+                con.close()
+            if tl is None:
+                self._send_json(404, {"error": "unknown key"})
+            else:
+                self._send_json(200, tl)
             return
 
         # SPN-01: GET /schedules — returns the effective delay-hours for each
