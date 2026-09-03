@@ -2385,3 +2385,5 @@ a.booked-pill:hover { background-color: rgba(31, 122, 82, 0.18); box-shadow: 0 1
 .tl-ro_closed .tl-l{color:#2f7d4f}.tl-empty{padding:8px 10px;color:#6b7280;font-size:13px}
 
 .ins-hint{font-size:12px;color:var(--muted,#6b7280);margin:-6px 0 10px}
+
+.cancel-all-btn[hidden]{display:none}

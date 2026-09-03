@@ -873,6 +873,15 @@
     form.querySelector('.book-close-btn').addEventListener('click', () => { form.hidden = true; });
     form.querySelector('.book-save-btn').addEventListener('click', () => handleBook(group, form, errEl));
     unbookBtn.addEventListener('click', () => handleUnbook(group, unbookBtn, errEl));
+
+    // CAN-01: card-level cancel of all pending follow-ups (24h/3day), one confirm.
+    const cancelAllBtn = bookingEl.querySelector('.cancel-all-btn');
+    if (cancelAllBtn) {
+      const pending = (group.jobs || []).filter((j) => j.sent !== 1 && j.cancelled !== 1
+        && (j.job_type === '24h' || j.job_type === '3day'));
+      cancelAllBtn.hidden = pending.length === 0;
+      cancelAllBtn.addEventListener('click', () => handleCancelAll(group, pending, cancelAllBtn, errEl));
+    }
   }
 
   async function handleBook(group, formEl, errEl) {
@@ -905,6 +914,36 @@
       showEntryError(errEl, 'Network error — please retry');
       btnEl.disabled = false;
     }
+  }
+
+  async function handleCancelAll(group, pending, btnEl, errEl) {
+    const who = group.name || formatPhone(group.phone) || 'this customer';
+    const n = pending.length;
+    if (!n) return;
+    if (!window.confirm(`Cancel ${n === 1 ? 'the pending follow-up text' : `all ${n} pending follow-up texts`} for ${who}?`)) return;
+    btnEl.disabled = true;
+    errEl.hidden = true; errEl.textContent = '';
+    const failed = [];
+    for (const job of pending) {
+      try {
+        const resp = await fetch(`${API_BASE}/queue`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: job.id }),
+        });
+        if (!resp.ok) failed.push(job.job_type);
+      } catch (err) {
+        failed.push(job.job_type);
+      }
+    }
+    if (failed.length) {
+      errEl.textContent = `Could not cancel: ${failed.join(', ')}. Try the individual Cancel buttons.`;
+      errEl.hidden = false;
+      btnEl.disabled = false;
+    } else {
+      btnEl.hidden = true;
+    }
+    fetchQueue();
   }
 
   async function handleUnbook(group, btnEl, errEl) {
