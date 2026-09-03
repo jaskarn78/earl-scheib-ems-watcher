@@ -119,8 +119,11 @@ _last_gated_log_ts = 0
 # INS-01: how often the scheduler refreshes the Insights source data
 # (CCC EMS exports + Twilio inbound). _insights_last_sync starts at 0 so the
 # first loop iteration after startup syncs once, then hourly thereafter.
+# The sync runs on its own thread, so the lock keeps a slow run from
+# overlapping the next hour's tick.
 _INSIGHTS_SYNC_EVERY = 3600
 _insights_last_sync = 0
+_INSIGHTS_SYNC_LOCK = threading.Lock()
 
 # USH-01: Twilio Messages API cache for the admin Logs tab. Keyed by
 # (days, status, direction, limit). 60s TTL is plenty — the UI polls on the
@@ -1327,6 +1330,27 @@ def _get_twilio_messages_cached(
 # Scheduler loop
 # ---------------------------------------------------------------------------
 
+def _run_insights_sync():
+    """Refresh the Insights source data. Runs on its own daemon thread.
+
+    Never raises: the caller is a bare Thread with nobody to catch for it, and
+    the scheduler must not care whether this succeeded. If the previous run is
+    still going (slow Twilio pagination), this tick is skipped rather than
+    queued — the next hourly tick picks up whatever was missed.
+    """
+    if not _INSIGHTS_SYNC_LOCK.acquire(blocking=False):
+        log.info("insights sync still running — skipping this tick")
+        return
+    try:
+        n_ro = sync_ro_exports()
+        n_sms = sync_inbound_sms()
+        log.info("insights sync: ro_exports+%d inbound_sms+%d", n_ro, n_sms)
+    except Exception as exc:
+        log.warning("insights sync failed (non-fatal): %s", exc)
+    finally:
+        _INSIGHTS_SYNC_LOCK.release()
+
+
 def scheduler_loop():
     """Background thread: fires due jobs every 30 seconds.
 
@@ -1352,15 +1376,13 @@ def scheduler_loop():
                     _last_gated_log_ts = now
             # INS-01: refresh the Insights source data hourly (and once at
             # startup). Deliberately NOT gated on auto_send_enabled — reading
-            # CCC exports and Twilio history sends nothing to customers.
+            # CCC exports and Twilio history sends nothing to customers. It runs
+            # on its own thread so a slow Twilio pagination cannot delay the
+            # 30-second job-fire tick; the stamp is taken before the run so a
+            # long sync does not immediately re-trigger itself.
             if time.time() - _insights_last_sync >= _INSIGHTS_SYNC_EVERY:
                 _insights_last_sync = time.time()
-                try:
-                    n_ro = sync_ro_exports()
-                    n_sms = sync_inbound_sms()
-                    log.info("insights sync: ro_exports+%d inbound_sms+%d", n_ro, n_sms)
-                except Exception as exc:
-                    log.warning("insights sync failed (non-fatal): %s", exc)
+                threading.Thread(target=_run_insights_sync, daemon=True).start()
         except Exception as exc:
             log.error("Scheduler error: %s", exc)
         time.sleep(30)
@@ -1683,8 +1705,36 @@ TEST_PHONES = {"+15308450190", OPERATOR_FORWARD_NUMBER}
 PLACEHOLDER_ESTIMATE = 472.5
 
 
-def _estimate_key_for(phone: str, vin: str, doc_id: str) -> str:
-    return f"{phone}|{vin}" if len(vin or "") == 17 else f"{phone}|{doc_id}"
+# A VIN is only an identifier at its full 17 characters. CCC writes "UNK" (or
+# nothing) when the estimator skipped the field, and treating those as VINs
+# collapses unrelated cars together and lets garbage-VIN ROs attach to whoever
+# happens to be last in the dict.
+VIN_LEN = 17
+
+
+def _ro_start_day(r) -> str:
+    """The day the car came in for this RO — ro_in, else date_out."""
+    return r["ro_in"] or r["date_out"] or ""
+
+
+def _pick_by_vin(candidates: list, r) -> dict | None:
+    """Choose which of several same-VIN estimates a VIN-only-matched RO belongs to.
+
+    The same car can be estimated more than once (a re-quote, or a second owner
+    phone). The RO belongs to the most recent estimate written on or before the
+    car came in; if the RO predates every estimate, fall back to the earliest.
+    """
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+    ordered = sorted(candidates, key=lambda c: c["created"])
+    day = _ro_start_day(r)
+    if day:
+        prior = [c for c in ordered if _day(c["created"]) <= day]
+        if prior:
+            return prior[-1]
+    return ordered[0]
 
 
 def _customer_index(con) -> dict:
@@ -1716,10 +1766,18 @@ def _customer_index(con) -> dict:
         for c in by_phone.get(m["from_phone"], []):
             if m["date_sent"] >= c["created"] - 86400:
                 c["replies"].append({"t": m["date_sent"], "body": m["body"]})
-    by_pv = {(c["phone"], c["vin"]): c for c in idx.values() if c["vin"]}
-    by_vin = {c["vin"]: c for c in idx.values() if c["vin"]}
+    by_pv: dict = {}
+    by_vin: dict = {}
+    for c in idx.values():
+        if len(c["vin"]) != VIN_LEN:
+            continue
+        by_pv[(c["phone"], c["vin"])] = c
+        by_vin.setdefault(c["vin"], []).append(c)
     for r in con.execute("SELECT * FROM ro_exports"):
-        c = by_pv.get((r["phone"], r["vin"])) or by_vin.get(r["vin"])
+        vin = r["vin"] or ""
+        if len(vin) != VIN_LEN:
+            continue
+        c = by_pv.get((r["phone"], vin)) or _pick_by_vin(by_vin.get(vin, []), r)
         if not c:
             continue
         if r["closed"]:
@@ -1769,10 +1827,15 @@ def compute_insights(con, days, now: int) -> dict:
     def won(cs): return [c for c in cs if _won_after_text(c)]
     def closed_after(cs): return [c for c in won(cs) if any((r["ro_in"] or r["date_out"]) >= _day(c["first_sent"]) for r in c["ros"])]
 
-    # shop totals by date_out inside the window (all closed ROs, matched or not)
-    def ro_rows(a, b):
-        return con.execute("SELECT g_ttl, date_out FROM ro_exports WHERE closed = 1 AND date_out >= ? AND date_out <= ?", (_day(a), _day(b))).fetchall()
-    ro_cur, ro_prev = ro_rows(start, now), ro_rows(prev_start, start - 1)
+    # Shop totals by date_out inside the window (all closed ROs, matched or not).
+    # date_out has day granularity while `start` is now-N*86400 rather than local
+    # midnight, so the previous window must end the day BEFORE the current
+    # window's first day: `_day(start - 1)` is still `_day(start)` and would
+    # count that day's closed ROs in both windows.
+    def ro_rows(day_from, day_to):
+        return con.execute("SELECT g_ttl, date_out FROM ro_exports WHERE closed = 1 AND date_out >= ? AND date_out <= ?", (day_from, day_to)).fetchall()
+    ro_cur = ro_rows(_day(start), _day(now))
+    ro_prev = ro_rows(_day(prev_start), _day(start - 86400))
     rev_cur = sum(r["g_ttl"] for r in ro_cur); rev_prev = sum(r["g_ttl"] for r in ro_prev)
 
     def reply_median(a, b):
@@ -1780,7 +1843,7 @@ def compute_insights(con, days, now: int) -> dict:
         for m in con.execute("SELECT from_phone, date_sent FROM inbound_sms WHERE date_sent >= ? AND date_sent <= ?", (a, b)):
             if m["from_phone"] in TEST_PHONES:
                 continue
-            nxt = con.execute("SELECT created_at FROM sms_log WHERE kind = 'reply' AND phone = ? AND created_at >= ? ORDER BY created_at LIMIT 1",
+            nxt = con.execute("SELECT created_at FROM sms_log WHERE kind = 'reply' AND is_test = 0 AND phone = ? AND created_at >= ? ORDER BY created_at LIMIT 1",
                               (m["from_phone"], m["date_sent"])).fetchone()
             if nxt and nxt[0] - m["date_sent"] <= 7 * 86400:
                 gaps.append((nxt[0] - m["date_sent"]) / 60.0)
@@ -1878,7 +1941,10 @@ def compute_timeline(con, key: str, now: int) -> dict | None:
         ev.append({"t": t, "kind": "ro_closed", "label": "Repair order closed", "detail": f"${r['g_ttl']:,.0f} per CCC"})
     ev.sort(key=lambda e: e["t"])
     status = "closed" if c["ros"] else "booked" if c["booking"] else "replied" if c["replies"] else "texted" if c["first_sent"] else "estimate"
-    return {"header": {"name": c["name"], "phone": c["phone"], "vehicle": c["vehicle"], "estimate_total": c["estimate_total"], "status": status}, "events": ev}
+    # A customer whose work is done has no open export left, so estimate_total
+    # is 0. Show what the job actually came to instead of a bare $0.
+    est_total = c["estimate_total"] or (max(r["g_ttl"] for r in c["ros"]) if c["ros"] else 0.0)
+    return {"header": {"name": c["name"], "phone": c["phone"], "vehicle": c["vehicle"], "estimate_total": est_total, "status": status}, "events": ev}
 
 
 def parse_bms(xml_bytes: bytes) -> dict:
