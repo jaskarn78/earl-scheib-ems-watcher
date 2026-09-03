@@ -2189,7 +2189,9 @@
     const viewIns   = document.getElementById('view-insights');
     if (!links.length || !viewQueue || !viewTpl) return;
 
+    const TITLES = { queue: 'Queue', templates: 'Templates', schedules: 'Schedules', logs: 'Logs', insights: 'Insights' };
     const activate = (target) => {
+      document.title = `Earl Scheib Concord — ${TITLES[target] || 'Follow-ups'}`;
       links.forEach((a) => {
         const on = a.getAttribute('data-view') === target;
         a.classList.toggle('is-active', on);
