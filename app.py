@@ -116,6 +116,12 @@ _AUTO_SEND_SEED = "1" if os.getenv("SCHEDULER_ENABLED", "0") == "1" else "0"
 _GATED_LOG_INTERVAL_S = 3600
 _last_gated_log_ts = 0
 
+# INS-01: how often the scheduler refreshes the Insights source data
+# (CCC EMS exports + Twilio inbound). _insights_last_sync starts at 0 so the
+# first loop iteration after startup syncs once, then hourly thereafter.
+_INSIGHTS_SYNC_EVERY = 3600
+_insights_last_sync = 0
+
 # USH-01: Twilio Messages API cache for the admin Logs tab. Keyed by
 # (days, status, direction, limit). 60s TTL is plenty — the UI polls on the
 # same 15s cadence as the queue, so on a quiet shop most requests hit cache.
@@ -1331,7 +1337,7 @@ def scheduler_loop():
     and continues to fire on operator click.
     """
     log.info("Scheduler started (auto_send_enabled=%s)", get_auto_send_enabled())
-    global _last_gated_log_ts
+    global _last_gated_log_ts, _insights_last_sync
     while True:
         try:
             if get_auto_send_enabled():
@@ -1344,6 +1350,17 @@ def scheduler_loop():
                         "— manual send-now still works"
                     )
                     _last_gated_log_ts = now
+            # INS-01: refresh the Insights source data hourly (and once at
+            # startup). Deliberately NOT gated on auto_send_enabled — reading
+            # CCC exports and Twilio history sends nothing to customers.
+            if time.time() - _insights_last_sync >= _INSIGHTS_SYNC_EVERY:
+                _insights_last_sync = time.time()
+                try:
+                    n_ro = sync_ro_exports()
+                    n_sms = sync_inbound_sms()
+                    log.info("insights sync: ro_exports+%d inbound_sms+%d", n_ro, n_sms)
+                except Exception as exc:
+                    log.warning("insights sync failed (non-fatal): %s", exc)
         except Exception as exc:
             log.error("Scheduler error: %s", exc)
         time.sleep(30)
@@ -4269,6 +4286,25 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 self._send_json(200, {"scheduled": 1, "send_at": new_send_at})
             else:
                 self._send_json(404, {"error": "not_found_or_not_pending"})
+            return
+
+        # INS-01: manual "sync now" for the Insights page. The scheduler
+        # already runs this hourly; this is the operator's impatience button.
+        # Each sync is independently guarded so a CCC share outage never
+        # blocks the Twilio pull (and vice versa).
+        if self.path.split("?")[0] == "/earlscheibconcord/insights/sync":
+            # Auth: CF Access (edge gate).
+            try:
+                n_ro = sync_ro_exports()
+            except Exception as exc:
+                log.warning("insights/sync ro_exports: %s", exc)
+                n_ro = 0
+            try:
+                n_sms = sync_inbound_sms()
+            except Exception as exc:
+                log.warning("insights/sync inbound_sms: %s", exc)
+                n_sms = 0
+            self._send_json(200, {"ro_exports": n_ro, "inbound_sms": n_sms})
             return
 
         # BOK-01: Book — customer committed to the work. Upserts the
