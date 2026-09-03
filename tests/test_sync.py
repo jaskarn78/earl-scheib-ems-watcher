@@ -58,3 +58,26 @@ def test_sync_ro_exports_upserts_and_is_incremental(tmp_path, monkeypatch):
     rows = con.execute("SELECT doc_id, closed, g_ttl FROM ro_exports").fetchall()
     assert rows == [("aaaa0001", 1, 1500.0)]
     assert app._get_setting("ro_exports_synced_at", "0") != "0"
+
+
+def test_sync_inbound_sms_inserts_only_inbound_and_paginates(tmp_path, monkeypatch):
+    app = _boot(tmp_path, monkeypatch)
+    pages = {
+        "first": {"messages": [
+            {"sid": "SM1", "direction": "inbound", "from": "+19255550101", "to": "+19256033934", "body": "Ok", "date_sent": "Wed, 03 Sep 2026 19:04:23 +0000"},
+            {"sid": "SM2", "direction": "outbound-api", "from": "+19256033934", "to": "+19254215772", "body": "From +19255550101: Ok", "date_sent": "Wed, 03 Sep 2026 19:04:23 +0000"},
+        ], "next_page_uri": "/2010-04-01/Accounts/AC/Messages.json?Page=1"},
+        "second": {"messages": [
+            {"sid": "SM3", "direction": "inbound", "from": "+19255550102", "to": "+19256033934", "body": "Hi", "date_sent": "Tue, 02 Sep 2026 22:51:00 +0000"},
+        ], "next_page_uri": None},
+    }
+    calls = []
+    def fetch(url):
+        calls.append(url)
+        return pages["second"] if "Page=1" in url else pages["first"]
+    assert app.sync_inbound_sms(fetch=fetch) == 2
+    assert app.sync_inbound_sms(fetch=fetch) == 0
+    con = sqlite3.connect(str(tmp_path / "jobs.db"))
+    rows = con.execute("SELECT sid, from_phone, body, date_sent FROM inbound_sms ORDER BY sid").fetchall()
+    assert rows == [("SM1", "+19255550101", "Ok", 1788462263), ("SM3", "+19255550102", "Hi", 1788389460)]
+    assert "DateSent%3E=" in calls[0] and calls[1].endswith("Page=1")

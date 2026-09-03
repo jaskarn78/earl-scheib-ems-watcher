@@ -405,6 +405,22 @@ def init_db():
     )
     con.commit()
 
+    # INS-01: local copy of Twilio inbound messages so history does not
+    # expire with the 30-day admin feed. Forward copies are never stored.
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS inbound_sms (
+            sid        TEXT PRIMARY KEY,
+            from_phone TEXT NOT NULL,
+            to_phone   TEXT NOT NULL DEFAULT '',
+            body       TEXT NOT NULL DEFAULT '',
+            date_sent  INTEGER NOT NULL,
+            synced_at  INTEGER NOT NULL
+        )
+        """
+    )
+    con.commit()
+
     # SPN-01: Marco-editable per-job-type send delays (in hours). Mirrors the
     # templates override pattern: absence of a row = use DEFAULT_SCHEDULES,
     # presence of a row = override. No seed INSERT — the override-vs-default
@@ -1577,6 +1593,60 @@ def sync_ro_exports(exports_dir: str | None = None) -> int:
         con.close()
     _set_setting("ro_exports_synced_at", str(int(time.time())))
     return upserted
+
+
+def _twilio_get_json(url: str) -> dict:
+    credentials = f"{TWILIO_API_KEY}:{TWILIO_API_SECRET}"
+    encoded = base64.b64encode(credentials.encode("utf-8")).decode("utf-8")
+    req = Request(url, method="GET")
+    req.add_header("Authorization", f"Basic {encoded}")
+    req.add_header("Accept", "application/json")
+    with urlopen(req, timeout=20) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def sync_inbound_sms(fetch=None) -> int:
+    """Pull inbound Twilio messages since (last sync - 1 day) into inbound_sms."""
+    from email.utils import parsedate_to_datetime
+    from urllib.parse import urlencode
+    fetch = fetch or _twilio_get_json
+    if fetch is _twilio_get_json and not (TWILIO_ACCOUNT_SID and TWILIO_API_KEY and TWILIO_API_SECRET):
+        return 0
+    last = int(_get_setting("inbound_sms_synced_at", "0"))
+    since = datetime.fromtimestamp(max(last - 86400, 1778630400), tz=timezone.utc)  # never before 2026-05-13
+    params = {"DateSent>": since.strftime("%Y-%m-%d"), "PageSize": "1000"}
+    if TWILIO_FROM:
+        params["To"] = TWILIO_FROM
+    url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json?{urlencode(params)}"
+    inserted = 0
+    con = get_db()
+    try:
+        while url:
+            try:
+                payload = fetch(url)
+            except Exception as exc:
+                log.warning("inbound_sms sync failed: %s", exc)
+                break
+            for m in payload.get("messages", []) or []:
+                if not str(m.get("direction", "")).startswith("inbound"):
+                    continue
+                raw_dt = m.get("date_sent") or m.get("date_created")
+                try:
+                    ts = int(parsedate_to_datetime(raw_dt).timestamp())
+                except Exception:
+                    continue
+                cur = con.execute(
+                    "INSERT OR IGNORE INTO inbound_sms (sid, from_phone, to_phone, body, date_sent, synced_at) VALUES (?,?,?,?,?,?)",
+                    (m.get("sid", ""), m.get("from", ""), m.get("to", ""), (m.get("body") or "")[:2000], ts, int(time.time())),
+                )
+                inserted += cur.rowcount
+            nxt = payload.get("next_page_uri")
+            url = ("https://api.twilio.com" + nxt) if nxt else None
+        con.commit()
+    finally:
+        con.close()
+    _set_setting("inbound_sms_synced_at", str(int(time.time())))
+    return inserted
 
 
 def parse_bms(xml_bytes: bytes) -> dict:
