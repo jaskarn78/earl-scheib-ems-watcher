@@ -272,7 +272,7 @@
   const API_BASE = (window.API_BASE_PATH || "/earlscheibconcord");
   const MIN=60000, HR=3600000, DAY=86400000;
   const POLL_MS = 15000;
-  const FORWARD_RE = /^From \+\d{10,15}:\s/;       // TwiML-Bin operator forward — drop from inbox
+  const FORWARD_RE = /^From \+\d{10,15}:(\s|$)/;   // TwiML-Bin operator forward — drop from inbox (FWD-02: also match an empty forwarded body)
   const JOB_LABEL = {estimate_24h:"Estimate sent",work_completed_3day:"Work completed",review_request:"Review request"};
   const AVATAR_COLORS = [["#1a2d4d","#42597e"],["#7a5230","#a8763f"],["#2c4a3b","#3f6b54"],["#4a2c3b","#7a4659"],["#2c3a4a","#465f7a"],["#5a4a2c","#7a6539"]];
 
