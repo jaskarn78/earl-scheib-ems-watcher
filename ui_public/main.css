@@ -961,6 +961,11 @@ a.booked-pill:hover { background-color: rgba(31, 122, 82, 0.18); box-shadow: 0 1
 .cal-cell--today .cal-day { color: var(--red); }
 .cal-appt {
   display: block;
+  width: 100%;
+  border: none;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
   background-color: rgba(31, 122, 82, 0.12);
   color: #12603f;
   border-radius: 6px;
@@ -972,7 +977,10 @@ a.booked-pill:hover { background-color: rgba(31, 122, 82, 0.18); box-shadow: 0 1
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.cal-appt:hover { background-color: rgba(31, 122, 82, 0.22); }
 .cal-appt-time { font-weight: 700; }
+/* CAL-02: card flashes red after a calendar tap jumps to it. */
+.estimate-card--flash { box-shadow: 0 0 0 3px var(--red), var(--shadow-lg); }
 @media (max-width: 720px) {
   .cal-cell { min-height: 54px; padding: 4px; }
   .cal-appt { font-size: 9.5px; padding: 2px 4px; }

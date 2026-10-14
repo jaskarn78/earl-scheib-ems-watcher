@@ -1020,9 +1020,9 @@
       const isToday = today.getFullYear() === y && today.getMonth() === m && today.getDate() === day;
       const dayAppts = (byDay.get(k) || []).slice().sort((a, b) => a.at - b.at);
       const chips = dayAppts.map((a) =>
-        `<span class="cal-appt" title="${escapeHTML(a.name)} — ${escapeHTML(formatAppt(a.at))}">`
+        `<button type="button" class="cal-appt" data-key="${escapeHTML(a.key)}" title="${escapeHTML(a.name)} — ${escapeHTML(formatAppt(a.at))}">`
         + `<span class="cal-appt-time mono">${escapeHTML(timeFmt.format(new Date(a.at * 1000)))}</span> `
-        + `${escapeHTML(a.name)}</span>`,
+        + `${escapeHTML(a.name)}</button>`,
       ).join('');
       html += `<div class="cal-cell${isToday ? ' cal-cell--today' : ''}${dayAppts.length ? ' cal-cell--busy' : ''}">`
         + `<span class="cal-day">${day}</span>${chips}</div>`;
@@ -1036,7 +1036,28 @@
     ));
   }
 
+  // CAL-02 (per Marco): tapping an appointment jumps to that customer's
+  // card below and flashes it. A search that hides the card is cleared.
+  function jumpToCard(key) {
+    const sel = `.estimate-card[data-estimate-key="${CSS.escape(key)}"]`;
+    let card = queueEl.querySelector(sel);
+    if (!card && currentSearch && searchEl) {
+      searchEl.value = '';
+      currentSearch = '';
+      renderQueue(lastJobs);
+      card = queueEl.querySelector(sel);
+    }
+    if (!card) return;
+    card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    card.classList.add('estimate-card--flash');
+    setTimeout(() => card.classList.remove('estimate-card--flash'), 1800);
+  }
+
   if (calEl) {
+    calGridEl.addEventListener('click', (e) => {
+      const chip = e.target.closest('.cal-appt');
+      if (chip && chip.dataset.key) jumpToCard(chip.dataset.key);
+    });
     calEl.querySelector('.cal-prev').addEventListener('click', () => {
       calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() - 1, 1);
       renderCalendar();
