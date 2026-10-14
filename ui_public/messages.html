@@ -458,9 +458,30 @@
     const rt=row.querySelector("[data-retry]"); if(rt) rt.addEventListener("click",()=>retrySend(m));
     return row;
   }
+  // MSG-02 (per Marco): Mark scheduled / Change date on the Queue saves a
+  // confirmation draft in sessionStorage and links here as #<phone>. The
+  // draft fills the composer once; Marco reviews it and taps Send. A
+  // customer with no texts yet gets an empty thread to send it from.
+  let draft=null;
+  try{
+    const d=JSON.parse(sessionStorage.getItem("esw-draft")||"null");
+    if(d&&d.phone&&d.text&&Date.now()-(d.at||0)<10*MIN){ d.phone=e164(d.phone); draft=d; }
+  }catch(e){}
+  function e164(p){ const d=String(p||"").replace(/\D/g,""); return d.length===10?"+1"+d:(d?"+"+d:""); }
+  function draftThread(phone){
+    if(!draft||draft.phone!==phone) return null;
+    return {phone, name:draft.name||null, job_type:null, msgs:[], color:colorFor(phone), ctx:"Appointment"};
+  }
+  function applyDraft(phone){
+    if(!draft||draft.phone!==phone||draft.used) return;
+    draft.used=true;
+    try{ sessionStorage.removeItem("esw-draft"); }catch(e){}
+    inputEl.value=draft.text; autoSize(); updateSendState();
+  }
+
   function renderThread(opts){
     opts=opts||{};
-    const t=threads.find(x=>x.phone===activephone);
+    const t=threads.find(x=>x.phone===activephone)||draftThread(activephone);
     if(!t){ emptyEl.style.display="flex"; messagesEl.style.display="none"; composerEl.style.display="none"; convHeadEl.style.visibility="hidden"; return; }
     emptyEl.style.display="none"; messagesEl.style.display="flex"; composerEl.style.display="block"; convHeadEl.style.visibility="visible";
     $("#chAvatar").textContent=initials(t); $("#chAvatar").style.background=`linear-gradient(160deg,${t.color[0]},${t.color[1]})`;
@@ -494,6 +515,7 @@
     activephone=phone; openedPhones.add(phone);
     appEl.classList.add("show-thread");
     renderList(); renderThread({forceBottom:true});
+    applyDraft(phone);
     setTimeout(()=>inputEl.focus(),60);
   }
 
@@ -503,7 +525,9 @@
   function openThreadFromHash(){
     let phone=""; try{ phone=decodeURIComponent(location.hash.slice(1)); }catch(e){ return; }
     if(!phone||phone===activephone) return;
-    if(threads.some(t=>t.phone===phone)) openThread(phone);
+    if(threads.some(t=>t.phone===phone)) { openThread(phone); return; }
+    const p=e164(phone);
+    if(threads.some(t=>t.phone===p)||draftThread(p)) openThread(p);
   }
 
   async function send(){

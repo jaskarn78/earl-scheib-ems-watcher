@@ -884,6 +884,24 @@
     }
   }
 
+  // MSG-02: the confirmation text drafted after Mark scheduled / Change
+  // date. Same voice as the appointment reminder template; Marco can edit
+  // it before he sends. Time is shop time (Pacific), like {appt_time}.
+  function bookingConfirmText(group, ts, isReschedule) {
+    const raw = (group.name || '').trim().split(/\s+/)[0] || '';
+    const first = raw ? raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase() : '';
+    const car = (group.vehicle_desc || '').trim().split(/\s+/).slice(0, 3).join(' ');
+    const when = new Date(ts * 1000).toLocaleString('en-US', {
+      timeZone: 'America/Los_Angeles', weekday: 'short', month: 'short', day: 'numeric',
+      hour: 'numeric', minute: '2-digit',
+    }).replace(/, (\d{1,2}:\d{2})/, ' at $1');
+    const hi = first ? `Hi ${first}, ` : 'Hi, ';
+    const what = car ? `your ${car}` : 'your vehicle';
+    return isReschedule
+      ? `${hi}this is Earl Scheib Of Concord. We've moved ${what} to ${when}. See you then! Questions? Call (925) 609-7780.`
+      : `${hi}this is Earl Scheib Of Concord. ${what.charAt(0).toUpperCase() + what.slice(1)} is booked for ${when}. See you then! Questions? Call (925) 609-7780.`;
+  }
+
   async function handleBook(group, formEl, errEl) {
     const btnEl = formEl.querySelector('.book-save-btn');
     const ts = dtpPickedTs(formEl);
@@ -899,6 +917,23 @@
       });
       if (resp.status === 200) {
         btnEl.textContent = 'Booked ✓';
+        // MSG-02 (per Marco): after booking or rebooking, open the
+        // customer's Messages thread with the confirmation text typed in,
+        // so he only taps Send.
+        if (group.phone && group.is_test !== 1 && !IS_LOCAL_ADMIN) {
+          try {
+            sessionStorage.setItem('esw-draft', JSON.stringify({
+              phone: group.phone,
+              name: group.name || '',
+              text: bookingConfirmText(group, ts, group.booked === 1),
+              at: Date.now(),
+            }));
+            setTimeout(() => {
+              window.location.href = `/earlscheib/messages#${encodeURIComponent(group.phone)}`;
+            }, 700);
+            return;
+          } catch (e) { /* no sessionStorage: stay on the card */ }
+        }
         setTimeout(fetchQueue, 600);
         setTimeout(() => {
           formEl.hidden = true;
