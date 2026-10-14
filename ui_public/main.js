@@ -1028,6 +1028,7 @@
         + `<span class="cal-day">${day}</span>${chips}</div>`;
     }
     calGridEl.innerHTML = html;
+    refreshApptPopup();
   }
 
   function escapeHTML(s) {
@@ -1053,10 +1054,75 @@
     setTimeout(() => card.classList.remove('estimate-card--flash'), 1800);
   }
 
+  // CAL-03 (per Marco): tapping an appointment opens a popup with the
+  // customer's details and the card's own buttons (Change date, Add to
+  // Google Calendar, Unmark, Cancel follow-ups) plus Call, Text and
+  // History, instead of scrolling down to the card.
+  const apptDrawer = document.getElementById('appt-drawer');
+  const apptBody   = document.getElementById('appt-body');
+  let apptKey = null;
+  let apptSig = '';
+
+  function apptGroup(key) {
+    return groupByEstimate(lastJobs || []).find((g) => g.key === key) || null;
+  }
+
+  function apptSignature(g) {
+    return [g.booked, g.appointment_at, g.jobs.map((j) => `${j.id}:${j.sent}:${j.cancelled}`).join(',')].join('|');
+  }
+
+  function openApptPopup(key) {
+    const group = apptGroup(key);
+    if (!group || !apptDrawer) { jumpToCard(key); return; }
+    apptKey = key;
+    apptSig = apptSignature(group);
+    apptBody.innerHTML = '';
+    const frag = buildEstimateCard(group, [], 0);
+    const card = frag.querySelector('.estimate-card');
+    card.classList.add('estimate-card--popup');
+    const tl = frag.querySelector('.timeline');
+    if (tl) tl.remove();
+    const acts = document.createElement('div');
+    acts.className = 'appt-actions';
+    acts.innerHTML = (group.phone
+      ? `<a class="btn btn-secondary" href="tel:${escapeHTML(group.phone)}">Call</a>`
+        + `<a class="btn btn-secondary" href="/earlscheib/messages#${encodeURIComponent(group.phone)}">Text</a>`
+      : '')
+      + '<button class="btn btn-ghost appt-history" type="button">History</button>';
+    acts.querySelector('.appt-history').addEventListener('click', () => {
+      closeApptPopup();
+      window.openTimeline(key);
+    });
+    card.appendChild(acts);
+    apptBody.appendChild(frag);
+    apptDrawer.hidden = false;
+  }
+
+  function closeApptPopup() {
+    if (apptDrawer) apptDrawer.hidden = true;
+    apptKey = null;
+  }
+
+  // Keep an open popup current after Change date / Unmark / Cancel
+  // follow-ups (each refetches the queue). Left alone while the date
+  // picker is open so a background refresh never wipes a half-picked date.
+  function refreshApptPopup() {
+    if (!apptKey || !apptDrawer || apptDrawer.hidden) return;
+    if (apptBody.querySelector('.book-form:not([hidden])')) return;
+    const group = apptGroup(apptKey);
+    if (!group) { closeApptPopup(); return; }
+    if (apptSignature(group) !== apptSig) openApptPopup(apptKey);
+  }
+
+  if (apptDrawer) {
+    apptDrawer.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', closeApptPopup));
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeApptPopup(); });
+  }
+
   if (calEl) {
     calGridEl.addEventListener('click', (e) => {
       const chip = e.target.closest('.cal-appt');
-      if (chip && chip.dataset.key) jumpToCard(chip.dataset.key);
+      if (chip && chip.dataset.key) openApptPopup(chip.dataset.key);
     });
     calEl.querySelector('.cal-prev').addEventListener('click', () => {
       calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() - 1, 1);

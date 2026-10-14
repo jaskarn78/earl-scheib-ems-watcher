@@ -2395,3 +2395,9 @@ a.booked-pill:hover { background-color: rgba(31, 122, 82, 0.18); box-shadow: 0 1
 .ins-hint{font-size:12px;color:var(--muted,#6b7280);margin:-6px 0 10px}
 
 .cancel-all-btn[hidden]{display:none}
+
+/* CAL-03: appointment popup. The customer card without its text timeline,
+   flat inside the drawer panel, with Call / Text / History underneath. */
+.appt-drawer .estimate-card--popup{opacity:1;transform:none;animation:none;box-shadow:none;border:0;padding:0;background:transparent}
+.appt-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;padding-top:14px;border-top:1px solid var(--hairline,#e5e7eb)}
+.appt-actions .btn{text-decoration:none}

@@ -446,6 +446,17 @@
     </div>
   </div>
 
+  <!-- CAL-03: appointment popup. Opened by tapping an appointment on the
+       Scheduled calendar; holds that customer's card (details + buttons,
+       no text timeline). Same sheet/rail as the timeline drawer. -->
+  <div class="drawer appt-drawer" id="appt-drawer" hidden role="dialog" aria-modal="true" aria-label="Appointment">
+    <div class="drawer-scrim" data-close></div>
+    <div class="drawer-panel">
+      <div class="drawer-head"><div class="drawer-sub">Appointment</div><button class="btn btn-ghost" type="button" data-close aria-label="Close">✕</button></div>
+      <div id="appt-body"></div>
+    </div>
+  </div>
+
   <script src="/main.js" defer></script>
 </body>
 </html>
