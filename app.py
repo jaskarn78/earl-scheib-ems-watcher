@@ -1260,6 +1260,11 @@ def _fetch_twilio_messages(
             sms_log_by_body: dict[str, dict] = {}
             for sr in cur.fetchall():
                 body = sr["body"]
+                # Replies typed in the Messages tab are logged without a job_id.
+                # They carry no name, so skip them here and let the phone
+                # fallback below put the customer's name on the thread.
+                if not sr["job_id"]:
+                    continue
                 if body and body not in sms_log_by_body:
                     sms_log_by_body[body] = {
                         "job_id": sr["job_id"],
