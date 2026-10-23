@@ -3935,11 +3935,11 @@ NAV_HEADER = """<header class="topbar" role="banner">
     </div>
     <nav class="topnav" role="tablist" aria-label="Views">
       <a class="topnav-link" data-view="queue" href="/earlscheib#queue" role="tab" aria-selected="false">Queue</a>
+      <a class="topnav-link" data-view="scheduled" href="/earlscheib#scheduled" role="tab" aria-selected="false">Scheduled</a>
       <a class="topnav-link" data-external href="/earlscheib/messages" role="link">Messages</a>
-      <a class="topnav-link" data-view="templates" href="/earlscheib#templates" role="tab" aria-selected="false">Templates</a>
-      <a class="topnav-link" data-view="schedules" href="/earlscheib#schedules" role="tab" aria-selected="false">Timing</a>
       <a class="topnav-link" data-view="logs" href="/earlscheib#logs" role="tab" aria-selected="false">Logs</a>
       <a class="topnav-link" data-view="insights" href="/earlscheib#insights" role="tab" aria-selected="false">Insights</a>
+      <a class="topnav-link" data-view="settings" href="/earlscheib#settings" role="tab" aria-selected="false">Settings</a>
     </nav>
     <div class="stats" aria-label="Queue statistics">
       <span class="stat"><b id="stat-pending">0</b><span class="stat-label">pending</span></span>
@@ -3963,17 +3963,13 @@ NAV_BOTTOMNAV = """<nav class="bottomnav" role="tablist" aria-label="Sections">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
       <span class="bn-label">Queue</span>
     </a>
+    <a class="topnav-link bn-link" data-view="scheduled" href="/earlscheib#scheduled" role="tab" aria-selected="false" aria-label="Scheduled">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16.5" rx="2.5"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/><path d="M8.5 15l2.2 2.2 4.8-4.8"/></svg>
+      <span class="bn-label">Scheduled</span>
+    </a>
     <a class="topnav-link bn-link" data-external href="/earlscheib/messages" role="link" aria-label="Messages">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
       <span class="bn-label">Messages</span>
-    </a>
-    <a class="topnav-link bn-link" data-view="templates" href="/earlscheib#templates" role="tab" aria-selected="false" aria-label="Templates">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h6"/></svg>
-      <span class="bn-label">Templates</span>
-    </a>
-    <a class="topnav-link bn-link" data-view="schedules" href="/earlscheib#schedules" role="tab" aria-selected="false" aria-label="Timing">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-      <span class="bn-label">Timing</span>
     </a>
     <a class="topnav-link bn-link" data-view="logs" href="/earlscheib#logs" role="tab" aria-selected="false" aria-label="Logs">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
@@ -3982,6 +3978,10 @@ NAV_BOTTOMNAV = """<nav class="bottomnav" role="tablist" aria-label="Sections">
     <a class="topnav-link bn-link" data-view="insights" href="/earlscheib#insights" role="tab" aria-selected="false" aria-label="Insights">
       <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M4 20h16v-2H4v2zm2-4h3V9H6v7zm5 0h3V4h-3v12zm5 0h3v-6h-3v6z"/></svg>
       <span class="bn-label">Insights</span>
+    </a>
+    <a class="topnav-link bn-link" data-view="settings" href="/earlscheib#settings" role="tab" aria-selected="false" aria-label="Settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+      <span class="bn-label">Settings</span>
     </a>
   </nav>"""
 

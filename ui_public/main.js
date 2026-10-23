@@ -177,6 +177,11 @@
   // 'Add to Google Calendar' link is hidden only while the sync is actually
   // running (connected AND the Scheduled-view toggle is on).
   let gcalConnected = false;
+  // Which top-level view is showing (queue | scheduled | logs | insights |
+  // settings). renderGcal hides the connect banner on Settings, where the
+  // sync panel itself carries the Google button.
+  let currentView = 'queue';
+  let lastGcal = null;
   let gcalEnabled   = true;
   const gcalSyncActive = () => gcalConnected && gcalEnabled;
   let currentSearch = '';
@@ -1173,9 +1178,12 @@
 
   function renderGcal(g) {
     if (!gcalBar) return;
+    lastGcal = g;
+    const syncLink = document.getElementById('cal-sync-link');
     if (IS_LOCAL_ADMIN || !g || !g.configured) {
       gcalBar.hidden = true;
       if (gcalBanner) gcalBanner.hidden = true;
+      if (syncLink) syncLink.hidden = true;
       return;
     }
     const wasActive = gcalSyncActive();
@@ -1186,19 +1194,27 @@
 
     // Top banner: only while not connected. Hidden once he signs in.
     if (gcalBanner) {
-      gcalBanner.hidden = gcalConnected || gcalBannerSnoozed();
+      gcalBanner.hidden = gcalConnected || gcalBannerSnoozed() || currentView === 'settings';
       const showErr = !gcalConnected && gcalFlashKind === 'error' && !!gcalFlash;
       gcalBanner.classList.toggle('gcal-banner--error', showErr);
       if (gcalBannerText) gcalBannerText.textContent = showErr ? gcalFlash : GCAL_BANNER_TEXT;
       if (gcalBannerCta) gcalBannerCta.href = connectHref;
     }
 
-    // Scheduled-view panel. While not connected and the top banner is up,
-    // the banner is the one Connect button; the panel would only repeat it.
-    // It appears once he is connected, or if he dismissed the banner.
-    gcalBar.hidden = !gcalConnected && !!gcalBanner && !gcalBanner.hidden;
+    // Settings > Google Calendar panel (the banner is hidden on Settings, so
+    // there is only ever one Google button on screen).
+    gcalBar.hidden = false;
+    // Scheduled view: small status pill next to the month title.
+    if (syncLink) {
+      syncLink.hidden = !gcalConnected;
+      syncLink.classList.toggle('is-paused', gcalConnected && !gcalEnabled);
+      syncLink.classList.toggle('is-error', !!g.last_error);
+      const st = document.getElementById('cal-sync-text');
+      if (st) st.textContent = g.last_error ? 'Calendar sync problem' : (gcalEnabled ? 'Syncing to Google Calendar' : 'Calendar sync paused');
+    }
     gcalBar.classList.toggle('gsync--error', !!g.last_error);
     gcalBar.classList.toggle('gsync--off', gcalConnected && !gcalEnabled);
+    gcalBar.classList.toggle('gsync--new', !gcalConnected);
     if (gcalConnectEl) { gcalConnectEl.hidden = gcalConnected; gcalConnectEl.href = connectHref; }
     if (gcalToggleWrap) gcalToggleWrap.hidden = !gcalConnected;
     if (gcalToggle && !gcalToggle.disabled) gcalToggle.checked = gcalEnabled;
@@ -1258,8 +1274,7 @@
   if (gcalBannerX && gcalBanner) {
     gcalBannerX.addEventListener('click', () => {
       try { localStorage.setItem(GCAL_BANNER_SNOOZE_KEY, String(Date.now() + 7 * 86400 * 1000)); } catch (_) { /* private mode */ }
-      gcalBanner.hidden = true;
-      if (gcalBar && !gcalConnected) gcalBar.hidden = false;   // Connect moves into the Scheduled panel
+      gcalBanner.hidden = true;   // Connect stays available in Settings > Google Calendar
     });
   }
 
@@ -1295,8 +1310,8 @@
     if (gcalFlashKind === 'error') console.warn('gcal connect failed:', qs.get('why') || 'unknown');
     if (gcalFlashKind === 'error') { try { localStorage.removeItem(GCAL_BANNER_SNOOZE_KEY); } catch (_) { /* ignore */ } }
     setTimeout(() => { gcalFlash = ''; gcalFlashKind = ''; fetchDiagnostic(); }, 20000);
-    const chip = document.querySelector('.filter[data-filter="scheduled"]');
-    if (chip) chip.click();
+    const land = () => { if (window.eswActivate) window.eswActivate('settings', 'calendar'); };
+    if (window.eswActivate) land(); else document.addEventListener('DOMContentLoaded', () => setTimeout(land, 0), { once: true });
     qs.delete('gcal');
     qs.delete('why');
     const clean = window.location.pathname + (qs.toString() ? `?${qs}` : '') + window.location.hash;
@@ -2655,32 +2670,75 @@
 
   function wireTopnav() {
     const links = document.querySelectorAll('.topnav-link');
-    const viewQueue = document.getElementById('view-queue');
-    const viewTpl   = document.getElementById('view-templates');
-    const viewSched = document.getElementById('view-schedules');
-    const viewLogs  = document.getElementById('view-logs');
-    const viewIns   = document.getElementById('view-insights');
-    if (!links.length || !viewQueue || !viewTpl) return;
+    const viewQueue    = document.getElementById('view-queue');
+    const viewTpl      = document.getElementById('view-templates');
+    const viewSched    = document.getElementById('view-schedules');
+    const viewLogs     = document.getElementById('view-logs');
+    const viewIns      = document.getElementById('view-insights');
+    const viewSettings = document.getElementById('view-settings');
+    const paneCal      = document.getElementById('settings-calendar');
+    const schedHead    = document.getElementById('sched-head');
+    const chipsRail    = document.querySelector('#view-queue .filters-rail');
+    if (!links.length || !viewQueue) return;
 
-    const TITLES = { queue: 'Queue', templates: 'Templates', schedules: 'Timing', logs: 'Logs', insights: 'Insights' };
-    const activate = (target) => {
-      document.title = `Earl Scheib Concord — ${TITLES[target] || 'Follow-ups'}`;
+    // Old deep links (#templates, #schedules) land in their Settings section.
+    const LEGACY = { templates: 'templates', schedules: 'timing' };
+    const TITLES = { queue: 'Queue', scheduled: 'Scheduled', logs: 'Logs', insights: 'Insights', settings: 'Settings' };
+    let settingsPane = 'calendar';
+
+    const showPane = (pane) => {
+      settingsPane = ['calendar', 'timing', 'templates'].includes(pane) ? pane : 'calendar';
+      document.querySelectorAll('.seg__btn').forEach((b) => {
+        b.setAttribute('aria-selected', b.dataset.settings === settingsPane ? 'true' : 'false');
+      });
+      if (paneCal)   paneCal.hidden   = settingsPane !== 'calendar';
+      if (viewSched) viewSched.hidden = settingsPane !== 'timing';
+      if (viewTpl)   viewTpl.hidden   = settingsPane !== 'templates';
+      if (settingsPane === 'templates') loadTemplates(false);
+      if (settingsPane === 'timing')    loadSchedules(false);
+    };
+
+    // Queue and Scheduled share the cards view; Scheduled = the "scheduled"
+    // filter with its own header and no chips (the nav link replaces the chip).
+    const setQueueMode = (scheduled) => {
+      if (schedHead) schedHead.hidden = !scheduled;
+      if (chipsRail) chipsRail.hidden = scheduled;
+      const want = scheduled ? 'scheduled' : (currentFilter === 'scheduled' ? 'estimates' : currentFilter);
+      if (want !== currentFilter) {
+        currentFilter = want;
+        document.querySelectorAll('#view-queue .filter').forEach((b) => {
+          b.setAttribute('aria-selected', b.getAttribute('data-filter') === want ? 'true' : 'false');
+        });
+        lastRenderKey = null;
+        renderQueue(lastJobs);
+      }
+    };
+
+    const activate = (target, pane) => {
+      if (LEGACY[target]) { pane = LEGACY[target]; target = 'settings'; }
+      if (!TITLES[target]) target = 'queue';
+      currentView = target;
+      document.title = `Earl Scheib Concord — ${TITLES[target]}`;
       links.forEach((a) => {
         const on = a.getAttribute('data-view') === target;
         a.classList.toggle('is-active', on);
         a.setAttribute('aria-selected', on ? 'true' : 'false');
         if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
       });
-      viewQueue.hidden = target !== 'queue';
-      viewTpl.hidden   = target !== 'templates';
-      if (viewSched) viewSched.hidden = target !== 'schedules';
-      if (viewLogs)  viewLogs.hidden  = target !== 'logs';
-      if (viewIns)   viewIns.hidden   = target !== 'insights';
-      if (target === 'templates') loadTemplates(false);
-      if (target === 'schedules') loadSchedules(false);
-      if (target === 'logs')      loadTwilioMessages();
-      if (target === 'insights')  loadInsights();
+      const isCards = target === 'queue' || target === 'scheduled';
+      viewQueue.hidden = !isCards;
+      if (viewSettings) viewSettings.hidden = target !== 'settings';
+      if (viewLogs)     viewLogs.hidden     = target !== 'logs';
+      if (viewIns)      viewIns.hidden      = target !== 'insights';
+      if (isCards) setQueueMode(target === 'scheduled');
+      if (target === 'settings') showPane(pane || settingsPane);
+      if (target === 'logs')     loadTwilioMessages();
+      if (target === 'insights') loadInsights();
+      if (lastGcal) renderGcal(lastGcal);   // banner visibility depends on the view
+      const scroller = target === 'settings' ? viewSettings : (isCards ? viewQueue : null);
+      if (scroller) scroller.scrollTop = 0;
     };
+    window.eswActivate = activate;
 
     links.forEach((a) => {
       a.addEventListener('click', (ev) => {
@@ -2690,23 +2748,33 @@
         ev.preventDefault();
         const target = a.getAttribute('data-view') || 'queue';
         activate(target);
+        try { history.replaceState(null, '', `#${target}`); } catch (_) { /* ignore */ }
       });
     });
+    document.querySelectorAll('.seg__btn').forEach((b) => {
+      b.addEventListener('click', () => showPane(b.dataset.settings));
+    });
+    const syncLink = document.getElementById('cal-sync-link');
+    if (syncLink) {
+      syncLink.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        activate('settings', 'calendar');
+        try { history.replaceState(null, '', '#settings'); } catch (_) { /* ignore */ }
+      });
+    }
 
-    // Allow direct-link via hash (e.g. refreshes on /earlscheib#templates).
-    // The Queue link is /earlscheib#queue and #queue is the cards container:
-    // the browser's fragment scroll would land past the chips and search, so
-    // put the view back at the top (both scroll containers: window on
-    // desktop, the view itself on the mobile app-shell).
-    if (window.location.hash === '#queue') {
+    // Direct links via hash (refreshes on /earlscheib#scheduled, links from
+    // the Messages page). The Queue link is /earlscheib#queue and #queue is
+    // the cards container: the browser's fragment scroll would land past the
+    // chips and search, so put the view back at the top (both scroll
+    // containers: window on desktop, the view itself on the mobile app-shell).
+    const hash = (window.location.hash || '').replace('#', '');
+    if (hash === 'queue' || hash === '') {
       const toTop = () => { window.scrollTo(0, 0); viewQueue.scrollTop = 0; };
       toTop();
       window.addEventListener('load', () => requestAnimationFrame(toTop), { once: true });
     }
-    if (window.location.hash === '#templates') activate('templates');
-    if (window.location.hash === '#schedules') activate('schedules');
-    if (window.location.hash === '#logs')      activate('logs');
-    if (window.location.hash === '#insights')  activate('insights');
+    if (hash && hash !== 'queue') activate(hash);
   }
 
   // ---------- Logs view (USH-01) --------------------------------------
