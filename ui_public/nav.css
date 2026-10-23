@@ -9,100 +9,73 @@
      - main.css            (the SPA: queue / templates / schedules / logs)
      - messages.html <style> (the inbox: panes / threads / bubbles / composer)
    Those files MUST NOT redefine anything below.
-   ========================================================== */
 
-/* ---- palette aliases ----
-   main.css defines these :root vars; messages.html defines its own. Both
-   resolve --navy / --red / --amber identically, so nav.css just references
-   them. The fallbacks keep the bar styled even if a var is ever missing. */
+   Design pass 2026-10-23: tokens mirror main.css / messages.html :root
+   (--navy #1A2D4D, --red #C8202F, --green #1F7A52, --amber #B7791F); the
+   fallbacks keep the bar styled even if a var is ever missing.
+   ========================================================== */
 
 /* ============== Topbar ============== */
 .topbar {
   position: sticky;
   top: 0;
   z-index: 20;
-  background-color: var(--navy, #1a2d4d);
+  background-color: var(--navy, #1A2D4D);
   min-height: 64px;
-  padding: 0 32px;
+  padding: 0 clamp(16px, 3vw, 32px);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   column-gap: 24px;
   row-gap: 0;
-  box-shadow: 0 2px 8px rgba(26, 45, 77, 0.3);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 2px 8px rgba(20, 33, 59, 0.25);
 }
 /* Push stats + sync to the right edge so the row reads:
-   brand · nav | … | stats · sync. Auto-margin on .stats consumes all slack,
-   .sync sits flush right. When the row wraps (narrow viewports), stats and
-   sync drop to a second line together rather than spilling outside. */
+   brand · nav | … | stats · sync. */
 .topbar .stats { margin-left: auto; }
 
 /* ============== Topnav (WMH-04) ============== */
 .topnav {
   display: inline-flex;
   align-items: stretch;
-  gap: 4px;
+  gap: 2px;
   height: 64px;
 }
 .topnav-link {
   position: relative;
   font-family: "Inter", system-ui, sans-serif;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: rgba(255,255,255,0.65);
+  letter-spacing: 0;
+  text-transform: none;
+  color: rgba(255, 255, 255, 0.8);
   text-decoration: none;
-  padding: 0 14px;
+  padding: 0 12px;
   display: inline-flex;
   align-items: center;
-  transition: color 120ms ease, background-color 120ms ease;
+  border-radius: 8px 8px 0 0;
+  transition: color 160ms ease, background-color 160ms ease;
 }
 .topnav-link:hover {
   color: #ffffff;
-  background-color: rgba(255,255,255,0.08);
+  background-color: rgba(255, 255, 255, 0.06);
 }
-.topnav-link.is-active {
-  color: #ffffff;
-}
+.topnav-link.is-active { color: #ffffff; }
 .topnav-link.is-active::after {
   content: "";
   position: absolute;
-  left: 0;
-  right: 0;
+  left: 12px;
+  right: 12px;
   bottom: 0;
   height: 3px;
-  background-color: var(--red, #c8202f);
+  background-color: var(--red, #C8202F);
   border-radius: 3px 3px 0 0;
 }
 .topnav-link:focus-visible {
-  outline: 2px solid rgba(255,255,255,0.5);
-  outline-offset: -2px;
+  outline: 2px solid rgba(255, 255, 255, 0.85);
+  outline-offset: -4px;
+  box-shadow: none;
 }
-
-/* ============== Mobile bottom navigation (≤720px) ============== */
-/* Reuses .topnav-link for JS wiring; .bn-link adds the bottom-bar layout.
-   Hidden on desktop; revealed in the 720px media query below. */
-.bottomnav { display: none; }
-.bottomnav .bn-link {
-  flex: 1 1 0;
-  min-width: 0;
-  flex-direction: column;
-  justify-content: center;
-  gap: 4px;
-  height: auto;
-  padding: 9px 2px 7px;
-  font-size: 10px;
-  letter-spacing: 0.02em;
-  text-transform: none;
-  color: rgba(255,255,255,0.6);
-}
-.bottomnav .bn-link svg { width: 23px; height: 23px; display: block; }
-.bottomnav .bn-link .bn-label { line-height: 1; font-weight: 600; }
-.bottomnav .bn-link:hover { background: rgba(255,255,255,0.06); color: #fff; }
-.bottomnav .bn-link.is-active { color: #fff; background: transparent; }
-.bottomnav .bn-link.is-active svg { color: var(--red, #c8202f); }
-.bottomnav .bn-link::after { display: none !important; } /* kill the topnav underline */
 
 /* ============== Brand ============== */
 .brand {
@@ -117,11 +90,13 @@
   align-items: center;
   text-decoration: none;
   opacity: 1;
-  transition: opacity 120ms ease;
+  transition: opacity 160ms ease;
+  border-radius: 6px;
 }
 .brand-link:hover { opacity: 0.85; }
+.brand-link:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.85); outline-offset: 4px; box-shadow: none; }
 .brand-logo {
-  height: 32px;
+  height: 30px;
   width: auto;
   display: block;
   /* The logo is on white — invert to white so it reads on navy bg */
@@ -131,55 +106,54 @@
   display: inline-block;
   width: 1px;
   height: 28px;
-  background-color: rgba(255,255,255,0.2);
+  background-color: rgba(255, 255, 255, 0.2);
 }
 .brand-mode {
   font-family: "Inter", system-ui, sans-serif;
   font-weight: 500;
   font-size: 13px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: rgba(255,255,255,0.55);
+  color: rgba(255, 255, 255, 0.6);
 }
 
-/* ============== Stats ============== */
+/* ============== Stats: quiet segmented strip ============== */
 .stats {
   display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  color: rgba(255,255,255,0.6);
-  font-size: 13px;
-  background-color: rgba(255,255,255,0.08);
-  padding: 7px 16px;
-  border-radius: 999px;
-  border: 1px solid rgba(255,255,255,0.12);
+  align-items: stretch;
+  height: 36px;
+  color: rgba(255, 255, 255, 0.7);
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 12px;
+  background-color: rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  overflow: hidden;
 }
 .stat {
   display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 12px;
+  white-space: nowrap;
 }
+.stat + .stat { border-left: 1px solid rgba(255, 255, 255, 0.12); }
 .stat b {
-  font-family: "Inter", system-ui, sans-serif;
   font-weight: 700;
   font-size: 14px;
   color: #ffffff;
   font-variant-numeric: tabular-nums;
+  transition: color 160ms ease;
 }
-.stat-label {
-  font-size: 11.5px;
-  letter-spacing: 0.02em;
-}
-.stat-sep {
-  color: rgba(255,255,255,0.2);
-}
+/* failed > 0 turns that number red (lightened so it reads on navy). */
+.stat b.is-bad { color: #FF8A94; }
+.stat-label { color: rgba(255, 255, 255, 0.7); }
+.stat-sep { display: none; }
 
 /* ============== Sync status + refresh ============== */
 .sync {
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  color: rgba(255,255,255,0.55);
+  color: rgba(255, 255, 255, 0.7);
+  font-family: "Inter", system-ui, sans-serif;
   font-size: 13px;
   white-space: nowrap;
 }
@@ -187,57 +161,79 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background-color: var(--amber, #c8953f);
-  box-shadow: 0 0 0 3px rgba(200, 149, 63, 0.18);
+  background-color: var(--green, #1F7A52);
+  box-shadow: 0 0 0 3px rgba(31, 122, 82, 0.28);
   display: inline-block;
-  transition: transform 200ms ease, box-shadow 200ms ease;
+  transition: transform 200ms ease, box-shadow 200ms ease, background-color 200ms ease;
 }
-.sync-dot--pulse {
-  animation: syncPulse 600ms ease-out;
-}
+.sync-dot.is-stale { background-color: var(--amber, #B7791F); box-shadow: 0 0 0 3px rgba(183, 121, 31, 0.28); }
+.sync-dot.is-down { background-color: #FF8A94; box-shadow: 0 0 0 3px rgba(255, 138, 148, 0.28); }
+.sync-dot--pulse { animation: syncPulse 600ms ease-out; }
 @keyframes syncPulse {
-  0%   { transform: scale(1);   box-shadow: 0 0 0 3px rgba(200, 149, 63, 0.18); }
-  50%  { transform: scale(1.6); box-shadow: 0 0 0 8px rgba(200, 149, 63, 0.02); }
-  100% { transform: scale(1);   box-shadow: 0 0 0 3px rgba(200, 149, 63, 0.18); }
+  0%   { transform: scale(1);   }
+  50%  { transform: scale(1.5); }
+  100% { transform: scale(1);   }
 }
-.sync-caption {
-  font-variant-numeric: tabular-nums;
-}
+.sync-caption { font-variant-numeric: tabular-nums; }
 
 .refresh-btn {
-  background: transparent;
-  border: 1px solid rgba(255,255,255,0.2);
-  color: rgba(255,255,255,0.55);
-  width: 30px; height: 30px;
-  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 0;
+  color: rgba(255, 255, 255, 0.85);
+  width: 36px; height: 36px;
+  border-radius: 10px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+  transition: color 160ms ease, background-color 160ms ease;
 }
-.refresh-btn:hover,
-.refresh-btn:focus-visible {
-  color: #ffffff;
-  border-color: rgba(255,255,255,0.5);
-  background-color: rgba(255,255,255,0.1);
-  outline: none;
+.refresh-btn svg { width: 16px; height: 16px; }
+.refresh-btn:hover { color: #ffffff; background-color: rgba(255, 255, 255, 0.18); }
+.refresh-btn:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.85); outline-offset: 2px; box-shadow: none; }
+.refresh-btn.spinning svg { animation: navSpin 700ms linear; }
+@keyframes navSpin { to { transform: rotate(360deg); } }
+
+/* ============== Mobile bottom navigation (≤720px) ============== */
+/* Reuses .topnav-link for JS wiring; .bn-link adds the bottom-bar layout.
+   White tab bar (not navy) so the red active state passes AA on a label.
+   Hidden on desktop; revealed in the 720px media query below. */
+.bottomnav { display: none; }
+.bottomnav .bn-link {
+  flex: 1 1 0;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  height: auto;
+  min-height: 56px;
+  padding: 8px 2px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink-3, #8592A6);
+  border-radius: 0;
 }
-.refresh-btn.spinning svg {
-  animation: spin 700ms linear;
-}
-@keyframes spin { to { transform: rotate(-360deg); } }
+.bottomnav .bn-link svg { width: 24px; height: 24px; display: block; }
+.bottomnav .bn-link .bn-label { line-height: 1; }
+.bottomnav .bn-link:hover { background: transparent; color: var(--ink, #14213B); }
+.bottomnav .bn-link.is-active { color: var(--red, #C8202F); background: transparent; }
+.bottomnav .bn-link.is-active svg { color: var(--red, #C8202F); }
+.bottomnav .bn-link::after { display: none !important; } /* kill the topnav underline */
+.bottomnav .bn-link:focus-visible { outline: 2px solid var(--focus, #2B5DB8); outline-offset: -4px; }
 
 /* ============== Mobile nav (≤720px) ============== */
 @media (max-width: 720px) {
   .topbar {
-    padding: 6px 16px;
+    padding: 0 16px;
     gap: 10px;
-    min-height: 44px;
+    min-height: 52px;
   }
   .brand, .brand-link { height: auto; }
-  .brand-logo { height: 22px; }
-  .sync-caption { font-size: 11px; }
+  .brand-logo { height: 24px; }
+  .sync { margin-left: auto; font-size: 12px; }
+  .refresh-btn { width: 36px; height: 36px; }
   .stats { display: none; } /* keep topbar clean on mobile */
   .topnav { display: none; }  /* nav moves to the fixed bottom bar */
   /* fixed app-style bottom tab bar (overridden to static by the app-shell
@@ -248,9 +244,9 @@
     position: fixed;
     left: 0; right: 0; bottom: 0;
     z-index: 40;
-    background: var(--navy, #1a2d4d);
-    border-top: 1px solid rgba(255,255,255,0.12);
-    box-shadow: 0 -2px 14px rgba(26,45,77,0.28);
+    background: var(--surface, #FFFFFF);
+    border-top: 1px solid var(--hairline, #E2E6EC);
+    box-shadow: 0 -4px 14px rgba(20, 33, 59, 0.06);
     padding-bottom: env(safe-area-inset-bottom);
     transform: translateZ(0);
     will-change: transform;
@@ -275,7 +271,7 @@
   .topbar { position: static; flex: 0 0 auto; }
   /* only the visible SPA view scrolls; hidden views are display:none */
   #view-queue, #view-templates, #view-schedules, #view-logs, #view-insights {
-    flex: 1 1 auto; min-height: 0; overflow-y: auto;
+    flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
     -webkit-overflow-scrolling: touch;
     padding-bottom: 24px;            /* no fixed-bar clearance needed anymore */
   }
