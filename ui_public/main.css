@@ -148,6 +148,10 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 /* Shared page shell: every view lines up on the same column. */
 .controls, .sched-calendar, .queue, .diagnostic, .templates, .schedules, .logs,
 #view-insights, .gcal-banner__inner {
+  /* width:100% matters on phones: the views are flex children of body
+     there, and auto margins stop the stretch, so without it a view
+     sizes to its content (one long nowrap reply = sideways scroll). */
+  width: 100%;
   max-width: var(--content-max);
   margin-left: auto;
   margin-right: auto;
@@ -1140,8 +1144,11 @@ a.booked-pill[href]:hover { background: #D8ECDF; }
 #view-insights { padding-top: 20px; padding-bottom: 40px; }
 .ins-toolbar { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; margin: 0 0 16px; }
 .ins-synced { margin-left: auto; font-size: 13px; color: var(--ink-3); }
-.ins-board { display: grid; grid-template-columns: 1fr; gap: 16px; margin-bottom: 16px; }
-@media (min-width: 900px) { .ins-board { grid-template-columns: 1fr 1fr; } }
+.ins-board { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; margin-bottom: 16px; }
+@media (min-width: 900px) { .ins-board { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+/* Grid/flex children default to min-width:auto, so one long customer reply
+   (nowrap .ins-sub) stretched the whole board past the phone width. */
+.ins-board > *, .ins-row > * { min-width: 0; }
 .ins-board .ins-card { margin-bottom: 0; }
 .ins-card { padding: 20px; margin-bottom: 16px; }
 .ins-card h2 { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 12px; }
