@@ -256,7 +256,26 @@
   .bk-label{margin:16px 0 8px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);}
   .bk-days{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 6px;scroll-snap-type:x proximity;scrollbar-width:none;}
   .bk-days::-webkit-scrollbar{display:none;}
-  .bk-label-row{display:flex;align-items:center;justify-content:space-between;}
+  .bk-quick{display:flex;gap:8px;flex-wrap:wrap;}
+  .bk-chip{border:1px solid var(--hairline-strong);background:var(--surface);border-radius:999px;padding:6px 12px;font:inherit;font-size:13px;font-weight:600;color:var(--ink);cursor:pointer;}
+  .bk-chip:hover{border-color:var(--ink-3);}
+  .bk-cal{border:1px solid var(--hairline);border-radius:12px;padding:10px 10px 8px;margin-top:10px;}
+  .bk-calhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}
+  .bk-month{font-weight:700;font-size:15px;}
+  .bk-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;}
+  .bk-gdow{font-size:11px;font-weight:600;color:var(--ink-3);padding:4px 0;}
+  .bk-gd{height:40px;border-radius:10px;border:1px solid transparent;background:none;font:inherit;font-size:14px;font-weight:600;color:var(--ink);display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;}
+  .bk-gd:hover:not([disabled]){border-color:var(--hairline-strong);}
+  .bk-gd[disabled]{color:#c4cbd6;cursor:default;}
+  .bk-gd.closed{text-decoration:line-through;}
+  .bk-gd.today{border-color:var(--ink-3);}
+  .bk-gd[aria-selected="true"]{background:var(--navy);border-color:var(--navy);color:#fff;}
+  .bk-dots{display:flex;gap:2px;margin-top:2px;height:4px;}
+  .bk-dots i{width:4px;height:4px;border-radius:50%;background:var(--red);}
+  .bk-gd[aria-selected="true"] .bk-dots i{background:#fff;}
+  .bk-legend{font-size:12px;color:var(--ink-3);margin-top:6px;display:flex;gap:14px;}
+  .bk-legend i{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--red);margin-right:5px;vertical-align:1px;}
+  .bk-slot.taken{color:#b3bac6;background:var(--surface-2);border-color:var(--hairline);}
   .bk-arrows{display:flex;gap:6px;}
   .bk-arrow{width:32px;height:28px;border:1px solid var(--hairline-strong);border-radius:8px;background:var(--surface);color:var(--ink);font:inherit;font-size:18px;line-height:1;cursor:pointer;}
   .bk-arrow:hover{border-color:var(--ink-3);}
@@ -410,8 +429,15 @@
   <div class="drawer-panel bk-panel">
     <div class="drawer-head"><div><div class="drawer-name" id="bk-title" tabindex="-1">Book</div><div class="drawer-sub" id="bk-sub"></div></div><button class="btn btn-ghost" type="button" data-bk-close aria-label="Close">✕</button></div>
     <p class="bk-current" id="bk-current" hidden></p>
-    <div class="bk-label bk-label-row"><span id="bk-days-label">Drop-off day</span><span class="bk-arrows"><button class="bk-arrow" type="button" data-bk-scroll="-1" aria-label="Earlier days">‹</button><button class="bk-arrow" type="button" data-bk-scroll="1" aria-label="Later days">›</button></span></div>
-    <div class="bk-days" id="bk-days" role="listbox" aria-labelledby="bk-days-label"></div>
+    <div class="bk-label" id="bk-days-label">Drop-off day</div>
+    <div class="bk-quick" id="bk-quick">
+      <button class="bk-chip" type="button" data-bk-quick="tomorrow">Tomorrow</button><button class="bk-chip" type="button" data-bk-quick="mon">Next Mon</button><button class="bk-chip" type="button" data-bk-quick="2w">In 2 weeks</button><button class="bk-chip" type="button" data-bk-quick="1m">In 1 month</button>
+    </div>
+    <div class="bk-cal">
+      <div class="bk-calhead"><div class="bk-month" id="bk-month"></div><div class="bk-arrows"><button class="bk-arrow" type="button" data-bk-month="-1" aria-label="Previous month">‹</button><button class="bk-arrow" type="button" data-bk-month="1" aria-label="Next month">›</button></div></div>
+      <div class="bk-grid" id="bk-days" role="listbox" aria-labelledby="bk-days-label"></div>
+      <div class="bk-legend"><span><i></i>jobs already booked that day</span><span>Sundays closed</span></div>
+    </div>
     <div class="bk-label" id="bk-slots-label">Time</div>
     <div class="bk-slots" id="bk-slots" role="listbox" aria-labelledby="bk-slots-label"></div>
     <p class="bk-note" id="bk-note"></p>
@@ -723,20 +749,46 @@
   const bkMidnight=d=>{const x=new Date(d);x.setHours(0,0,0,0);return x;};
   const bkTs=()=>Math.floor(new Date(bk.day.getFullYear(),bk.day.getMonth(),bk.day.getDate(),Math.floor(bk.mins/60),bk.mins%60).getTime()/1000);
   const bkWhen=ts=>new Date(ts*1000).toLocaleString("en-US",{weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"});
+  // BKT-02 (Jas, 10/23 "revamp the calendar selection"): month calendar with
+  // quick picks instead of a long day strip. Dots = jobs already booked that
+  // day (from /queue); Sundays and past days can't be picked; slots already
+  // booked that day are greyed but still pickable (two drop-offs can share a time).
+  const bkDayKey=d=>`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+  let bkBooked={days:{},slots:new Set()};
+  async function bkLoadBooked(){
+    try{
+      const r=await fetch(`${API_BASE}/queue?status=all`,{credentials:"same-origin",cache:"no-store"});
+      if(!r.ok) return;
+      const rows=await r.json(); const seen=new Set(); const days={}; const slots=new Set();
+      (Array.isArray(rows)?rows:(rows.rows||rows.items||[])).forEach(x=>{
+        if(!x||!x.appointment_at||!x.booked||x.is_test) return;
+        const id=x.estimate_key+"|"+x.appointment_at; if(seen.has(id)) return; seen.add(id);
+        const d=new Date(x.appointment_at*1000); const k=bkDayKey(d);
+        days[k]=(days[k]||0)+1; slots.add(k+"|"+(d.getHours()*60+d.getMinutes()));
+      });
+      bkBooked={days,slots};
+    }catch(e){ console.warn("booked days load failed",e); }
+  }
+  function bkPick(d){ bk.day=bkMidnight(d); if(bk.day.getDay()===0) bk.day.setDate(bk.day.getDate()+1); bk.viewY=bk.day.getFullYear(); bk.viewM=bk.day.getMonth(); bkRender(); }
   function bkRender(){
-    const today=bkMidnight(Date.now()); let html="";
-    // BKT-02: 120 days (Marco booked a job a month out and the old 30 ran out)
-    for(let i=0;i<120;i++){
-      const d=new Date(today); d.setDate(today.getDate()+i);
-      const sel=bk.day&&d.getTime()===bk.day.getTime();
-      html+=`<button type="button" class="bk-day" role="option" aria-selected="${sel}" data-i="${i}">`+
-        `<span class="bk-dow">${i===0?"Today":d.toLocaleDateString("en-US",{weekday:"short"})}</span>`+
-        `<span class="bk-dnum">${d.getDate()}</span><span class="bk-mon">${d.toLocaleDateString("en-US",{month:"short"})}</span></button>`;
+    const today=bkMidnight(Date.now());
+    if(bk.viewY==null&&bk.day){ bk.viewY=bk.day.getFullYear(); bk.viewM=bk.day.getMonth(); }
+    const first=new Date(bk.viewY,bk.viewM,1);
+    $("#bk-month").textContent=first.toLocaleDateString("en-US",{month:"long",year:"numeric"});
+    let html=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(d=>`<span class="bk-gdow">${d}</span>`).join("");
+    const lead=(first.getDay()+6)%7; for(let i=0;i<lead;i++) html+="<span></span>";
+    const dim=new Date(bk.viewY,bk.viewM+1,0).getDate();
+    for(let n=1;n<=dim;n++){
+      const d=new Date(bk.viewY,bk.viewM,n); const k=bkDayKey(d);
+      const past=d<today, sun=d.getDay()===0, sel=bk.day&&d.getTime()===bk.day.getTime();
+      const cnt=Math.min(bkBooked.days[k]||0,4);
+      html+=`<button type="button" class="bk-gd${sun?" closed":""}${d.getTime()===today.getTime()?" today":""}" role="option" aria-selected="${!!sel}" data-n="${n}"${past||sun?" disabled":""}>${n}<span class="bk-dots">${"<i></i>".repeat(cnt)}</span></button>`;
     }
     bkDays.innerHTML=html;
     const nowMins=new Date().getHours()*60+new Date().getMinutes();
     const isToday=bk.day&&bk.day.getTime()===today.getTime();
-    bkSlots.innerHTML=BK_SLOTS.map(m=>`<button type="button" class="bk-slot" role="option" data-m="${m}" aria-selected="${m===bk.mins}"${isToday&&m<=nowMins?" disabled":""}>${bkFmtSlot(m)}</button>`).join("");
+    const dk=bk.day?bkDayKey(bk.day):"";
+    bkSlots.innerHTML=BK_SLOTS.map(m=>`<button type="button" class="bk-slot${bkBooked.slots.has(dk+"|"+m)?" taken":""}" role="option" data-m="${m}" aria-selected="${m===bk.mins}"${isToday&&m<=nowMins?" disabled":""}${bkBooked.slots.has(dk+"|"+m)?' title="Another job is booked at this time"':""}>${bkFmtSlot(m)}</button>`).join("");
     const okSlot=!(isToday&&bk.mins<=nowMins);
     bkSave.disabled=!(bk.day&&okSlot);
     bkSave.textContent=bk.day&&okSlot?`${bk.rebook?"Move to":"Book"} ${bk.day.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})} · ${bkFmtSlot(bk.mins)}`:"Pick a time";
@@ -745,34 +797,42 @@
     if(!bkEl) return;
     bk.key=key; bk.phone=t.phone; bk.rebook=false; bkErr.hidden=true; bkCur.hidden=true;
     const tomorrow=bkMidnight(Date.now()); tomorrow.setDate(tomorrow.getDate()+1);
-    bk.day=tomorrow; bk.mins=9*60;
+    if(tomorrow.getDay()===0) tomorrow.setDate(tomorrow.getDate()+1);
+    bk.day=tomorrow; bk.mins=9*60; bk.viewY=tomorrow.getFullYear(); bk.viewM=tomorrow.getMonth();
     $("#bk-title").textContent=`Book ${t.name?t.name.split(/\s+/)[0].replace(/^./,c=>c.toUpperCase()):fmtPhone(t.phone)}`;
     $("#bk-sub").textContent=fmtPhone(t.phone);
     bkNote.textContent="";
     bkRender(); bkEl.hidden=false; setTimeout(()=>$("#bk-title").focus(),30);
     try{
-      const [a,s]=await Promise.all([
+      const [,a,s]=await Promise.all([
+        bkLoadBooked(),
         fetch(`${API_BASE}/appointment?estimate_key=${encodeURIComponent(key)}`,{credentials:"same-origin"}).then(r=>r.ok?r.json():null),
         fetch(`${API_BASE}/booking-texts`,{credentials:"same-origin"}).then(r=>r.ok?r.json():null),
       ]);
       if(a&&a.booked){
         bk.rebook=true; const d=new Date(a.appointment_at*1000);
-        if(d>=bkMidnight(Date.now())){ bk.day=bkMidnight(d); const m=d.getHours()*60+d.getMinutes(); if(BK_SLOTS.includes(m)) bk.mins=m; }
+        if(d>=bkMidnight(Date.now())){ bk.day=bkMidnight(d); bk.viewY=bk.day.getFullYear(); bk.viewM=bk.day.getMonth(); const m=d.getHours()*60+d.getMinutes(); if(BK_SLOTS.includes(m)) bk.mins=m; }
         bkCur.textContent=`Booked for ${bkWhen(a.appointment_at)}. Pick a new time to move it.`; bkCur.hidden=false;
       }
       if(s) bkNote.textContent=s.confirm_auto
         ? "A confirmation text goes out as soon as you save."
         : "The confirmation will be typed in below for you to send.";
       bkRender();
-      const selDay=bkDays.querySelector('[aria-selected="true"]'); if(selDay) selDay.scrollIntoView({block:"nearest",inline:"center"});
     }catch(e){ console.warn("book sheet load failed",e); }
   }
   function closeBook(){ if(bkEl) bkEl.hidden=true; }
   function showDone(msg){ if(!bkDone) return; bkDone.textContent=msg; bkDone.hidden=false; announce(msg); clearTimeout(showDone._t); showDone._t=setTimeout(()=>{bkDone.hidden=true;},6000); }
   if(bkEl){
-    bkDays.addEventListener("click",e=>{ const b=e.target.closest(".bk-day"); if(!b) return; const d=bkMidnight(Date.now()); d.setDate(d.getDate()+Number(b.dataset.i)); bk.day=d; bkRender(); });
-    // BKT-02: arrows page the day strip a week at a time (no scrollbar on a desktop mouse)
-    bkEl.querySelectorAll("[data-bk-scroll]").forEach(b=>b.addEventListener("click",()=>{ bkDays.scrollBy({left:Number(b.dataset.bkScroll)*7*66,behavior:"smooth"}); }));
+    bkDays.addEventListener("click",e=>{ const b=e.target.closest(".bk-gd:not([disabled])"); if(!b) return; bk.day=new Date(bk.viewY,bk.viewM,Number(b.dataset.n)); bkRender(); });
+    bkEl.querySelectorAll("[data-bk-month]").forEach(b=>b.addEventListener("click",()=>{ const v=new Date(bk.viewY,bk.viewM+Number(b.dataset.bkMonth),1); const t=bkMidnight(Date.now()); if(v<new Date(t.getFullYear(),t.getMonth(),1)) return; bk.viewY=v.getFullYear(); bk.viewM=v.getMonth(); bkRender(); }));
+    bkEl.querySelectorAll("[data-bk-quick]").forEach(b=>b.addEventListener("click",()=>{
+      const d=bkMidnight(Date.now()); const q=b.dataset.bkQuick;
+      if(q==="tomorrow") d.setDate(d.getDate()+1);
+      else if(q==="mon") d.setDate(d.getDate()+(((8-d.getDay())%7)||7));
+      else if(q==="2w") d.setDate(d.getDate()+14);
+      else if(q==="1m") d.setMonth(d.getMonth()+1);
+      bkPick(d);
+    }));
     bkSlots.addEventListener("click",e=>{ const b=e.target.closest(".bk-slot:not([disabled])"); if(!b) return; bk.mins=Number(b.dataset.m); bkRender(); });
     bkEl.querySelectorAll("[data-bk-close]").forEach(b=>b.addEventListener("click",closeBook));
     document.addEventListener("keydown",e=>{ if(e.key==="Escape"&&!bkEl.hidden) closeBook(); });
