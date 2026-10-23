@@ -159,6 +159,24 @@ SETMORE_REMINDER_KEY = "setmore_arm_reminder"
 SETMORE_LOOKAHEAD_DAYS = 120
 SETMORE_ESTIMATE_MAX_AGE_DAYS = 90
 
+# RPL-01 (R-0007): a customer who texts the shop after the estimate is in a
+# conversation with Marco; the canned 24h / 3-day check-ins must not land in
+# the middle of it. Like a booking, the pause is computed (inbound_sms row
+# from the estimate's phone dated at/after the estimate), so it needs no
+# state and Send now still sends a paused row on purpose. Absent row = ON.
+REPLY_PAUSE_KEY = "reply_pause_enabled"
+REPLY_PAUSE_TYPES = ("24h", "3day")
+# Inbound texts are refreshed this often for the cards, and again right
+# before the scheduler sends a follow-up if the last good read is older
+# than INBOUND_FRESH_S. If Twilio cannot be read for INBOUND_STALE_HOLD_S,
+# follow-ups wait rather than risk landing mid-conversation.
+INBOUND_SYNC_EVERY_S = 300
+INBOUND_FRESH_S = 60
+INBOUND_STALE_HOLD_S = 900
+_inbound_last_kick = 0.0
+_inbound_last_ok = 0.0
+_INBOUND_SYNC_LOCK = threading.Lock()
+
 # WNC-01: Persistent auto-send toggle backed by the app_settings DB table.
 # The SCHEDULER_ENABLED env var is only a first-boot seed — once the
 # app_settings row exists, env changes have no effect. The DB value is the
@@ -543,6 +561,8 @@ def init_db():
         )
         """
     )
+    # RPL-01: the reply-pause lookups are by sender phone + date.
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_inbound_sms_from ON inbound_sms (from_phone, date_sent)")
     con.commit()
 
     # SPN-01: Marco-editable per-job-type send delays (in hours). Mirrors the
@@ -2374,7 +2394,7 @@ def scheduler_loop():
     and continues to fire on operator click.
     """
     log.info("Scheduler started (auto_send_enabled=%s)", get_auto_send_enabled())
-    global _last_gated_log_ts, _insights_last_sync, _gcal_last_kick
+    global _last_gated_log_ts, _insights_last_sync, _gcal_last_kick, _inbound_last_kick
     while True:
         try:
             # BKT-01 / R-0003: appointment reminders and review requests
@@ -2405,6 +2425,11 @@ def scheduler_loop():
             if time.time() - _insights_last_sync >= _INSIGHTS_SYNC_EVERY:
                 _insights_last_sync = time.time()
                 threading.Thread(target=_run_insights_sync, daemon=True).start()
+            # RPL-01: keep inbound texts fresh so cards show "customer
+            # replied" within minutes. Reads only; not gated on auto-send.
+            if time.time() - _inbound_last_kick >= INBOUND_SYNC_EVERY_S:
+                _inbound_last_kick = time.time()
+                threading.Thread(target=_run_inbound_sync, daemon=True).start()
             # CAL-04: mirror bookings to Google Calendar. Not gated on
             # auto_send_enabled either (sends nothing to customers); the
             # kick is a no-op until Marco has connected.
@@ -2441,6 +2466,7 @@ def _fire_due_jobs(only_types=(), exclude_types=()):
         if exclude_types:
             rows = [r for r in rows if r["job_type"] not in exclude_types]
         rows = _drop_stale_rows(cur, rows, now)
+        rows = _drop_reply_paused_rows(cur, rows, now)
         for row in rows:
             job_id = row["id"]
             job_type = row["job_type"]
@@ -2841,12 +2867,22 @@ _TWILIO_MAX_PAGES = 50
 
 
 def sync_inbound_sms(fetch=None) -> int:
-    """Pull inbound Twilio messages since (last sync - 1 day) into inbound_sms."""
+    """Pull inbound Twilio messages since (last sync - 1 day) into inbound_sms.
+    RPL-01: serialized (the Insights thread, the 5-minute refresh and the
+    pre-send check all call it) and stamps _inbound_last_ok on a clean read."""
+    with _INBOUND_SYNC_LOCK:
+        return _sync_inbound_sms(fetch)
+
+
+def _sync_inbound_sms(fetch=None) -> int:
+    global _inbound_last_ok
     from email.utils import parsedate_to_datetime
     from urllib.parse import urlencode
     fetch = fetch or _twilio_get_json
     if fetch is _twilio_get_json and not (TWILIO_ACCOUNT_SID and TWILIO_API_KEY and TWILIO_API_SECRET):
+        _inbound_last_ok = time.time()   # no Twilio, nothing to read (and nothing can send)
         return 0
+    ok = True
     last = int(_get_setting("inbound_sms_synced_at", "0"))
     since = datetime.fromtimestamp(max(last - 86400, 1778630400), tz=timezone.utc)  # never before 2026-05-13
     params = {"DateSent>": since.strftime("%Y-%m-%d"), "PageSize": "1000"}
@@ -2863,6 +2899,7 @@ def sync_inbound_sms(fetch=None) -> int:
                 payload = fetch(url)
             except Exception as exc:
                 log.warning("inbound_sms sync failed: %s", exc)
+                ok = False
                 break
             for m in payload.get("messages", []) or []:
                 if not str(m.get("direction", "")).startswith("inbound"):
@@ -2885,7 +2922,72 @@ def sync_inbound_sms(fetch=None) -> int:
     finally:
         con.close()
     _set_setting("inbound_sms_synced_at", str(int(time.time())))
+    if ok:
+        _inbound_last_ok = time.time()
     return inserted
+
+
+# ---------------------------------------------------------------------------
+# RPL-01 (R-0007): customer replied -> 24h / 3-day check-ins pause
+# ---------------------------------------------------------------------------
+
+def _reply_pause_enabled() -> bool:
+    return _get_setting(REPLY_PAUSE_KEY, "1") != "0"
+
+
+def _reply_paused(cur, row) -> bool:
+    """True when this pending 24h / 3-day row's customer has texted the shop
+    at or after the estimate came in (the row's created_at, which re-saves
+    keep). Same phone format on both sides (E.164 from clean_phone / Twilio)."""
+    if row["job_type"] not in REPLY_PAUSE_TYPES or not row["phone"]:
+        return False
+    return cur.execute(
+        "SELECT 1 FROM inbound_sms WHERE from_phone = ? AND date_sent >= ? LIMIT 1",
+        (row["phone"], int(row["created_at"] or 0)),
+    ).fetchone() is not None
+
+
+def _run_inbound_sync():
+    """Daemon-thread body for the 5-minute refresh. Never raises."""
+    try:
+        sync_inbound_sms()
+    except Exception as exc:
+        log.warning("inbound refresh failed (non-fatal): %s", exc)
+
+
+def _drop_reply_paused_rows(cur, rows, now: int) -> list:
+    """RPL-01: drop 24h / 3-day rows whose customer has replied. Rows are not
+    modified, so they stay pending and Send now still sends them. Before any
+    such row is allowed out, inbound texts are re-read if the last good read
+    is older than INBOUND_FRESH_S; if Twilio has been unreadable for
+    INBOUND_STALE_HOLD_S, those rows wait this tick."""
+    if not rows or not _reply_pause_enabled():
+        return rows
+    keep, held = [], []
+    for r in rows:
+        if r["job_type"] in REPLY_PAUSE_TYPES:
+            if _reply_paused(cur, r):
+                continue
+            held.append(r)
+        else:
+            keep.append(r)
+    if not held:
+        return keep
+    if time.time() - _inbound_last_ok >= INBOUND_FRESH_S:
+        try:
+            sync_inbound_sms()
+        except Exception as exc:
+            log.warning("inbound check before send failed: %s", exc)
+    if time.time() - _inbound_last_ok >= INBOUND_STALE_HOLD_S:
+        log.warning("scheduler: holding %d follow-up(s): customer replies "
+                    "could not be read from Twilio", len(held))
+        return keep
+    for r in held:
+        if _reply_paused(cur, r):
+            log.info("Job %s paused: customer replied (RPL-01)", r["id"])
+        else:
+            keep.append(r)
+    return keep
 
 
 # ---------------------------------------------------------------------------
@@ -4872,7 +4974,11 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 "                AND a.unbooked_at = 0 AND a.source = 'setmore') AS gcal_synced, "
                 "       COALESCE((SELECT a.source FROM appointments a "
                 "         WHERE a.estimate_key = jobs.estimate_key "
-                "           AND a.unbooked_at = 0), '') AS appointment_source "
+                "           AND a.unbooked_at = 0), '') AS appointment_source, "
+                # RPL-01: latest customer text since the estimate came in.
+                "       COALESCE((SELECT MAX(i.date_sent) FROM inbound_sms i "
+                "         WHERE i.from_phone = jobs.phone "
+                "           AND i.date_sent >= jobs.created_at), 0) AS customer_replied_at "
                 "FROM jobs"
             )
             # GLV-02: "pending" means literally pending — exclude cancelled
@@ -4906,6 +5012,14 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 rows = [dict(r) for r in cur.fetchall()]
             finally:
                 con.close()
+            # RPL-01: reply_paused mirrors what the scheduler skips: a
+            # pending, unbooked 24h / 3-day row whose customer has replied.
+            pause_on = _reply_pause_enabled()
+            for r in rows:
+                r["reply_paused"] = int(bool(
+                    pause_on and r["job_type"] in REPLY_PAUSE_TYPES
+                    and r["customer_replied_at"] and not r["sent"]
+                    and not r["cancelled"] and not r["booked"]))
             self._send_json(200, rows)
             return
 

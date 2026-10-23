@@ -737,6 +737,7 @@ a.booked-pill[href]:hover { background: #D8ECDF; }
 .timeline__sent-stamp .mono { font-weight: 600; }
 .timeline__entry[data-state="cancelled"] .timeline__sent-stamp,
 .timeline__entry[data-suppressed="1"] .timeline__sent-stamp { background: var(--surface-2); color: var(--ink-2); }
+.timeline__entry[data-reply-paused="1"] .timeline__sent-stamp { background: var(--surface-2); color: var(--ink-2); }  /* RPL-01 */
 .manual-tag { background: var(--navy-soft); color: var(--navy); }
 
 .sms-preview { margin: 0; display: flex; flex-direction: column; gap: 6px; }

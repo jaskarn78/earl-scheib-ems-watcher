@@ -207,7 +207,7 @@
 
   function jobsRenderKey(jobs, filter, search, sort) {
     const parts = (jobs || []).map((j) =>
-      `${j.id}:${j.sent || 0}:${j.send_at || 0}:${j.sent_at || 0}:${j.send_at_manual || 0}:${j.booked || 0}:${j.appointment_at || 0}:${j.appointment_source || ''}`,
+      `${j.id}:${j.sent || 0}:${j.send_at || 0}:${j.sent_at || 0}:${j.send_at_manual || 0}:${j.booked || 0}:${j.appointment_at || 0}:${j.appointment_source || ''}:${j.reply_paused || 0}`,
     );
     return `${filter}|${search}|${sort}|${parts.join(',')}`;
   }
@@ -560,7 +560,7 @@
     // One primary action per card: the first pending "Send now" is red,
     // any further pending ones step down to secondary.
     const sendBtns = timeline.querySelectorAll(
-      '.timeline__entry[data-state="pending"]:not([data-suppressed]) .send-now-btn:not([hidden])',
+      '.timeline__entry[data-state="pending"]:not([data-suppressed]):not([data-reply-paused]) .send-now-btn:not([hidden])',
     );
     sendBtns.forEach((b, i) => {
       if (i > 0) { b.classList.remove('btn-primary'); b.classList.add('btn-secondary'); }
@@ -622,6 +622,18 @@
       const cBtn = frag.querySelector('.cancel-btn');
       if (sBtn) sBtn.hidden = true;
       if (cBtn) cBtn.hidden = true;
+    } else if (job.reply_paused === 1) {
+      // RPL-01 (R-0007): the customer texted after the estimate, so the
+      // scheduler holds this check-in. Send now and Cancel stay: Marco can
+      // still send it on purpose, or drop it.
+      const stampEl = frag.querySelector('.timeline__sent-stamp');
+      stampEl.hidden = false;
+      stampEl.textContent = 'Paused · customer replied'
+        + (job.customer_replied_at ? ' ' + formatWhen(job.customer_replied_at) : '');
+      frag.querySelector('.job-send').hidden = true;
+      li.dataset.replyPaused = '1';
+      const sBtn = frag.querySelector('.send-now-btn');
+      if (sBtn) { sBtn.classList.remove('btn-primary'); sBtn.classList.add('btn-secondary'); }
     }
 
     frag.querySelector('.sms-bubble').textContent = previewSMS(job.job_type, job);
