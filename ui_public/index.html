@@ -200,8 +200,36 @@
     <div id="view-schedules" data-view="schedules" hidden>
       <section class="schedules" aria-label="Send timing">
         <header class="schedules-header">
-          <p class="schedules-sub">How long after each event the text goes out. Pending texts move to the new timing when you save.</p>
+          <p class="schedules-sub">When each text goes out. Saving a new delay moves pending texts to the new timing.</p>
         </header>
+        <!-- BKT-01: booking texts. Both switches default off (Marco sends
+             texts himself); main.js loads/saves them via /booking-texts. -->
+        <section class="card btexts" id="booking-texts" aria-labelledby="btexts-title" hidden>
+          <h2 class="btexts__title" id="btexts-title">Booking texts</h2>
+          <label class="btexts__row">
+            <span class="btexts__copy">
+              <strong>Text a confirmation when I book</strong>
+              <span id="btexts-confirm-help">On: it goes out the moment you book or move an appointment. Off: it is typed into Messages for you to send.</span>
+            </span>
+            <span class="switch">
+              <input class="switch__input" id="btexts-confirm" type="checkbox">
+              <span class="switch__track"></span>
+              <span class="switch__label" id="btexts-confirm-label">Off</span>
+            </span>
+          </label>
+          <label class="btexts__row">
+            <span class="btexts__copy">
+              <strong>Send the reminder by itself</strong>
+              <span>On: the reminder goes out 24 hours before drop-off. Off: it waits for you to tap Send now.</span>
+            </span>
+            <span class="switch">
+              <input class="switch__input" id="btexts-reminder" type="checkbox">
+              <span class="switch__track"></span>
+              <span class="switch__label" id="btexts-reminder-label">Off</span>
+            </span>
+          </label>
+          <p class="btexts__foot"><span class="btexts__status" id="btexts-status" role="status" aria-live="polite"></span><button class="btn btn-tertiary btn-sm" type="button" id="btexts-edit">Edit the wording</button></p>
+        </section>
         <div id="schedules-list" class="schedules-list" aria-live="polite">
           <!-- One .sched-card per job_type, injected by main.js. -->
         </div>

@@ -980,16 +980,27 @@
         body: JSON.stringify({ estimate_key: group.key, appointment_at: ts }),
       });
       if (resp.status === 200) {
+        const booked = await resp.json().catch(() => ({}));
+        const conf = booked.confirmation || {};
+        // BKT-01: "Text a confirmation when I book" is on and it went out:
+        // say so on the card and stay here.
+        if (conf.sent) {
+          btnEl.textContent = 'Booked · confirmation texted';
+          setTimeout(fetchQueue, 600);
+          setTimeout(() => { formEl.hidden = true; btnEl.disabled = false; btnEl.textContent = 'Save appointment'; }, 1800);
+          return;
+        }
         btnEl.textContent = 'Booked';
         // MSG-02 (per Marco): after booking or rebooking, open the
         // customer's Messages thread with the confirmation text typed in,
-        // so he only taps Send.
+        // so he only taps Send. BKT-01: the text comes from the editable
+        // Booking confirmation template; the local copy is the fallback.
         if (group.phone && group.is_test !== 1 && !IS_LOCAL_ADMIN) {
           try {
             sessionStorage.setItem('esw-draft', JSON.stringify({
               phone: group.phone,
               name: group.name || '',
-              text: bookingConfirmText(group, ts, group.booked === 1),
+              text: conf.text || bookingConfirmText(group, ts, group.booked === 1),
               at: Date.now(),
             }));
             setTimeout(() => {
@@ -2408,7 +2419,57 @@
     return document.getElementById('schedules-list');
   }
 
+  // ---------- BKT-01: Booking texts switches (Settings > Send timing) ----
+  const bt = {
+    card: document.getElementById('booking-texts'),
+    confirm: document.getElementById('btexts-confirm'),
+    reminder: document.getElementById('btexts-reminder'),
+    confirmLbl: document.getElementById('btexts-confirm-label'),
+    reminderLbl: document.getElementById('btexts-reminder-label'),
+    status: document.getElementById('btexts-status'),
+  };
+  function renderBookingTexts(st) {
+    if (!bt.card) return;
+    bt.card.hidden = false;
+    bt.confirm.checked = !!st.confirm_auto;
+    bt.reminder.checked = !!st.reminder_auto;
+    bt.confirmLbl.textContent = st.confirm_auto ? 'On' : 'Off';
+    bt.reminderLbl.textContent = st.reminder_auto ? 'On' : 'Off';
+  }
+  async function loadBookingTexts() {
+    if (!bt.card || IS_LOCAL_ADMIN) return;
+    try {
+      const r = await fetch(`${API_BASE}/booking-texts`);
+      if (r.ok) renderBookingTexts(await r.json());
+    } catch (_) { /* card stays hidden; next visit retries */ }
+  }
+  async function saveBookingText(field, input) {
+    const want = input.checked;
+    input.disabled = true;
+    if (bt.status) bt.status.textContent = 'Saving…';
+    try {
+      const r = await fetch(`${API_BASE}/booking-texts`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [field]: want }),
+      });
+      if (!r.ok) throw new Error(String(r.status));
+      renderBookingTexts(await r.json());
+      if (bt.status) bt.status.textContent = 'Saved.';
+    } catch (err) {
+      console.warn('booking-texts save failed:', err);
+      input.checked = !want;
+      if (bt.status) bt.status.textContent = "Couldn't save that. Check your connection and try again.";
+    }
+    input.disabled = false;
+    setTimeout(() => { if (bt.status) bt.status.textContent = ''; }, 4000);
+  }
+  if (bt.confirm) bt.confirm.addEventListener('change', () => saveBookingText('confirm_auto', bt.confirm));
+  if (bt.reminder) bt.reminder.addEventListener('change', () => saveBookingText('reminder_auto', bt.reminder));
+  const btEdit = document.getElementById('btexts-edit');
+  if (btEdit) btEdit.addEventListener('click', () => { if (window.eswActivate) window.eswActivate('settings', 'templates'); });
+
   async function loadSchedules(force) {
+    loadBookingTexts();
     const listEl = getSchedulesListEl();
     if (!listEl) return;
     if (scheduleState.loaded && !force) return;

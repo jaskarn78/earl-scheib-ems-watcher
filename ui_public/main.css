@@ -1444,3 +1444,20 @@ a.booked-pill[href]:hover { background: #D8ECDF; }
 /* Not connected yet: informational blue, not the green "synced" accent. */
 .gsync.gsync--new { border-left-color: var(--blue); }
 .gsync.gsync--new .gsync__icon { background: var(--blue-soft); color: var(--blue); }
+
+/* ============== BKT-01: Booking texts card ============== */
+.btexts[hidden] { display: none; }
+.btexts { padding: 20px; margin: 0 0 16px; }
+.btexts__title { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 4px; color: var(--ink); }
+.btexts__row {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 14px 0; border-top: 1px solid var(--hairline); cursor: pointer;
+}
+.btexts__row:first-of-type { border-top: 0; }
+.btexts__copy { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.btexts__copy strong { font-size: 15px; font-weight: 600; color: var(--ink); }
+.btexts__copy span { font-size: 13px; color: var(--ink-2); line-height: 1.45; }
+.btexts__row .switch { flex: 0 0 auto; }
+.btexts__row .switch__label { min-width: 26px; }
+.btexts__foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 6px 0 0; }
+.btexts__status { font-size: 13px; color: var(--ink-2); }

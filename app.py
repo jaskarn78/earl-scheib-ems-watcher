@@ -222,6 +222,12 @@ DEFAULT_TEMPLATES = {
         "Hi {first_name}, a friendly reminder from {shop_name}: your "
         "{year} {short_model} is booked for {appt_time}. See you then! "
         "Questions? Call {shop_phone}.",
+    # BKT-01: booking confirmation. Sent right after Mark scheduled /
+    # Change date / Book in Messages when "Text a confirmation
+    # automatically" is on; otherwise typed into the reply box for Marco.
+    "booking_confirm":
+        "Hi {first_name}, this is {shop_name}. Your {year} {short_model} "
+        "is booked for {appt_time}. See you then! Questions? Call {shop_phone}.",
 }
 
 SHOP_CONSTANTS = {
@@ -260,7 +266,20 @@ JOB_TYPE_META = [
     # Marco-editable on the Templates tab.
     {"job_type": "appt_reminder", "label": "Appointment reminder",
      "when": "~24 hours before the booked drop-off", "no_schedule": True},
+    # BKT-01: no job row ever carries this type; it is rendered from the
+    # estimate's latest job at booking time (see /queue/book).
+    {"job_type": "booking_confirm", "label": "Booking confirmation",
+     "when": "Right after you book or move an appointment", "no_schedule": True},
 ]
+
+# BKT-01: "Booking texts" switches in Settings > Send timing. Both default
+# OFF, which is how Marco works today: he sends texts himself.
+#   booking_confirm_auto: send the confirmation the moment he books
+#     (off = it is typed into the Messages reply box for him to send).
+#   appt_reminder_auto: fire the 24h reminder by itself, even while the
+#     global auto-send switch is off (off = it waits for Send now).
+BOOKING_CONFIRM_AUTO_KEY = "booking_confirm_auto"
+APPT_REMINDER_AUTO_KEY = "appt_reminder_auto"
 
 # Placeholder catalog — rendered as clickable chips on the Templates page.
 # Order matters: Templates UI lays out chips in this exact sequence.
@@ -1805,18 +1824,30 @@ def _gcal_sync_once() -> dict:
     return stats
 
 
+_gcal_rerun = threading.Event()
+
+
 def _run_gcal_sync():
-    """Daemon-thread entry. Never raises; overlapping runs are skipped."""
+    """Daemon-thread entry. Never raises. A kick that arrives while a pass
+    is running is not dropped: it sets _gcal_rerun and the running thread
+    does one more pass, so an Unmark right after a booking still reaches
+    Google within seconds (BKT-01 fix; was up to the next 60 s pass)."""
     if not _GCAL_SYNC_LOCK.acquire(blocking=False):
+        _gcal_rerun.set()
         return
     try:
-        _gcal_sync_once()
-    except Exception as exc:
-        log.warning("gcal: sync failed (non-fatal): %s", exc)
-        try:
-            _set_setting("gcal_last_error", str(exc)[:300])
-        except Exception:
-            pass
+        for _ in range(3):            # bounded: at most 2 follow-up passes
+            _gcal_rerun.clear()
+            try:
+                _gcal_sync_once()
+            except Exception as exc:
+                log.warning("gcal: sync failed (non-fatal): %s", exc)
+                try:
+                    _set_setting("gcal_last_error", str(exc)[:300])
+                except Exception:
+                    pass
+            if not _gcal_rerun.is_set():
+                break
     finally:
         _GCAL_SYNC_LOCK.release()
 
@@ -1953,9 +1984,15 @@ def scheduler_loop():
     global _last_gated_log_ts, _insights_last_sync, _gcal_last_kick
     while True:
         try:
+            # BKT-01: appointment reminders follow their own switch, in both
+            # directions: on = they fire even with auto-send off; off = they
+            # wait for Send now even with auto-send on.
+            reminder_auto = _get_setting(APPT_REMINDER_AUTO_KEY, "0") == "1"
             if get_auto_send_enabled():
-                _fire_due_jobs()
+                _fire_due_jobs(exclude_types=() if reminder_auto else ("appt_reminder",))
             else:
+                if reminder_auto:
+                    _fire_due_jobs(only_types=("appt_reminder",))
                 now = int(time.time())
                 if now - _last_gated_log_ts >= _GATED_LOG_INTERVAL_S:
                     log.info(
@@ -1983,7 +2020,7 @@ def scheduler_loop():
         time.sleep(30)
 
 
-def _fire_due_jobs():
+def _fire_due_jobs(only_types=(), exclude_types=()):
     now = int(time.time())
     con = get_db()
     try:
@@ -2003,6 +2040,10 @@ def _fire_due_jobs():
             (now,),
         )
         rows = cur.fetchall()
+        if only_types:
+            rows = [r for r in rows if r["job_type"] in only_types]
+        if exclude_types:
+            rows = [r for r in rows if r["job_type"] not in exclude_types]
         for row in rows:
             job_id = row["id"]
             job_type = row["job_type"]
@@ -2148,6 +2189,56 @@ def _get_setting(key: str, default: str) -> str:
         return str(row[0]) if row else default
     finally:
         con.close()
+
+
+def _booking_texts_state() -> dict:
+    """BKT-01: the two Booking texts switches, plus the global auto-send
+    state so the UI can explain what Off means."""
+    return {
+        "confirm_auto": _get_setting(BOOKING_CONFIRM_AUTO_KEY, "0") == "1",
+        "reminder_auto": _get_setting(APPT_REMINDER_AUTO_KEY, "0") == "1",
+        "auto_send": get_auto_send_enabled(),
+    }
+
+
+def _booking_confirmation(estimate_key: str, appointment_at: int) -> dict:
+    """BKT-01: render the booking confirmation for this estimate and, when
+    "Text a confirmation automatically" is on, send it now. Never sends for
+    test estimates or appointments already in the past. Returns
+    {text, phone, name, auto, sent, error} for the UI."""
+    out = {"text": "", "phone": "", "name": "", "auto": False, "sent": False, "error": ""}
+    con = get_db()
+    try:
+        row = con.execute(
+            "SELECT * FROM jobs WHERE estimate_key = ? ORDER BY id DESC LIMIT 1",
+            (estimate_key,),
+        ).fetchone()
+    finally:
+        con.close()
+    if row is None:
+        return out
+    out["phone"] = row["phone"] or ""
+    out["name"] = row["name"] or ""
+    # Same greeting as the draft Marco used to get ("Hi Bob", not "Hi BOB"
+    # or "Hi bob": CCC names arrive in any case).
+    ctx = dict(row)
+    raw_first = (row["name"] or "").strip().split()[0] if (row["name"] or "").strip() else ""
+    if raw_first:
+        ctx["first_name"] = raw_first[:1].upper() + raw_first[1:].lower()
+    out["text"] = render_template("booking_confirm", ctx)
+    out["auto"] = _get_setting(BOOKING_CONFIRM_AUTO_KEY, "0") == "1"
+    is_test = bool(row["is_test"]) or str(estimate_key).startswith("test|")
+    if not (out["auto"] and out["text"] and out["phone"]) or is_test:
+        return out
+    if appointment_at <= int(time.time()):
+        return out          # logging a drop-off that already happened
+    ok, err = send_sms(out["phone"], out["text"])
+    _log_sms(job_id=None, job_type="booking_confirm", phone=out["phone"],
+             body=out["text"], status="sent" if ok else "failed",
+             kind="confirm", is_test=False, error=err)
+    out["sent"], out["error"] = ok, ("" if ok else (err or "send failed"))
+    log.info("booking confirmation for %s: %s", estimate_key, "sent" if ok else err)
+    return out
 
 
 def _set_setting(key: str, value: str) -> None:
@@ -4434,6 +4525,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
                     "email":        "alex@example.com",
                 }
             sample_row.update(SHOP_CONSTANTS)
+            # BKT-01: previews of the reminder/confirmation read "booked for ."
+            # without a time; show a plausible one.
+            sample_row.setdefault("appt_time", "Tue, Oct 28 at 9:00 AM")
 
             self._send_json(200, {
                 "job_types":    job_types_out,
@@ -4537,6 +4631,31 @@ class WebhookHandler(BaseHTTPRequestHandler):
         # most recently uploaded client log, and the count of logs received.
         # HMAC-authed so only holders of CCC_SECRET can inspect.
         # CAL-04 (R-0001): Google Calendar sync routes.
+        if path == "/earlscheibconcord/booking-texts":
+            # Auth: CF Access (edge gate). BKT-01.
+            self._send_json(200, _booking_texts_state())
+            return
+
+        if path == "/earlscheibconcord/appointment":
+            # Auth: CF Access (edge gate). BKT-01: the Messages page Book
+            # sheet shows the current booking (if any) for this estimate.
+            key = (parse_qs(parsed.query).get("estimate_key") or [""])[0]
+            con = get_db()
+            try:
+                r = con.execute(
+                    "SELECT appointment_at FROM appointments "
+                    "WHERE estimate_key = ? AND unbooked_at = 0", (key,),
+                ).fetchone()
+                known = con.execute(
+                    "SELECT COUNT(1) FROM jobs WHERE estimate_key = ?", (key,),
+                ).fetchone()[0] > 0
+            finally:
+                con.close()
+            self._send_json(200, {"estimate_key": key, "known": known,
+                                  "booked": r is not None,
+                                  "appointment_at": int(r[0]) if r else 0})
+            return
+
         if path == "/earlscheibconcord/gcal/status":
             # Auth: CF Access (edge gate).
             self._send_json(200, _gcal_status())
@@ -5311,6 +5430,24 @@ class WebhookHandler(BaseHTTPRequestHandler):
             self._send_json(202, {"started": True})
             return
 
+        if self.path.split("?")[0] == "/earlscheibconcord/booking-texts":
+            # Auth: CF Access (edge gate). BKT-01: {confirm_auto?, reminder_auto?}
+            try:
+                body = json.loads(raw.decode("utf-8")) if raw else {}
+                if not isinstance(body, dict) or not ({"confirm_auto", "reminder_auto"} & set(body)):
+                    raise ValueError
+                for k, key in (("confirm_auto", BOOKING_CONFIRM_AUTO_KEY),
+                               ("reminder_auto", APPT_REMINDER_AUTO_KEY)):
+                    if k in body:
+                        if not isinstance(body[k], bool):
+                            raise ValueError
+                        _set_setting(key, "1" if body[k] else "0")
+            except (ValueError, TypeError, UnicodeDecodeError):
+                self._send_json(400, {"error": "confirm_auto / reminder_auto (bool) required"})
+                return
+            self._send_json(200, _booking_texts_state())
+            return
+
         if self.path.split("?")[0] == "/earlscheibconcord/gcal/enable":
             # Auth: CF Access (edge gate). CAL-05: pause/resume without
             # dropping the Google sign-in. Resuming kicks a reconcile so
@@ -5370,6 +5507,10 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 if cur.fetchone()["n"] == 0:
                     self._send_json(404, {"error": "unknown estimate_key"})
                     return
+                was_booked = cur.execute(
+                    "SELECT 1 FROM appointments WHERE estimate_key = ? AND unbooked_at = 0",
+                    (estimate_key,),
+                ).fetchone() is not None
                 cur.execute(
                     "INSERT INTO appointments "
                     "(estimate_key, appointment_at, created_at, updated_at, "
@@ -5443,7 +5584,10 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 estimate_key, appointment_at,
             )
             _gcal_kick()   # CAL-04: push the booking to Google Calendar
-            self._send_json(200, {"booked": 1, "appointment_at": appointment_at})
+            confirmation = _booking_confirmation(estimate_key, appointment_at)
+            self._send_json(200, {"booked": 1, "appointment_at": appointment_at,
+                                  "rescheduled": was_booked,
+                                  "confirmation": confirmation})
             return
 
         # BOK-01: Unbook — the booking fell through; follow-ups resume.
