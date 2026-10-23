@@ -211,6 +211,14 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   border-color: var(--red);
   color: #fff;
 }
+/* A disabled primary must not read as a pink button: go neutral. */
+.btn-primary:disabled, .btn-primary[aria-disabled="true"] {
+  background-color: var(--surface-2);
+  border-color: var(--surface-2);
+  color: var(--ink-3);
+  opacity: 1;
+  box-shadow: none;
+}
 .btn-primary:hover:not(:disabled) { background-color: var(--red-hover); border-color: var(--red-hover); }
 
 .btn-secondary {
