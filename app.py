@@ -1348,10 +1348,16 @@ def _fetch_twilio_messages(
                 if m:
                     enrich = unambiguous_by_phone.get(m.group(1))
             if not enrich and to != OPERATOR_FORWARD_NUMBER:
-                # Phone fallback — only for ad-hoc sends that bypassed
-                # sms_log (e.g., direct Twilio API tests). Skip for forwards
-                # to Marco; those should never enrich via phone.
+                # Phone fallback — ad-hoc sends that have no job row: replies
+                # Marco types in the Messages tab (logged without job_id) and
+                # direct Twilio API tests. Skip for forwards to Marco; those
+                # should never enrich via phone. MSG-04: the match gives the
+                # thread its customer name, but NOT a job_type: job_type is
+                # what the inbox reads as "Auto follow-up", and a typed reply
+                # is not one (Marco's replies were all tagged auto).
                 enrich = unambiguous_by_phone.get(to)
+                if enrich:
+                    enrich = dict(enrich, job_type=None)
         else:  # inbound
             enrich = unambiguous_by_phone.get(r.get("from") or "")
         if enrich:
