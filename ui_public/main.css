@@ -848,6 +848,9 @@ a.booked-pill[href]:hover { background: #D8ECDF; }
   margin: 20px 0 12px;
 }
 .cal-title { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; color: var(--ink); margin: 0; }
+/* The header's top margin spaces it from the sync panel; with the panel
+   hidden (banner up) it would just double the gap under the search row. */
+.gsync[hidden] + .cal-head { margin-top: 0; }
 .cal-nav { display: flex; gap: 4px; }
 .cal-nav .cal-prev, .cal-nav .cal-next { width: 34px; padding: 0; font-size: 18px; }
 

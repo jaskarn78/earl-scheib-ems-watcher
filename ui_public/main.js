@@ -1193,8 +1193,10 @@
       if (gcalBannerCta) gcalBannerCta.href = connectHref;
     }
 
-    // Scheduled-view panel.
-    gcalBar.hidden = false;
+    // Scheduled-view panel. While not connected and the top banner is up,
+    // the banner is the one Connect button; the panel would only repeat it.
+    // It appears once he is connected, or if he dismissed the banner.
+    gcalBar.hidden = !gcalConnected && !!gcalBanner && !gcalBanner.hidden;
     gcalBar.classList.toggle('gsync--error', !!g.last_error);
     gcalBar.classList.toggle('gsync--off', gcalConnected && !gcalEnabled);
     if (gcalConnectEl) { gcalConnectEl.hidden = gcalConnected; gcalConnectEl.href = connectHref; }
@@ -1257,6 +1259,7 @@
     gcalBannerX.addEventListener('click', () => {
       try { localStorage.setItem(GCAL_BANNER_SNOOZE_KEY, String(Date.now() + 7 * 86400 * 1000)); } catch (_) { /* private mode */ }
       gcalBanner.hidden = true;
+      if (gcalBar && !gcalConnected) gcalBar.hidden = false;   // Connect moves into the Scheduled panel
     });
   }
 
@@ -2659,7 +2662,7 @@
     const viewIns   = document.getElementById('view-insights');
     if (!links.length || !viewQueue || !viewTpl) return;
 
-    const TITLES = { queue: 'Queue', templates: 'Templates', schedules: 'Schedules', logs: 'Logs', insights: 'Insights' };
+    const TITLES = { queue: 'Queue', templates: 'Templates', schedules: 'Timing', logs: 'Logs', insights: 'Insights' };
     const activate = (target) => {
       document.title = `Earl Scheib Concord — ${TITLES[target] || 'Follow-ups'}`;
       links.forEach((a) => {

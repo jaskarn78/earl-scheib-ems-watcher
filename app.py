@@ -3937,7 +3937,7 @@ NAV_HEADER = """<header class="topbar" role="banner">
       <a class="topnav-link" data-view="queue" href="/earlscheib#queue" role="tab" aria-selected="false">Queue</a>
       <a class="topnav-link" data-external href="/earlscheib/messages" role="link">Messages</a>
       <a class="topnav-link" data-view="templates" href="/earlscheib#templates" role="tab" aria-selected="false">Templates</a>
-      <a class="topnav-link" data-view="schedules" href="/earlscheib#schedules" role="tab" aria-selected="false">Schedules</a>
+      <a class="topnav-link" data-view="schedules" href="/earlscheib#schedules" role="tab" aria-selected="false">Timing</a>
       <a class="topnav-link" data-view="logs" href="/earlscheib#logs" role="tab" aria-selected="false">Logs</a>
       <a class="topnav-link" data-view="insights" href="/earlscheib#insights" role="tab" aria-selected="false">Insights</a>
     </nav>
@@ -3971,9 +3971,9 @@ NAV_BOTTOMNAV = """<nav class="bottomnav" role="tablist" aria-label="Sections">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h6"/></svg>
       <span class="bn-label">Templates</span>
     </a>
-    <a class="topnav-link bn-link" data-view="schedules" href="/earlscheib#schedules" role="tab" aria-selected="false" aria-label="Schedules">
+    <a class="topnav-link bn-link" data-view="schedules" href="/earlscheib#schedules" role="tab" aria-selected="false" aria-label="Timing">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-      <span class="bn-label">Schedules</span>
+      <span class="bn-label">Timing</span>
     </a>
     <a class="topnav-link bn-link" data-view="logs" href="/earlscheib#logs" role="tab" aria-selected="false" aria-label="Logs">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
