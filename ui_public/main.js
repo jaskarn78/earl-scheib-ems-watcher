@@ -2429,6 +2429,11 @@
     reminderLbl: document.getElementById('btexts-reminder-label'),
     reviewLbl: document.getElementById('btexts-review-label'),
     status: document.getElementById('btexts-status'),
+    // R-0005: Send days card, saved through the same endpoint.
+    daysCard: document.getElementById('send-days'),
+    saturday: document.getElementById('sdays-saturday'),
+    saturdayLbl: document.getElementById('sdays-saturday-label'),
+    daysStatus: document.getElementById('sdays-status'),
   };
   function renderBookingTexts(st) {
     if (!bt.card) return;
@@ -2441,6 +2446,11 @@
       bt.review.checked = !!st.review_auto;
       bt.reviewLbl.textContent = st.review_auto ? 'On' : 'Off';
     }
+    if (bt.daysCard && 'saturday_sends' in st) {
+      bt.daysCard.hidden = false;
+      bt.saturday.checked = !!st.saturday_sends;
+      bt.saturdayLbl.textContent = st.saturday_sends ? 'On' : 'Off';
+    }
   }
   async function loadBookingTexts() {
     if (!bt.card || IS_LOCAL_ADMIN) return;
@@ -2449,29 +2459,35 @@
       if (r.ok) renderBookingTexts(await r.json());
     } catch (_) { /* card stays hidden; next visit retries */ }
   }
-  async function saveBookingText(field, input) {
+  async function saveBookingText(field, input, statusEl) {
+    const status = statusEl || bt.status;
     const want = input.checked;
     input.disabled = true;
-    if (bt.status) bt.status.textContent = 'Saving…';
+    if (status) status.textContent = 'Saving…';
     try {
       const r = await fetch(`${API_BASE}/booking-texts`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ [field]: want }),
       });
       if (!r.ok) throw new Error(String(r.status));
-      renderBookingTexts(await r.json());
-      if (bt.status) bt.status.textContent = 'Saved.';
+      const st = await r.json();
+      renderBookingTexts(st);
+      if (status) {
+        const n = st.retimed || 0;
+        status.textContent = n ? `Saved. Moved ${n} waiting text${n === 1 ? '' : 's'}.` : 'Saved.';
+      }
     } catch (err) {
       console.warn('booking-texts save failed:', err);
       input.checked = !want;
-      if (bt.status) bt.status.textContent = "Couldn't save that. Check your connection and try again.";
+      if (status) status.textContent = "Couldn't save that. Check your connection and try again.";
     }
     input.disabled = false;
-    setTimeout(() => { if (bt.status) bt.status.textContent = ''; }, 4000);
+    setTimeout(() => { if (status) status.textContent = ''; }, 4000);
   }
   if (bt.confirm) bt.confirm.addEventListener('change', () => saveBookingText('confirm_auto', bt.confirm));
   if (bt.reminder) bt.reminder.addEventListener('change', () => saveBookingText('reminder_auto', bt.reminder));
   if (bt.review) bt.review.addEventListener('change', () => saveBookingText('review_auto', bt.review));
+  if (bt.saturday) bt.saturday.addEventListener('change', () => saveBookingText('saturday_sends', bt.saturday, bt.daysStatus));
   const btEdit = document.getElementById('btexts-edit');
   if (btEdit) btEdit.addEventListener('click', () => { if (window.eswActivate) window.eswActivate('settings', 'templates'); });
 

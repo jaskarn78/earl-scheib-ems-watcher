@@ -243,6 +243,23 @@
           </label>
           <p class="btexts__foot"><span class="btexts__status" id="btexts-status" role="status" aria-live="polite"></span><button class="btn btn-tertiary btn-sm" type="button" id="btexts-edit">Edit the wording</button></p>
         </section>
+        <!-- R-0005: Saturday as a send day. Default on; same /booking-texts
+             endpoint, and saving it moves pending texts to the new days. -->
+        <section class="card btexts" id="send-days" aria-labelledby="sdays-title" hidden>
+          <h2 class="btexts__title" id="sdays-title">Send days</h2>
+          <label class="btexts__row">
+            <span class="btexts__copy">
+              <strong>Send on Saturdays</strong>
+              <span>On: texts go out Monday to Saturday, 10 to 12 and 2 to 4. Off: Monday to Friday only. Sunday is always skipped. Changing this moves texts already waiting.</span>
+            </span>
+            <span class="switch">
+              <input class="switch__input" id="sdays-saturday" type="checkbox">
+              <span class="switch__track"></span>
+              <span class="switch__label" id="sdays-saturday-label">On</span>
+            </span>
+          </label>
+          <p class="btexts__foot"><span class="btexts__status" id="sdays-status" role="status" aria-live="polite"></span></p>
+        </section>
         <div id="schedules-list" class="schedules-list" aria-live="polite">
           <!-- One .sched-card per job_type, injected by main.js. -->
         </div>

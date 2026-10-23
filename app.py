@@ -28,21 +28,31 @@ except ImportError:
 
 from datetime import timedelta
 
-def next_send_window(after_ts: int) -> int:
+def _send_off_day(dt, saturday: bool) -> bool:
+    """R-0005: Sunday is never a send day; Saturday is one when the
+    "Send on Saturdays" switch is on."""
+    return dt.weekday() == 6 or (dt.weekday() == 5 and not saturday)
+
+
+def next_send_window(after_ts: int, saturday=None) -> int:
     """Return next optimal send time after after_ts.
     Rules (America/Los_Angeles):
     - Quiet hours: no sends before 8am or after 8pm
     - Optimal windows: 10am-12pm or 2pm-4pm
-    - Skip weekends (push to Monday 10am)
+    - Skip Sundays, and Saturdays unless the "Send on Saturdays" switch is on
+      (R-0005); a skipped day pushes to the next send day at 10am
+    saturday=None reads the switch from app_settings.
     If pytz not available, returns after_ts unchanged.
     """
     if not HAS_PYTZ:
         return after_ts
+    if saturday is None:
+        saturday = _saturday_sends()
 
     dt = datetime.fromtimestamp(after_ts, tz=SHOP_TZ)
 
-    # Advance past weekends first
-    while dt.weekday() >= 5:  # 5=Sat, 6=Sun
+    # Advance past days off first
+    while _send_off_day(dt, saturday):
         dt = (dt + timedelta(days=1)).replace(hour=10, minute=0, second=0, microsecond=0)
 
     h = dt.hour
@@ -57,9 +67,9 @@ def next_send_window(after_ts: int) -> int:
     elif h < 16:
         pass  # 2pm-4pm: optimal
     else:
-        # After 4pm: push to 10am next business day
+        # After 4pm: push to 10am next send day
         dt = (dt + timedelta(days=1)).replace(hour=10, minute=0, second=0, microsecond=0)
-        while dt.weekday() >= 5:
+        while _send_off_day(dt, saturday):
             dt += timedelta(days=1)
 
     return int(dt.timestamp())
@@ -294,6 +304,10 @@ REVIEW_AUTO_KEY = "review_auto"
 # has passed.
 STALE_SKIP_HOURS_KEY = "stale_skip_hours"
 STALE_SKIP_HOURS_DEFAULT = 48
+# R-0005: Saturday counts as a send day (same 10-12 / 2-4 windows) while
+# this is on; Sunday is always skipped. Default ON (Marco 10/23). Settings >
+# Send timing; flipping it moves pending texts (_retime_for_send_days).
+SATURDAY_SENDS_KEY = "saturday_sends"
 
 # Placeholder catalog — rendered as clickable chips on the Templates page.
 # Order matters: Templates UI lays out chips in this exact sequence.
@@ -2265,8 +2279,61 @@ def _booking_texts_state() -> dict:
         "confirm_auto": _get_setting(BOOKING_CONFIRM_AUTO_KEY, "0") == "1",
         "reminder_auto": _get_setting(APPT_REMINDER_AUTO_KEY, "0") == "1",
         "review_auto": _get_setting(REVIEW_AUTO_KEY, "0") == "1",
+        "saturday_sends": _saturday_sends(),
         "auto_send": get_auto_send_enabled(),
     }
+
+
+def _saturday_sends() -> bool:
+    """R-0005: the "Send on Saturdays" switch. Default on; a database that
+    cannot be read yet (startup, bare unit tests) also means on."""
+    try:
+        return _get_setting(SATURDAY_SENDS_KEY, "1") == "1"
+    except sqlite3.Error:
+        return True
+
+
+def _retime_for_send_days(saturday: bool) -> int:
+    """R-0005: move pending machine-timed texts after the Saturday switch
+    changes. On: a text parked on Monday because Saturday was off moves to
+    the Saturday (or earlier) slot it would have had, if that slot is still
+    ahead. Off: a text sitting on a Saturday moves to the next send day.
+    Hand-picked times and appointment reminders are left alone. Returns the
+    number of rows moved."""
+    now = int(time.time())
+    types = [m["job_type"] for m in JOB_TYPE_META if not m.get("no_schedule")]
+    con = get_db()
+    try:
+        cur = con.cursor()
+        cur.execute(
+            "SELECT id, job_type, send_at, created_at FROM jobs "
+            "WHERE sent = 0 AND cancelled = 0 AND send_at_manual = 0 "
+            "  AND send_at > ? AND job_type IN (%s)" % ",".join("?" * len(types)),
+            (now, *types),
+        )
+        updates = []
+        for r in cur.fetchall():
+            send_at = int(r["send_at"])
+            if saturday:
+                new = next_send_window(
+                    int(r["created_at"]) + get_effective_schedule(r["job_type"]) * 3600,
+                    saturday=True,
+                )
+                if not (now < new < send_at):
+                    continue
+            else:
+                if not HAS_PYTZ or datetime.fromtimestamp(send_at, tz=SHOP_TZ).weekday() != 5:
+                    continue
+                new = next_send_window(send_at, saturday=False)
+            updates.append((int(new), int(r["id"])))
+        if updates:
+            cur.executemany("UPDATE jobs SET send_at = ? WHERE id = ?", updates)
+            con.commit()
+    finally:
+        con.close()
+    log.info("send days: Saturday %s, moved %d pending text(s)",
+             "on" if saturday else "off", len(updates))
+    return len(updates)
 
 
 def _booking_confirmation(estimate_key: str, appointment_at: int) -> dict:
@@ -5500,22 +5567,29 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
         if self.path.split("?")[0] == "/earlscheibconcord/booking-texts":
             # Auth: CF Access (edge gate). BKT-01: {confirm_auto?, reminder_auto?}
-            # R-0003: plus review_auto?
+            # R-0003: plus review_auto? R-0005: plus saturday_sends?
+            keys = (("confirm_auto", BOOKING_CONFIRM_AUTO_KEY),
+                    ("reminder_auto", APPT_REMINDER_AUTO_KEY),
+                    ("review_auto", REVIEW_AUTO_KEY),
+                    ("saturday_sends", SATURDAY_SENDS_KEY))
             try:
                 body = json.loads(raw.decode("utf-8")) if raw else {}
-                if not isinstance(body, dict) or not ({"confirm_auto", "reminder_auto", "review_auto"} & set(body)):
+                if not isinstance(body, dict) or not ({k for k, _ in keys} & set(body)):
                     raise ValueError
-                for k, key in (("confirm_auto", BOOKING_CONFIRM_AUTO_KEY),
-                               ("reminder_auto", APPT_REMINDER_AUTO_KEY),
-                               ("review_auto", REVIEW_AUTO_KEY)):
-                    if k in body:
-                        if not isinstance(body[k], bool):
-                            raise ValueError
-                        _set_setting(key, "1" if body[k] else "0")
+                if any(not isinstance(body[k], bool) for k, _ in keys if k in body):
+                    raise ValueError
             except (ValueError, TypeError, UnicodeDecodeError):
-                self._send_json(400, {"error": "confirm_auto / reminder_auto / review_auto (bool) required"})
+                self._send_json(400, {"error": "confirm_auto / reminder_auto / review_auto / saturday_sends (bool) required"})
                 return
-            self._send_json(200, _booking_texts_state())
+            for k, key in keys:
+                if k in body:
+                    _set_setting(key, "1" if body[k] else "0")
+            st = _booking_texts_state()
+            if "saturday_sends" in body:
+                # Always re-time, even when the value did not change: it is
+                # idempotent and lets one POST catch up rows parked earlier.
+                st["retimed"] = _retime_for_send_days(body["saturday_sends"])
+            self._send_json(200, st)
             return
 
         if self.path.split("?")[0] == "/earlscheibconcord/gcal/enable":
