@@ -173,9 +173,12 @@
   // QAJ-02 filter + search state. Re-applied against the cached `lastJobs`
   // array on chip click or search keystroke — avoids a network round-trip.
   let currentFilter = 'estimates';
-  // CAL-04: true while the Pi reports a connected Google Calendar; the
-  // manual 'Add to Google Calendar' link is hidden then (sync does it).
+  // CAL-04/05: Google Calendar state from /diagnostic. The manual
+  // 'Add to Google Calendar' link is hidden only while the sync is actually
+  // running (connected AND the Scheduled-view toggle is on).
   let gcalConnected = false;
+  let gcalEnabled   = true;
+  const gcalSyncActive = () => gcalConnected && gcalEnabled;
   let currentSearch = '';
   let lastJobs      = [];
   let searchTimerId = null;
@@ -344,6 +347,7 @@
           // BOK-01: per-estimate booking state (same value on every row).
           booked:         job.booked === 1 ? 1 : 0,
           appointment_at: job.appointment_at || 0,
+          gcal_synced:    job.gcal_synced === 1 ? 1 : 0,   // CAL-05: already on his calendar
           is_test:        job.is_test === 1 ? 1 : 0,
           jobs:         [],
         });
@@ -851,12 +855,13 @@
       pill.hidden = false;
       whenEl.textContent = '· ' + formatAppt(group.appointment_at);
       bookBtn.querySelector('span').textContent = 'Change date';
-      if (gcalConnected) {
-        // CAL-04: the booking is synced automatically; a manual add would
-        // only create a duplicate.
+      if (gcalSyncActive() || group.gcal_synced === 1) {
+        // CAL-04/05: the booking is (or will be) on the calendar via the
+        // sync; a manual add would only create a duplicate. While paused,
+        // only bookings that never synced get the manual link back.
         gcalEl.hidden = true;
         pill.removeAttribute('href');
-        pill.title = 'Synced to Google Calendar';
+        pill.title = gcalSyncActive() ? 'Synced to Google Calendar' : 'Already on your Google Calendar (sync paused)';
       } else {
         gcalEl.hidden = false;
         gcalEl.href = gcalHref(group);
@@ -1084,15 +1089,35 @@
     ));
   }
 
-  // ---------- Google Calendar sync (CAL-04) ----------------------------
-  // Status line under the calendar header. Hidden in the local Go admin
-  // and when the Pi has no GCAL_CLIENT_ID (diagnostic.gcal is null).
-  const gcalBar       = document.getElementById('cal-gcal');
-  const gcalText      = document.getElementById('cal-gcal-text');
-  const gcalConnectEl = document.getElementById('cal-gcal-connect');
-  const gcalSyncBtn   = document.getElementById('cal-gcal-sync');
-  const gcalDiscBtn   = document.getElementById('cal-gcal-disconnect');
-  let gcalFlash = '';   // one-shot message after the Google redirect
+  // ---------- Google Calendar sync (CAL-04 / CAL-05) -------------------
+  // Two surfaces, both hidden in the local Go admin and when the Pi has no
+  // GCAL_CLIENT_ID (diagnostic.gcal is null):
+  //  - #gcal-banner: top-of-page strip with the Connect button, shown only
+  //    while not connected (and not snoozed via the x for 7 days);
+  //  - #cal-gcal: panel at the top of the Scheduled view with the
+  //    pause/resume toggle, Sync now and Disconnect once connected.
+  const gcalBar        = document.getElementById('cal-gcal');
+  const gcalText       = document.getElementById('cal-gcal-text');
+  const gcalConnectEl  = document.getElementById('cal-gcal-connect');
+  const gcalSyncBtn    = document.getElementById('cal-gcal-sync');
+  const gcalDiscBtn    = document.getElementById('cal-gcal-disconnect');
+  const gcalToggleWrap = document.getElementById('cal-gcal-toggle-wrap');
+  const gcalToggle     = document.getElementById('cal-gcal-toggle');
+  const gcalToggleLbl  = document.getElementById('cal-gcal-toggle-label');
+  const gcalBanner     = document.getElementById('gcal-banner');
+  const gcalBannerText = document.getElementById('gcal-banner-text');
+  const gcalBannerCta  = document.getElementById('gcal-banner-connect');
+  const gcalBannerX    = document.getElementById('gcal-banner-close');
+  const GCAL_BANNER_SNOOZE_KEY = 'eswGcalBannerHiddenUntil';
+  const GCAL_BANNER_TEXT = gcalBannerText ? gcalBannerText.textContent : '';
+  let gcalFlash = '';       // one-shot message after the Google redirect
+  let gcalFlashKind = '';   // 'ok' | 'error'
+  let gcalNotice = '';      // short-lived panel message (e.g. toggle failed)
+
+  function gcalBannerSnoozed() {
+    try { return Number(localStorage.getItem(GCAL_BANNER_SNOOZE_KEY) || 0) > Date.now(); }
+    catch (_) { return false; }
+  }
 
   function agoText(unixSeconds) {
     if (!unixSeconds) return 'never';
@@ -1105,29 +1130,90 @@
 
   function renderGcal(g) {
     if (!gcalBar) return;
-    if (IS_LOCAL_ADMIN || !g || !g.configured) { gcalBar.hidden = true; return; }
-    const wasConnected = gcalConnected;
-    gcalConnected = !!g.connected;
-    gcalBar.hidden = false;
-    gcalBar.classList.toggle('cal-gcal--error', !!g.last_error);
-    if (gcalConnectEl) {
-      gcalConnectEl.hidden = gcalConnected;
-      gcalConnectEl.href = `${API_BASE}/gcal/connect`;
+    if (IS_LOCAL_ADMIN || !g || !g.configured) {
+      gcalBar.hidden = true;
+      if (gcalBanner) gcalBanner.hidden = true;
+      return;
     }
-    if (gcalSyncBtn) gcalSyncBtn.hidden = !gcalConnected;
+    const wasActive = gcalSyncActive();
+    gcalConnected = !!g.connected;
+    gcalEnabled   = g.enabled !== false;
+    const active  = gcalSyncActive();
+    const connectHref = `${API_BASE}/gcal/connect`;
+
+    // Top banner: only while not connected. Hidden once he signs in.
+    if (gcalBanner) {
+      gcalBanner.hidden = gcalConnected || gcalBannerSnoozed();
+      const showErr = !gcalConnected && gcalFlashKind === 'error' && !!gcalFlash;
+      gcalBanner.classList.toggle('gcal-banner--error', showErr);
+      if (gcalBannerText) gcalBannerText.textContent = showErr ? gcalFlash : GCAL_BANNER_TEXT;
+      if (gcalBannerCta) gcalBannerCta.href = connectHref;
+    }
+
+    // Scheduled-view panel.
+    gcalBar.hidden = false;
+    gcalBar.classList.toggle('gsync--error', !!g.last_error);
+    gcalBar.classList.toggle('gsync--off', gcalConnected && !gcalEnabled);
+    if (gcalConnectEl) { gcalConnectEl.hidden = gcalConnected; gcalConnectEl.href = connectHref; }
+    if (gcalToggleWrap) gcalToggleWrap.hidden = !gcalConnected;
+    if (gcalToggle && !gcalToggle.disabled) gcalToggle.checked = gcalEnabled;
+    if (gcalToggleLbl) gcalToggleLbl.textContent = gcalEnabled ? 'Auto-sync on' : 'Auto-sync off';
+    if (gcalSyncBtn) gcalSyncBtn.hidden = !active;
     if (gcalDiscBtn) gcalDiscBtn.hidden = !gcalConnected;
-    let text = gcalFlash;
+
+    gcalBar.classList.toggle('gsync--notice', !!gcalNotice);
+    let text = gcalFlash || gcalNotice;
     if (!text && !gcalConnected) {
-      text = 'Google Calendar: not connected. Bookings stay in this app only.';
+      text = 'Not connected. Bookings stay in this app; use "Add to Google Calendar" on a booking to add one by hand.';
+    } else if (!text && !gcalEnabled) {
+      const who = g.account ? `Connected as ${g.account}. ` : '';
+      text = `${who}Auto-sync is paused: new bookings, date changes and cancellations are not sent to your calendar until you turn it back on. Bookings not yet on your calendar show "Add to Google Calendar" meanwhile.`;
     } else if (!text) {
       const who = g.account ? ` as ${g.account}` : '';
       const n = Number(g.events) || 0;
-      text = `Google Calendar: connected${who} · ${n} booking${n === 1 ? '' : 's'} synced · last check ${agoText(g.last_sync)}`;
+      text = `Connected${who} · ${n} booking${n === 1 ? '' : 's'} synced · last check ${agoText(g.last_sync)}`;
       if (g.last_error) text += ` · problem: ${g.last_error}`;
     }
     if (gcalText) gcalText.textContent = text;
-    // The cards' pill/link state depends on the connection; redraw on change.
-    if (wasConnected !== gcalConnected && lastJobs) renderQueue(lastJobs);
+    // The cards' pill/link state depends on whether the sync is running;
+    // redraw when that flips (connect, disconnect, pause, resume).
+    if (wasActive !== active && lastJobs) {
+      lastRenderKey = null;   // the render key ignores sync state; force the rebuild
+      renderQueue(lastJobs);
+    }
+  }
+
+  // CAL-05: pause / resume. The server answers with the fresh status, so
+  // the panel and the cards update at once; the next poll confirms.
+  if (gcalToggle) {
+    gcalToggle.addEventListener('change', async () => {
+      const enabled = gcalToggle.checked;
+      gcalToggle.disabled = true;
+      if (gcalToggleLbl) gcalToggleLbl.textContent = enabled ? 'Turning on…' : 'Pausing…';
+      let ok = false;
+      try {
+        const r = await fetch(`${API_BASE}/gcal/enable`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled }),
+        });
+        if (r.ok) { ok = true; gcalToggle.disabled = false; renderGcal(await r.json()); }
+      } catch (_) { /* handled below */ }
+      if (!ok) {
+        // Say so instead of letting the next poll silently flip the switch back.
+        gcalToggle.disabled = false;
+        gcalToggle.checked = !enabled;
+        gcalNotice = `Could not turn auto-sync ${enabled ? 'on' : 'off'}. Check your connection and try again.`;
+        setTimeout(() => { gcalNotice = ''; fetchDiagnostic(); }, 6000);
+      }
+      fetchDiagnostic();
+    });
+  }
+  if (gcalBannerX && gcalBanner) {
+    gcalBannerX.addEventListener('click', () => {
+      try { localStorage.setItem(GCAL_BANNER_SNOOZE_KEY, String(Date.now() + 7 * 86400 * 1000)); } catch (_) { /* private mode */ }
+      gcalBanner.hidden = true;
+    });
   }
 
   if (gcalSyncBtn) {
@@ -1155,10 +1241,12 @@
     const qs = new URLSearchParams(window.location.search);
     const r = qs.get('gcal');
     if (!r) return;
+    gcalFlashKind = r === 'connected' ? 'ok' : 'error';
     gcalFlash = r === 'connected'
       ? 'Google Calendar connected. Upcoming bookings are being added now.'
       : `Google Calendar sign-in did not finish: ${qs.get('why') || 'unknown error'}. Tap Connect to try again.`;
-    setTimeout(() => { gcalFlash = ''; }, 20000);
+    if (gcalFlashKind === 'error') { try { localStorage.removeItem(GCAL_BANNER_SNOOZE_KEY); } catch (_) { /* ignore */ } }
+    setTimeout(() => { gcalFlash = ''; gcalFlashKind = ''; fetchDiagnostic(); }, 20000);
     const chip = document.querySelector('.filter[data-filter="scheduled"]');
     if (chip) chip.click();
     qs.delete('gcal');

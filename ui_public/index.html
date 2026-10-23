@@ -28,6 +28,21 @@
 
   <!--SHARED_NAV_HEADER--><!-- app.py injects the canonical top header (see NAV_HEADER) -->
 
+  <!-- CAL-05: Google Calendar connect banner (Pi only). main.js shows it
+       while /diagnostic reports gcal configured but not connected; it goes
+       away once Marco signs in, or for a week after he taps the x. -->
+  <aside class="gcal-banner" id="gcal-banner" hidden role="status" aria-live="polite">
+    <div class="gcal-banner__inner">
+      <span class="gcal-banner__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4M9 15.5l2 2 4-4"/></svg></span>
+      <div class="gcal-banner__copy">
+        <strong class="gcal-banner__title">Put booked appointments on your Google Calendar</strong>
+        <span class="gcal-banner__text" id="gcal-banner-text">One-time sign-in. Every booking you mark in this app lands on your calendar automatically.</span>
+      </div>
+      <a class="btn btn-primary gcal-banner__cta" id="gcal-banner-connect">Connect Google Calendar</a>
+      <button class="gcal-banner__close" id="gcal-banner-close" type="button" aria-label="Hide for now" title="Hide for now">&times;</button>
+    </div>
+  </aside>
+
 
   <!-- WMH-04: view wrappers. Queue view (default) contains filter chips,
        queue grid, diagnostic panel. Templates view (hidden by default)
@@ -80,6 +95,29 @@
          the Scheduled chip is active; rendered by main.js from the same
          queue payload (booked + appointment_at fields). -->
     <section id="sched-calendar" class="sched-calendar" aria-label="Appointment calendar" hidden>
+      <!-- CAL-04/05: Google Calendar sync panel. Hidden until /diagnostic
+           returns a gcal object (Pi-served, GCAL_CLIENT_ID set); main.js
+           renders it on every poll. Connected: toggle (pause/resume),
+           Sync now, Disconnect. Not connected: Connect button. -->
+      <div class="gsync" id="cal-gcal" hidden role="status" aria-live="polite">
+        <div class="gsync__lead">
+          <span class="gsync__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4M9 15.5l2 2 4-4"/></svg></span>
+          <div class="gsync__copy">
+            <strong class="gsync__title">Google Calendar sync</strong>
+            <span class="gsync__text" id="cal-gcal-text"></span>
+          </div>
+        </div>
+        <div class="gsync__controls">
+          <a class="btn btn-primary" id="cal-gcal-connect" hidden>Connect Google Calendar</a>
+          <label class="switch" id="cal-gcal-toggle-wrap" hidden>
+            <input class="switch__input" id="cal-gcal-toggle" type="checkbox" aria-label="Auto-sync bookings to Google Calendar">
+            <span class="switch__track"></span>
+            <span class="switch__label" id="cal-gcal-toggle-label">Auto-sync on</span>
+          </label>
+          <button class="btn btn-ghost" id="cal-gcal-sync" type="button" hidden>Sync now</button>
+          <button class="btn btn-ghost gsync__disconnect" id="cal-gcal-disconnect" type="button" hidden>Disconnect</button>
+        </div>
+      </div>
       <header class="cal-head">
         <h2 class="cal-title" id="cal-title"></h2>
         <div class="cal-nav">
@@ -88,15 +126,6 @@
           <button class="btn btn-ghost cal-next" type="button" aria-label="Next month">›</button>
         </div>
       </header>
-      <!-- CAL-04: Google Calendar sync status + controls. Hidden until
-           /diagnostic returns a gcal object (Pi-served, GCAL_CLIENT_ID set);
-           main.js renders it on every diagnostic poll. -->
-      <div class="cal-gcal" id="cal-gcal" hidden role="status" aria-live="polite">
-        <span class="cal-gcal__text" id="cal-gcal-text"></span>
-        <a class="btn btn-ghost" id="cal-gcal-connect" hidden>Connect Google Calendar</a>
-        <button class="btn btn-ghost" id="cal-gcal-sync" type="button" hidden>Sync now</button>
-        <button class="btn btn-ghost" id="cal-gcal-disconnect" type="button" hidden>Disconnect</button>
-      </div>
       <div class="cal-grid" id="cal-grid"></div>
     </section>
 

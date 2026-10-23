@@ -522,5 +522,81 @@ def test_disconnect_forgets_token_and_mapping_but_keeps_events(gcal_env, monkeyp
     assert len(fake.live_events()) == 1               # left on the calendar
     assert any(c[1] == "/revoke" for c in fake.calls)
     st = get_json(f"{gcal_env['base']}/earlscheibconcord/gcal/status")
-    assert st == {"configured": True, "connected": False, "account": "",
+    assert st == {"configured": True, "connected": False, "enabled": True, "account": "",
                   "last_sync": 0, "last_error": "", "events": 0}
+
+
+# ---------------------------------------------------------------------------
+# CAL-05: pause / resume toggle
+# ---------------------------------------------------------------------------
+
+def test_toggle_off_pauses_sync_and_on_resumes(gcal_env):
+    fake, base = gcal_env["fake"], gcal_env["base"]
+    write_token(gcal_env)
+    st = get_json(f"{base}/earlscheibconcord/gcal/status")
+    assert st["connected"] is True and st["enabled"] is True   # default ON
+
+    status, body = post_json(f"{base}/earlscheibconcord/gcal/enable", {"enabled": False})
+    assert status == 200 and body["enabled"] is False and body["connected"] is True
+    assert os.path.exists(gcal_env["token_path"])             # sign-in kept
+
+    # Booking while paused: nothing reaches Google.
+    assert book(gcal_env)[0] == 200
+    time.sleep(0.6)
+    assert fake.live_events() == []
+    assert not any(c[1].endswith("/events") for c in fake.calls)
+    # An explicit sync pass is a no-op too.
+    assert gcal_env["app"]._gcal_sync_once()["created"] == 0
+
+    # Resume: the kick catches the booking up.
+    status, body = post_json(f"{base}/earlscheibconcord/gcal/enable", {"enabled": True})
+    assert status == 200 and body["enabled"] is True
+    assert wait_for(lambda: len(fake.live_events()) == 1)
+
+
+def test_toggle_rejects_bad_body(gcal_env):
+    with pytest.raises(HTTPError) as ei:
+        post_json(f"{gcal_env['base']}/earlscheibconcord/gcal/enable", {"nope": 1})
+    assert ei.value.code == 400
+
+
+def test_pause_does_not_survive_disconnect_or_reconnect(gcal_env):
+    """A pause belongs to the sign-in it was set under. Disconnecting clears
+    it, and a fresh Google sign-in always starts syncing."""
+    base, fake = gcal_env["base"], gcal_env["fake"]
+    write_token(gcal_env)
+    post_json(f"{base}/earlscheibconcord/gcal/enable", {"enabled": False})
+    assert get_json(f"{base}/earlscheibconcord/gcal/status")["enabled"] is False
+
+    post_json(f"{base}/earlscheibconcord/gcal/disconnect", {})
+    assert get_json(f"{base}/earlscheibconcord/gcal/status")["enabled"] is True
+
+    # Pause again (connected), then reconnect through the OAuth callback.
+    write_token(gcal_env)
+    post_json(f"{base}/earlscheibconcord/gcal/enable", {"enabled": False})
+    assert book(gcal_env)[0] == 200
+    time.sleep(0.4)
+    assert fake.live_events() == []                 # paused: nothing sent
+    _, h = get_raw(f"{base}/earlscheibconcord/gcal/connect")
+    state = parse_qs(urlparse(h["Location"]).query)["state"][0]
+    status, _ = get_raw(f"{base}/earlscheibconcord/gcal/callback?code=good-code&state={state}")
+    assert status == 302
+    st = get_json(f"{base}/earlscheibconcord/gcal/status")
+    assert st["connected"] is True and st["enabled"] is True
+    assert wait_for(lambda: len(fake.live_events()) == 1)   # backfilled on reconnect
+
+
+def test_queue_rows_carry_gcal_synced_flag(gcal_env, monkeypatch):
+    app = gcal_env["app"]
+    monkeypatch.setattr(app, "_gcal_kick", lambda: None)
+    write_token(gcal_env)
+    assert book(gcal_env)[0] == 200
+    rows = get_json(f"{gcal_env['base']}/earlscheibconcord/queue?status=all")
+    mine = [r for r in rows if r["estimate_key"] == KEY]
+    assert mine and all(r["booked"] == 1 and r["gcal_synced"] == 0 for r in mine)
+    app._gcal_sync_once()
+    rows = get_json(f"{gcal_env['base']}/earlscheibconcord/queue?status=all")
+    mine = [r for r in rows if r["estimate_key"] == KEY]
+    assert mine and all(r["gcal_synced"] == 1 for r in mine)
+    other = [r for r in rows if r["estimate_key"] != KEY]
+    assert all(r["gcal_synced"] == 0 for r in other)

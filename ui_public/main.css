@@ -925,19 +925,108 @@ a.booked-pill:hover { background-color: rgba(31, 122, 82, 0.18); box-shadow: 0 1
 }
 .cal-nav { display: flex; gap: 6px; }
 .cal-nav .btn { padding: 6px 12px; font-size: 13px; }
-/* CAL-04: Google Calendar sync line under the calendar header. */
-.cal-gcal {
+/* CAL-04/05: Google Calendar sync panel at the top of the Scheduled view.
+   Left accent: green = syncing, amber = paused, terra = problem. */
+.gsync {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 8px 12px;
-  margin: -2px 0 12px;
-  font-size: 13px;
-  color: var(--ink-soft);
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin: 0 0 14px;
+  padding: 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-left: 4px solid #1f7a52;
+  border-radius: var(--r-panel);
+  box-shadow: var(--shadow-sm);
 }
-.cal-gcal[hidden] { display: none; }
-.cal-gcal--error .cal-gcal__text { color: var(--terra); }
-.cal-gcal .btn { padding: 6px 12px; font-size: 13px; }
+.gsync[hidden] { display: none; }
+.gsync--off { border-left-color: var(--amber); }
+.gsync--error { border-left-color: var(--terra); }
+.gsync--error .gsync__text,
+.gsync--notice .gsync__text { color: var(--terra); }
+.gsync__lead { display: flex; align-items: center; gap: 12px; flex: 1 1 280px; min-width: 0; }
+.gsync__icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; border-radius: 10px; flex: 0 0 auto;
+  background: var(--surface-alt); color: var(--navy);
+}
+.gsync__icon svg { width: 19px; height: 19px; }
+.gsync__copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.gsync__title { font-size: 14px; font-weight: 700; color: var(--navy); line-height: 1.3; }
+.gsync__text { font-size: 13px; color: var(--ink-soft); line-height: 1.4; }
+.gsync__controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.gsync__controls .btn { padding: 7px 12px; font-size: 13px; text-decoration: none; }
+.gsync__disconnect { border-color: transparent; }
+/* Toggle switch (shared look with the retired auto-send bar, own classes). */
+.switch {
+  position: relative; display: inline-flex; align-items: center; gap: 8px;
+  cursor: pointer; user-select: none;
+  font-size: 13px; font-weight: 600; color: var(--ink);
+}
+.switch[hidden] { display: none; }
+.switch__input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
+.switch__track {
+  position: relative; width: 40px; height: 22px; border-radius: 11px; flex: 0 0 auto;
+  background: #b8c2d1; transition: background-color 140ms ease;
+}
+.switch__track::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px;
+  border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 140ms ease;
+}
+.switch__input:checked + .switch__track { background: #1f7a52; }
+.switch__input:checked + .switch__track::after { transform: translateX(18px); }
+.switch__input:focus-visible + .switch__track { outline: 2px solid var(--oxblood); outline-offset: 2px; }
+.switch__input:disabled + .switch__track { opacity: 0.6; }
+@media (max-width: 640px) {
+  .gsync { flex-direction: column; align-items: stretch; gap: 12px; }
+  /* In column flow the row flex-basis would become height; reset it. */
+  .gsync__lead { flex: 0 0 auto; }
+  .gsync__controls { flex: 0 0 auto; justify-content: space-between; }
+  .gsync__controls .btn-primary { flex: 1 1 auto; justify-content: center; }
+}
+
+/* ============== CAL-05: Google Calendar connect banner ============== */
+/* Full-width notification strip right under the sticky topbar. */
+.gcal-banner {
+  background: linear-gradient(90deg, var(--navy) 0%, var(--navy-mid) 100%);
+  color: #fff;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.gcal-banner[hidden] { display: none; }
+.gcal-banner__inner {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: clamp(10px, 1.6vw, 14px) clamp(16px, 3vw, 32px);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+}
+.gcal-banner__icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 38px; height: 38px; border-radius: 10px; flex: 0 0 auto;
+  background: rgba(255, 255, 255, 0.12);
+}
+.gcal-banner__icon svg { width: 20px; height: 20px; }
+.gcal-banner__copy { display: flex; flex-direction: column; gap: 2px; flex: 1 1 260px; min-width: 0; }
+.gcal-banner__title { font-size: 15px; font-weight: 700; line-height: 1.3; }
+.gcal-banner__text { font-size: 13px; line-height: 1.4; color: rgba(255, 255, 255, 0.78); }
+.gcal-banner--error .gcal-banner__text { color: #ffd2cc; }
+.gcal-banner__cta { flex: 0 0 auto; text-decoration: none; white-space: nowrap; }
+.gcal-banner__close {
+  flex: 0 0 auto; width: 32px; height: 32px; border-radius: 8px; border: 0;
+  background: transparent; color: rgba(255, 255, 255, 0.7);
+  font-size: 22px; line-height: 1; cursor: pointer;
+}
+.gcal-banner__close:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+@media (max-width: 640px) {
+  .gcal-banner__copy { flex: 1 1 0; }
+  .gcal-banner__close { order: 2; }
+  .gcal-banner__cta { order: 3; flex-basis: 100%; justify-content: center; }
+}
 .cal-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);

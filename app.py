@@ -135,6 +135,9 @@ GCAL_EVENT_DURATION_S = 3600          # bookings have no end time; show 1h
 GCAL_SYNC_EVERY_S = int(os.getenv("GCAL_SYNC_EVERY_S", "60"))
 GCAL_STATE_TTL_S = 600                # OAuth state nonce lifetime
 GCAL_HTTP_TIMEOUT_S = 20
+# CAL-05: Marco can pause the sync from the Scheduled view without
+# disconnecting (token kept; reconcile skipped while off). Absent row = ON.
+GCAL_ENABLED_SETTING_KEY = "gcal_sync_enabled"
 
 # WNC-01: Persistent auto-send toggle backed by the app_settings DB table.
 # The SCHEDULER_ENABLED env var is only a first-boot seed — once the
@@ -1480,6 +1483,38 @@ def _gcal_connected() -> bool:
     return bool(_gcal_load_token().get("refresh_token"))
 
 
+def _gcal_sync_enabled() -> bool:
+    """CAL-05: the Scheduled-view toggle. ON unless app_settings says "0"."""
+    try:
+        con = get_db()
+        try:
+            row = con.execute(
+                "SELECT value FROM app_settings WHERE key = ?", (GCAL_ENABLED_SETTING_KEY,)
+            ).fetchone()
+        finally:
+            con.close()
+    except sqlite3.OperationalError as exc:
+        log.warning("_gcal_sync_enabled: %s", exc)
+        return True
+    if row is None:
+        return True
+    val = row["value"] if hasattr(row, "keys") else row[0]
+    return val != "0"
+
+
+def _gcal_set_sync_enabled(enabled: bool) -> None:
+    con = get_db()
+    try:
+        con.execute(
+            "INSERT INTO app_settings(key, value, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+            (GCAL_ENABLED_SETTING_KEY, "1" if enabled else "0", int(time.time())),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+
 def _gcal_http(method: str, url: str, body=None, token: str = "",
                form: bool = False) -> tuple:
     """One HTTPS call. Returns (status, parsed-json-or-{}). Raises GcalError
@@ -1664,7 +1699,7 @@ def _gcal_sync_once() -> dict:
     Per-event Google errors are logged, recorded in gcal_last_error and do
     not stop the pass (one bad row must not block the others)."""
     stats = {"created": 0, "updated": 0, "deleted": 0, "skipped": 0, "errors": 0}
-    if not _gcal_connected():
+    if not _gcal_connected() or not _gcal_sync_enabled():
         return stats
     now = int(time.time())
     first_error = ""
@@ -1781,8 +1816,9 @@ def _run_gcal_sync():
 
 
 def _gcal_kick() -> None:
-    """Start a sync on a daemon thread if the app is connected."""
-    if _gcal_configured() and _gcal_connected():
+    """Start a sync on a daemon thread if the app is connected and the
+    Scheduled-view toggle is on (CAL-05)."""
+    if _gcal_configured() and _gcal_connected() and _gcal_sync_enabled():
         threading.Thread(target=_run_gcal_sync, daemon=True).start()
 
 
@@ -1804,6 +1840,7 @@ def _gcal_status() -> dict:
     return {
         "configured": _gcal_configured(),
         "connected": bool(tok.get("refresh_token")),
+        "enabled": _gcal_sync_enabled(),
         "account": tok.get("email", "") if tok.get("refresh_token") else "",
         "last_sync": last_sync,
         "last_error": settings.get("gcal_last_error", ""),
@@ -1887,6 +1924,8 @@ def _gcal_disconnect() -> None:
     con = get_db()
     try:
         con.execute("DELETE FROM gcal_events")
+        # CAL-05: a pause must not outlive the sign-in it belonged to.
+        con.execute("DELETE FROM app_settings WHERE key = ?", (GCAL_ENABLED_SETTING_KEY,))
         con.commit()
     finally:
         con.close()
@@ -4227,7 +4266,11 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 "                AND a.unbooked_at = 0) AS booked, "
                 "       (SELECT a.appointment_at FROM appointments a "
                 "         WHERE a.estimate_key = jobs.estimate_key "
-                "           AND a.unbooked_at = 0) AS appointment_at "
+                "           AND a.unbooked_at = 0) AS appointment_at, "
+                # CAL-05: the UI shows the manual "Add to Google Calendar"
+                # link only for bookings that are not already on the calendar.
+                "       EXISTS(SELECT 1 FROM gcal_events g "
+                "              WHERE g.estimate_key = jobs.estimate_key) AS gcal_synced "
                 "FROM jobs"
             )
             # GLV-02: "pending" means literally pending — exclude cancelled
@@ -4519,6 +4562,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
             else:
                 try:
                     _gcal_finish_oauth(code, state)
+                    _gcal_set_sync_enabled(True)   # CAL-05: a fresh sign-in always syncs
                     _gcal_kick()
                     dest = "/earlscheib?gcal=connected"
                 except (GcalError, URLError, OSError) as exc:
@@ -5261,6 +5305,22 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 return
             _gcal_kick()
             self._send_json(202, {"started": True})
+            return
+
+        if self.path.split("?")[0] == "/earlscheibconcord/gcal/enable":
+            # Auth: CF Access (edge gate). CAL-05: pause/resume without
+            # dropping the Google sign-in. Resuming kicks a reconcile so
+            # bookings made while paused catch up within seconds.
+            try:
+                body = json.loads(raw.decode("utf-8")) if raw else {}
+                enabled = bool(body["enabled"])
+            except (ValueError, KeyError, TypeError):
+                self._send_json(400, {"error": "enabled (bool) required"})
+                return
+            _gcal_set_sync_enabled(enabled)
+            if enabled:
+                _gcal_kick()
+            self._send_json(200, _gcal_status())
             return
 
         if self.path.split("?")[0] == "/earlscheibconcord/gcal/disconnect":
