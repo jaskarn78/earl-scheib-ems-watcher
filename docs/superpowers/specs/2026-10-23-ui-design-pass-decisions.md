@@ -1,0 +1,35 @@
+# UI design pass: decisions beyond the spec (Builder A: index.html, main.css, nav.css, main.js, NAV_HEADER)
+
+One line each: decision · why · where to look.
+
+- Global `[hidden] { display: none !important; }` instead of per-class `.foo[hidden]` rules · closes the class-level display vs `[hidden]` trap once for every current and future element · `main.css` Base section; any `hidden` toggle in main.js.
+- Bottom tab bar is white (hairline top, ink-3 idle, red active icon + label) rather than navy · the spec asks for a red label on the active item and AA contrast; red on navy is ~2:1 at 11px, red on white passes · `nav.css` bottomnav block; `*-mobile.png` bottom edge. Affects the inbox page too (shared nav.css).
+- Failed stat turns `#FF8A94` (lightened red) on the navy bar, not brand red · brand red on navy fails contrast · `nav.css .stat b.is-bad`, set by `updateStats()`.
+- Sync dot is green when polls land, amber when data is 2 polls stale or in retry (was always amber) · the dot now encodes a state instead of being decoration · `nav.css .sync-dot`, `updateSyncCaption()`.
+- Schedule text reads "Sends Today 8:41 AM" with the countdown ("in 2h 29m") kept as quiet ink-3 meta · spec puts the absolute time first; Marco still asked for "when is it coming back" so the countdown stays but demoted · `buildTimelineEntry()`, `.job-send-in`; `queue-desktop.png`.
+- Time formatter `formatWhen()` adds "Tomorrow" / "Yesterday" to the spec's "Today" and drops the year when it is the current one · shorter and still unambiguous · `main.js formatWhen`; booked pills, sent stamps, log rows, insights rows all use it.
+- Job-type chip is one neutral navy-soft style (no per-type colours) · colour is reserved for state (green/amber/red/blue) per 4.1; type colour encoded nothing Marco acts on · `.job-chip`.
+- Estimate date renders as "Estimate Oct 23" (full date in the tooltip) · a bare date right of the name read as ambiguous · `buildEstimateCard()`; card header right.
+- "Uncancel" button label is now "Restore" · plain English; confirm says it goes back to pending · timeline entry template, `handleUncancel()` confirm.
+- Server error reasons reach the screen only when they are already a sentence; snake_case tags and HTTP codes go to `console.warn` and Marco sees "X didn't go through. Try again." · spec 4.3/4.4 forbids codes; some server reasons (e.g. allowlist) are genuinely useful sentences · `friendlyError()` in main.js.
+- Queue fetch error is a state card with a Try again button (polls keep retrying on their own) · same error shape as the other views · `showError()`, `#error-state-template`.
+- Templates/Schedules/Logs load errors and the Logs empty state use one `stateBlock()` builder (icon well, title, sentence, optional Try again) · one implementation of the empty/error shape · `stateBlock()`; `logs-desktop.png`.
+- Message log drops the Twilio SID column from view (kept in the DOM, hidden) and shows carrier errors as the message only, with the numeric code in a tooltip · internal identifiers and codes are not for Marco · `renderTwilioMessages()`, `.log-row__sid`.
+- Message log rows show the job type under the customer as "24-hour follow-up" etc. (sentence case via JOB_TYPE_LABELS) · consistent naming with the queue · `renderTwilioMessages()`.
+- Insights person rows show the phone (mono) as the meta line; the payload has no vehicle field · spec asked for vehicle + phone; vehicle would need an API change (non-goal) · `phoneMeta()`; `insights-desktop.png`.
+- Insights revenue empty state toggles `.ins-cols.is-empty` from JS rather than relying on `:has()` · broader browser support · `renderInsights()`, `.ins-cols.is-empty`.
+- Insights "This week" rows get the chevron; "Replied, not booked" rows keep the Reply button instead (one affordance per row) · avoids two competing actions on the right · `renderInsights()`.
+- Funnel bars step lighter per stage with fixed navy tints (nth-child) · spec 6.7 asks for lighter steps; five stages, no data-driven colour needed · `.ins-bar:nth-child(n) .ins-bar-f`.
+- Timeline drawer uses small SVG icons in tinted wells instead of emoji · emoji render differently per device and read as icon soup · `window.openTimeline`, `.tl-ic`.
+- Appointment popup focuses its "Appointment" label on open (mirrors the timeline drawer focusing its title) · keyboard/VoiceOver parity between the two sheets · `openApptPopup()`, `#appt-title`.
+- `/earlscheib#queue` resets both scroll containers to the top on load · the browser's fragment scroll landed past the chips and search (the Queue nav link from the inbox hits this) and, with a focusable `#queue`, drew a focus ring · `wireTopnav()`; `tabindex` removed from `#queue`.
+- Mobile controls: search fills row 2 with the sort select compact on its right (label visually hidden) · spec's "search full width below, sort compact" on one row saves a third row of controls on a phone · mobile `.search-wrap` / `.sort-wrap`; `queue-mobile.png`.
+- Mobile chip rail fade is done with gradient pseudo-elements on `.filters-rail`, not a mask · the old mask reduced the navy chips' alpha and fringed the active chip · `.filters-rail::before/::after`.
+- Compact in-row buttons are 34px on desktop and 40px on mobile with a transparent `::after` extending the hit area to 44px · spec's 34px compact vs 44px touch minimum · mobile `.btn::after`, `.filter::after`.
+- Card footer Save/Reset buttons stay at the full 40px height · they are the card's primary action, not an in-row control · `.tpl-card__actions .btn`.
+- Disabled Save is the red button at 45% opacity (reads pink) · spec: same hue, lower opacity, never a different colour · `.btn:disabled`.
+- Google button pill radius is 20px in both the banner and the panel; banner button goes full width on mobile · spec 5 ("same everywhere", "full width on mobile") · `.gsi-btn`, mobile `.gcal-banner__cta`.
+- `aria-current="page"` is set by `activate()` in main.js for the SPA views; `_render_shared_nav` in app.py already sets it for the Queue/Messages items on load · app.py beyond NAV_HEADER is out of scope for Builder A · `wireTopnav()`.
+- NAV_HEADER nav links are byte-identical to before · `_render_shared_nav()` string-matches the exact link markup to mark the active item · `app.py` NAV_HEADER; only the stats/sync markup changed.
+- Google Calendar panel copy: not connected = one sentence ("Sign in once and every booking you mark here lands on your calendar."); paused and connected lines lead with the account · spec 6.3 shapes · `renderGcal()`; `extra-notconnected-panel-*.png`, `extra-scheduled-autosync-off-desktop.png`.
+- Extra "after" screenshots (`extra-*.png`) cover states shoot.py does not reach: date picker, unsaved template/schedule, auto-sync off, not-connected banner/panel (second rig on :8312 without the token), drawers (viewport-only: full-page capture garbles fixed layers), empty chips, search no-match, System details open · the lead can see every state without running the rig · `docs/superpowers/shots/after/extra-*.png`.
