@@ -159,3 +159,75 @@ def test_review_switch_defaults_off(env):
     with pytest.raises(HTTPError) as ei:
         post(env, "/earlscheibconcord/booking-texts", {"review_auto": "on"})
     assert ei.value.code == 400
+
+
+# ---------------------------------------------------------------------------
+# R-0004: the scheduler skips stale texts instead of blasting a backlog.
+# ---------------------------------------------------------------------------
+
+def _age_job(app, job_type, hours, phone=None):
+    con = sqlite3.connect(app.DB_PATH)
+    con.execute("UPDATE jobs SET send_at = ? WHERE job_type = ? AND (? IS NULL OR phone = ?)",
+                (int(time.time()) - int(hours * 3600), job_type, phone, phone))
+    con.commit(); con.close()
+
+
+def _unsent(app, phone, job_type):
+    con = sqlite3.connect(app.DB_PATH)
+    n = con.execute("SELECT COUNT(*) FROM jobs WHERE phone = ? AND job_type = ? AND sent = 0 AND cancelled = 0",
+                    (phone, job_type)).fetchone()[0]
+    con.close()
+    return n
+
+
+@pytest.mark.parametrize("hours,setting,fires", [
+    (1, None, True),          # fresh: fires
+    (47, None, True),         # inside the default 48 h window
+    (49, None, False),        # past it: left pending
+    (24 * 15, None, False),   # the Oct 8 backlog case
+    (49, "72", True),         # window widened in app_settings
+    (49, "0", True),          # 0 turns the guard off
+    (49, "junk", False),      # bad value falls back to 48
+])
+def test_stale_rows_skipped_by_scheduler(env, monkeypatch, hours, setting, fires):
+    app = env["app"]
+    _seed_due(app, "24h", "+15105550301")
+    _age_job(app, "24h", hours, "+15105550301")
+    if setting is not None:
+        app._set_setting(app.STALE_SKIP_HOURS_KEY, setting)
+    app.set_auto_send_enabled(True)
+    _one_scheduler_tick(app, monkeypatch)
+    assert (("+15105550301" in [to for to, _ in env["sent"]])) is fires
+    assert _unsent(app, "+15105550301", "24h") == (0 if fires else 1)
+
+
+def test_stale_row_still_sends_with_send_now(env, monkeypatch):
+    app = env["app"]
+    _seed_due(app, "review", "+15105550302")
+    _age_job(app, "review", 24 * 10, "+15105550302")
+    post(env, "/earlscheibconcord/booking-texts", {"review_auto": True})
+    _one_scheduler_tick(app, monkeypatch)
+    assert env["sent"] == [] and _unsent(app, "+15105550302", "review") == 1    # skipped, still pending
+    con = sqlite3.connect(app.DB_PATH)
+    job_id = con.execute("SELECT id FROM jobs WHERE phone = '+15105550302'").fetchone()[0]
+    con.close()
+    r = post(env, "/earlscheibconcord/queue/send-now", {"id": job_id})
+    assert r == {"sent": True}
+    assert [to for to, _ in env["sent"]] == ["+15105550302"] and _unsent(app, "+15105550302", "review") == 0
+
+
+def test_reminder_skipped_once_appointment_passed(env, monkeypatch):
+    app = env["app"]
+    post(env, "/earlscheibconcord/booking-texts", {"reminder_auto": True})
+    post(env, "/earlscheibconcord/queue/book", {"estimate_key": KEY, "appointment_at": int(time.time()) + 3600})
+    _age_job(app, "appt_reminder", 0.01, "+15105550111")                      # due now, appointment still ahead
+    con = sqlite3.connect(app.DB_PATH)
+    con.execute("UPDATE appointments SET appointment_at = ? WHERE estimate_key = ?", (int(time.time()) - 600, KEY))
+    con.commit(); con.close()
+    _one_scheduler_tick(app, monkeypatch)
+    assert env["sent"] == [] and _unsent(app, "+15105550111", "appt_reminder") == 1
+    con = sqlite3.connect(app.DB_PATH)
+    con.execute("UPDATE appointments SET appointment_at = ? WHERE estimate_key = ?", (int(time.time()) + 3600, KEY))
+    con.commit(); con.close()
+    _one_scheduler_tick(app, monkeypatch)
+    assert len(env["sent"]) == 1 and "friendly reminder" in env["sent"][0][1]

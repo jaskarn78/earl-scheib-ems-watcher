@@ -150,6 +150,8 @@ _AUTO_SEND_SEED = "1" if os.getenv("SCHEDULER_ENABLED", "0") == "1" else "0"
 # log file isn't flooded with one line every 30 seconds.
 _GATED_LOG_INTERVAL_S = 3600
 _last_gated_log_ts = 0
+# R-0004: same hourly throttle for the "skipped N stale texts" line.
+_last_stale_log_ts = 0
 
 # INS-01: how often the scheduler refreshes the Insights source data
 # (CCC EMS exports + Twilio inbound). _insights_last_sync starts at 0 so the
@@ -284,6 +286,14 @@ APPT_REMINDER_AUTO_KEY = "appt_reminder_auto"
 # reminder. Default OFF (it waits for Send now), which matches today on the
 # shop server, where global auto-send is off.
 REVIEW_AUTO_KEY = "review_auto"
+# R-0004: the scheduler never fires a text more than this many hours past
+# its send_at, so turning on auto-send or a per-type switch cannot blast an
+# old backlog. Stale rows stay pending; Send now still sends them on purpose.
+# Stored in app_settings so it can change without a restart; 0 turns the
+# guard off. Appointment reminders are also skipped once the appointment
+# has passed.
+STALE_SKIP_HOURS_KEY = "stale_skip_hours"
+STALE_SKIP_HOURS_DEFAULT = 48
 
 # Placeholder catalog — rendered as clickable chips on the Templates page.
 # Order matters: Templates UI lays out chips in this exact sequence.
@@ -2051,6 +2061,7 @@ def _fire_due_jobs(only_types=(), exclude_types=()):
             rows = [r for r in rows if r["job_type"] in only_types]
         if exclude_types:
             rows = [r for r in rows if r["job_type"] not in exclude_types]
+        rows = _drop_stale_rows(cur, rows, now)
         for row in rows:
             job_id = row["id"]
             job_type = row["job_type"]
@@ -2086,6 +2097,46 @@ def _fire_due_jobs(only_types=(), exclude_types=()):
                 log.warning("Job %s send failed, will retry", job_id)
     finally:
         con.close()
+
+
+def _stale_skip_hours() -> int:
+    """R-0004: hours past send_at after which the scheduler leaves a text
+    alone. Bad or negative values fall back to the default; 0 = no limit."""
+    try:
+        h = int(_get_setting(STALE_SKIP_HOURS_KEY, str(STALE_SKIP_HOURS_DEFAULT)))
+    except ValueError:
+        return STALE_SKIP_HOURS_DEFAULT
+    return h if h >= 0 else STALE_SKIP_HOURS_DEFAULT
+
+
+def _drop_stale_rows(cur, rows, now: int) -> list:
+    """R-0004: drop rows the scheduler must not fire automatically: more than
+    _stale_skip_hours() past send_at, or an appointment reminder whose
+    appointment is gone or already started. Rows are not modified, so they
+    stay pending and Send now (/queue/send-now) still sends them."""
+    hours = _stale_skip_hours()
+    cutoff = now - hours * 3600 if hours else None
+    keep, stale = [], 0
+    for r in rows:
+        if cutoff is not None and int(r["send_at"]) < cutoff:
+            stale += 1
+            continue
+        if r["job_type"] == "appt_reminder":
+            a = cur.execute(
+                "SELECT appointment_at FROM appointments "
+                "WHERE estimate_key = ? AND unbooked_at = 0",
+                (r["estimate_key"],),
+            ).fetchone()
+            if a is None or int(a["appointment_at"]) <= now:
+                stale += 1
+                continue
+        keep.append(r)
+    global _last_stale_log_ts
+    if stale and now - _last_stale_log_ts >= _GATED_LOG_INTERVAL_S:
+        log.info("scheduler: left %d stale text(s) unsent (over %sh past due "
+                 "or appointment passed); Send now still works", stale, hours)
+        _last_stale_log_ts = now
+    return keep
 
 
 # ---------------------------------------------------------------------------
