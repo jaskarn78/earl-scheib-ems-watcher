@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Earl Scheib Concord — Queue</title>
 
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%231a2d4d'/><text x='16' y='22' text-anchor='middle' font-family='Arial,sans-serif' font-weight='800' font-size='14' fill='%23c8202f'>ES</text></svg>">
@@ -10,11 +10,15 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+  <!-- Roboto 500 is only for the official "Continue with Google" button (spec 5). -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@500&display=swap">
 
   <link rel="stylesheet" href="/earlscheib/nav.css">
   <link rel="stylesheet" href="/main.css">
 </head>
 <body>
+  <a class="skip-link" href="#queue">Skip to content</a>
+
   <!-- WNC-01: auto-send toggle — visible only when /diagnostic returns a boolean
        scheduler_enabled (Pi-served). Hidden in local Go admin (returns undefined).
        Toggled by main.js on every diagnostic poll. -->
@@ -22,7 +26,7 @@
     <label class="auto-send-toggle__label">
       <input class="auto-send-toggle__input" id="auto-send-checkbox" type="checkbox" aria-label="Auto-send toggle">
       <span class="auto-send-toggle__track"></span>
-      <span class="auto-send-toggle__text" id="auto-send-label">Auto-send OFF — paused; manual Send now still works</span>
+      <span class="auto-send-toggle__text" id="auto-send-label">Auto-send is off. Texts wait until you turn it back on; Send now still works.</span>
     </label>
   </div>
 
@@ -32,14 +36,19 @@
        while /diagnostic reports gcal configured but not connected; it goes
        away once Marco signs in, or for a week after he taps the x. -->
   <aside class="gcal-banner" id="gcal-banner" hidden role="status" aria-live="polite">
-    <div class="gcal-banner__inner">
+    <div class="gcal-banner__inner callout">
       <span class="gcal-banner__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4M9 15.5l2 2 4-4"/></svg></span>
       <div class="gcal-banner__copy">
         <strong class="gcal-banner__title">Put booked appointments on your Google Calendar</strong>
-        <span class="gcal-banner__text" id="gcal-banner-text">One-time sign-in. Every booking you mark in this app lands on your calendar automatically.</span>
+        <span class="gcal-banner__text" id="gcal-banner-text">One-time sign-in. Every booking you mark here lands on your calendar automatically.</span>
       </div>
-      <a class="btn btn-primary gcal-banner__cta" id="gcal-banner-connect">Connect Google Calendar</a>
-      <button class="gcal-banner__close" id="gcal-banner-close" type="button" aria-label="Hide for now" title="Hide for now">&times;</button>
+      <a class="gsi-btn gcal-banner__cta" id="gcal-banner-connect" href="#">
+        <span class="gsi-btn__logo" aria-hidden="true"><svg viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/><path fill="none" d="M0 0h48v48H0z"/></svg></span>
+        <span class="gsi-btn__label">Continue with Google</span>
+      </a>
+      <button class="gcal-banner__close" id="gcal-banner-close" type="button" aria-label="Hide for now" title="Hide for now">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+      </button>
     </div>
   </aside>
 
@@ -49,14 +58,12 @@
        lists editable SMS templates, one card per job_type. JS toggles the
        `hidden` attribute on these elements when the topnav is clicked. -->
   <div id="view-queue" data-view="queue">
-    <!-- QAJ-02: filter chips + live search. Keep the light Fraunces aesthetic;
-         Work Sans uppercase with letter-spacing for the chips; oxblood selected
-         state. Search uses canvas bg + oxblood focus accent. -->
+    <!-- QAJ-02: filter chips + live search. -->
     <section class="controls" aria-label="Queue filters">
       <div class="filters-rail">
       <nav class="filters" role="tablist" aria-label="Filter jobs">
         <button class="filter" type="button" data-filter="estimates" role="tab" aria-selected="true">Estimates</button>
-        <button class="filter" type="button" data-filter="completed" role="tab" aria-selected="false">Work Completed</button>
+        <button class="filter" type="button" data-filter="completed" role="tab" aria-selected="false">Work completed</button>
         <!-- SCH-01: hand-scheduled pending rows only (send_at_manual=1) —
              "what did I push out, and when is it coming back". -->
         <button class="filter" type="button" data-filter="scheduled" role="tab" aria-selected="false">Scheduled</button>
@@ -67,8 +74,8 @@
              main.js hides everything marked data-test-chip unless the URL
              carries ?test (see wireFilters()). -->
         <span class="filter-sep" data-test-chip aria-hidden="true"></span>
-        <button class="filter filter--test" type="button" data-test-chip data-filter="test-estimates" role="tab" aria-selected="false">Test Est.</button>
-        <button class="filter filter--test" type="button" data-test-chip data-filter="test-completed" role="tab" aria-selected="false">Test Work Compl.</button>
+        <button class="filter filter--test" type="button" data-test-chip data-filter="test-estimates" role="tab" aria-selected="false">Test estimates</button>
+        <button class="filter filter--test" type="button" data-test-chip data-filter="test-completed" role="tab" aria-selected="false">Test work completed</button>
         <button class="test-reset-btn" type="button" data-test-chip title="Reset test jobs (re-seed fresh)" aria-label="Reset test jobs">↺</button>
       </nav>
       </div>
@@ -79,15 +86,15 @@
           <option value="newest">Newest activity</option>
           <option value="oldest">Oldest activity</option>
           <option value="next-send">Next send time</option>
-          <option value="customer">Customer A→Z</option>
+          <option value="customer">Customer A to Z</option>
         </select>
       </div>
       <div class="search-wrap">
-        <svg class="search-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <svg class="search-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <circle cx="7" cy="7" r="5"></circle>
           <path d="M14 14l-3.5-3.5"></path>
         </svg>
-        <input id="search" class="search" type="search" placeholder="Search by name, phone, VIN, RO…" aria-label="Search">
+        <input id="search" class="search" type="search" placeholder="Search name, phone, VIN or RO" aria-label="Search">
       </div>
     </section>
 
@@ -98,7 +105,7 @@
       <!-- CAL-04/05: Google Calendar sync panel. Hidden until /diagnostic
            returns a gcal object (Pi-served, GCAL_CLIENT_ID set); main.js
            renders it on every poll. Connected: toggle (pause/resume),
-           Sync now, Disconnect. Not connected: Connect button. -->
+           Sync now, Disconnect. Not connected: Google button. -->
       <div class="gsync" id="cal-gcal" hidden role="status" aria-live="polite">
         <div class="gsync__lead">
           <span class="gsync__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4M9 15.5l2 2 4-4"/></svg></span>
@@ -108,22 +115,25 @@
           </div>
         </div>
         <div class="gsync__controls">
-          <a class="btn btn-primary" id="cal-gcal-connect" hidden>Connect Google Calendar</a>
+          <a class="gsi-btn" id="cal-gcal-connect" hidden href="#">
+            <span class="gsi-btn__logo" aria-hidden="true"><svg viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/><path fill="none" d="M0 0h48v48H0z"/></svg></span>
+            <span class="gsi-btn__label">Continue with Google</span>
+          </a>
           <label class="switch" id="cal-gcal-toggle-wrap" hidden>
             <input class="switch__input" id="cal-gcal-toggle" type="checkbox" aria-label="Auto-sync bookings to Google Calendar">
             <span class="switch__track"></span>
             <span class="switch__label" id="cal-gcal-toggle-label">Auto-sync on</span>
           </label>
-          <button class="btn btn-ghost" id="cal-gcal-sync" type="button" hidden>Sync now</button>
-          <button class="btn btn-ghost gsync__disconnect" id="cal-gcal-disconnect" type="button" hidden>Disconnect</button>
+          <button class="btn btn-secondary" id="cal-gcal-sync" type="button" hidden>Sync now</button>
+          <button class="btn btn-danger-text gsync__disconnect" id="cal-gcal-disconnect" type="button" hidden>Disconnect</button>
         </div>
       </div>
       <header class="cal-head">
         <h2 class="cal-title" id="cal-title"></h2>
         <div class="cal-nav">
-          <button class="btn btn-ghost cal-prev" type="button" aria-label="Previous month">‹</button>
-          <button class="btn btn-ghost cal-today" type="button">Today</button>
-          <button class="btn btn-ghost cal-next" type="button" aria-label="Next month">›</button>
+          <button class="btn btn-tertiary cal-prev" type="button" aria-label="Previous month">‹</button>
+          <button class="btn btn-tertiary cal-today" type="button">Today</button>
+          <button class="btn btn-tertiary cal-next" type="button" aria-label="Next month">›</button>
         </div>
       </header>
       <div class="cal-grid" id="cal-grid"></div>
@@ -133,8 +143,14 @@
       <!-- Estimate cards (with nested timelines) injected by main.js -->
     </main>
 
-    <section id="diagnostic" class="diagnostic" aria-label="Diagnostic">
-      <h2 class="diag-heading">Diagnostic</h2>
+    <!-- Diagnostic: collapsed behind a "System details" disclosure. The dt/dd
+         ids are what main.js fills; relabelDiagnosticForServer() renames the
+         captions in Pi mode. -->
+    <details id="diagnostic" class="diagnostic" aria-label="Diagnostic">
+      <summary class="diag-summary">
+        <span>System details</span>
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>
+      </summary>
       <dl class="diag-grid">
         <dt>Watch folder</dt>             <dd id="diag-watch-folder">—</dd>
         <dt>Folder exists</dt>            <dd id="diag-folder-exists">—</dd>
@@ -148,14 +164,14 @@
         <dt>HMAC secret baked in</dt>     <dd id="diag-hmac">—</dd>
         <dt>Version</dt>                  <dd id="diag-version">—</dd>
       </dl>
-    </section>
+    </details>
   </div>
 
   <div id="view-templates" data-view="templates" hidden>
     <section class="templates" aria-label="SMS templates">
       <header class="templates-header">
         <h1 class="templates-title">Message templates</h1>
-        <p class="templates-sub">Edit the SMS copy that goes out for each follow-up. Clearing a template restores the default.</p>
+        <p class="templates-sub">The text each follow-up sends. Tap a variable to drop it in; Reset puts the default back.</p>
       </header>
       <div id="templates-list" class="templates-list" aria-live="polite">
         <!-- One .tpl-card per job_type, injected by main.js. -->
@@ -164,13 +180,13 @@
   </div>
 
   <!-- SPN-05: Schedules tab — three numeric inputs (24h / 3day / review)
-       with live "(X days)" helper text + dirty-dot + Save + Reset-to-default.
+       with live "(X days)" helper text + unsaved pill + Save + Reset-to-default.
        Mirrors the Templates editor pattern. -->
   <div id="view-schedules" data-view="schedules" hidden>
     <section class="schedules" aria-label="Send schedules">
       <header class="schedules-header">
         <h1 class="schedules-title">Send schedules</h1>
-        <p class="schedules-sub">Delay (in hours) between event and SMS. Saved instantly. Pending jobs are rebased to the new delay.</p>
+        <p class="schedules-sub">How long after each event the text goes out. Pending texts move to the new timing when you save.</p>
       </header>
       <div id="schedules-list" class="schedules-list" aria-live="polite">
         <!-- One .sched-card per job_type, injected by main.js. -->
@@ -187,8 +203,8 @@
   <div id="view-logs" data-view="logs" hidden>
     <section class="logs" aria-label="Twilio message log">
       <header class="logs-header">
-        <h1 class="logs-title">Messages</h1>
-        <p class="logs-sub">Pulled live from Twilio. Outbound + inbound, most recent first. Includes the actual delivery status reported by carriers.</p>
+        <h1 class="logs-title">Message log</h1>
+        <p class="logs-sub">Every text in and out, straight from Twilio, with carrier delivery status.</p>
       </header>
       <section class="controls logs-controls" aria-label="Message filters">
         <div class="logs-filter-group" role="group" aria-label="Status">
@@ -211,15 +227,15 @@
         <div class="logs-filter-group" role="group" aria-label="Range">
           <span class="logs-filter-label">Range</span>
           <nav class="filters" role="tablist">
-            <button class="filter logs-filter" type="button" data-filter-key="days" data-filter-value="1"  role="tab" aria-selected="false">24h</button>
-            <button class="filter logs-filter" type="button" data-filter-key="days" data-filter-value="7"  role="tab" aria-selected="false">7d</button>
-            <button class="filter logs-filter" type="button" data-filter-key="days" data-filter-value="30" role="tab" aria-selected="true">30d</button>
+            <button class="filter logs-filter" type="button" data-filter-key="days" data-filter-value="1"  role="tab" aria-selected="false">24 hours</button>
+            <button class="filter logs-filter" type="button" data-filter-key="days" data-filter-value="7"  role="tab" aria-selected="false">7 days</button>
+            <button class="filter logs-filter" type="button" data-filter-key="days" data-filter-value="30" role="tab" aria-selected="true">30 days</button>
           </nav>
         </div>
         <div class="logs-freshness" id="logs-freshness" aria-live="polite"></div>
       </section>
       <div id="logs-list" class="logs-list" aria-live="polite">
-        <!-- One .log-row per Twilio message, injected by main.js. -->
+        <!-- A .logs-table of .log-row per Twilio message, injected by main.js. -->
       </div>
     </section>
   </div>
@@ -236,11 +252,16 @@
         <button class="chip" data-days="90" role="tab">90 days</button>
         <button class="chip" data-days="ytd" role="tab">Year to date</button>
       </div>
-      <button class="btn btn-ghost" id="ins-refresh" type="button">Refresh</button>
+      <button class="btn btn-tertiary" id="ins-refresh" type="button">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.61-3.89"></path><path d="M13.5 2.5v3h-3"></path></svg>
+        <span>Refresh</span>
+      </button>
       <span class="ins-synced" id="ins-synced"></span>
     </div>
-    <section class="ins-card" id="ins-warm"><h2>Replied, not booked</h2><p class="ins-hint">Customers waiting on a next step, newest reply first.</p><div class="ins-list"></div></section>
-    <section class="ins-card" id="ins-upcoming"><h2>This week</h2><div class="ins-list"></div></section>
+    <div class="ins-board">
+      <section class="ins-card" id="ins-warm"><h2>Replied, not booked</h2><p class="ins-hint">Customers waiting on a next step, newest reply first.</p><div class="ins-list"></div></section>
+      <section class="ins-card" id="ins-upcoming"><h2>This week</h2><div class="ins-list"></div></section>
+    </div>
     <section class="ins-card" id="ins-noshows" hidden><h2>No-shows</h2><div class="ins-list"></div></section>
     <section class="ins-card" id="ins-tiles"><h2>This period</h2><div class="ins-tiles"></div></section>
     <section class="ins-card" id="ins-funnel"><h2>Follow-ups</h2><div class="ins-bars"></div><div class="ins-tpl"></div></section>
@@ -249,24 +270,26 @@
   </div>
 
   <!-- Estimate card = one customer + one vehicle with ALL their pending/sent
-       follow-ups rendered as a vertical timeline. Preserves the OH4 aesthetic
-       (Fraunces name, soft cream card, oxblood accents) while adding timeline
-       structure for QAJ-02. -->
+       follow-ups rendered as a vertical timeline. -->
   <template id="estimate-card-template">
     <article class="estimate-card">
       <header class="estimate-card__header">
-        <h2 class="estimate-card__name"></h2>
-        <p class="estimate-card__contact">
-          <span class="estimate-phone mono"></span>
-          <span class="estimate-email"></span>
-        </p>
+        <div class="estimate-card__top">
+          <div class="estimate-card__id">
+            <h2 class="estimate-card__name"></h2>
+            <p class="estimate-card__contact">
+              <span class="estimate-phone mono"></span>
+              <span class="estimate-email"></span>
+            </p>
+          </div>
+          <p class="estimate-card__meta">
+            <span class="estimate-date"></span>
+          </p>
+        </div>
         <p class="estimate-card__vehicle">
           <span class="estimate-vehicle-desc"></span>
           <span class="estimate-vin mono" title=""></span>
           <span class="estimate-ro"></span>
-        </p>
-        <p class="estimate-card__meta">
-          <span class="estimate-date"></span>
         </p>
         <!-- BOK-01: booking controls. Customer committed to the work →
              Mark scheduled (with appointment date) stops the pre-work
@@ -275,20 +298,24 @@
         <div class="booking">
           <!-- BOK-03: the pill IS a Google Calendar link — Marco asked to
                "just click on the date and time to add it to your calendar". -->
-          <a class="booked-pill" hidden target="_blank" rel="noopener" title="Tap to add to your calendar">
-            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 8.5l3.5 3.5 7.5-8"/></svg>
+          <a class="booked-pill pill" hidden target="_blank" rel="noopener" title="Tap to add to your calendar">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="12" height="11" rx="2"/><path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3M5.5 10.5l1.7 1.7 3.3-3.4"/></svg>
             <span>Booked</span>
             <span class="booked-when mono"></span>
           </a>
           <button class="btn btn-secondary book-btn" type="button">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="12" height="11" rx="2"/><path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3"/></svg>
             <span>Mark scheduled</span>
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="12" height="11" rx="2"/><path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3"/></svg>
           </button>
-          <a class="btn btn-ghost gcal-link" target="_blank" rel="noopener" hidden>Add to Google Calendar</a>
+          <a class="btn btn-tertiary gcal-link" target="_blank" rel="noopener" hidden>
+            <span>Add to Google Calendar</span>
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2h5v5M14 2L7 9M12 9.5V13a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3.5"/></svg>
+          </a>
+          <span class="booking__spacer" aria-hidden="true"></span>
           <!-- CAN-01 (Marco): one-tap cancel of every pending follow-up on this
                estimate, next to Mark scheduled. Per-text Cancel stays too. -->
-          <button class="btn btn-ghost cancel-all-btn" type="button" hidden>Cancel follow-ups</button>
-          <button class="btn btn-ghost unbook-btn" type="button" hidden>Unmark</button>
+          <button class="btn btn-danger-text cancel-all-btn" type="button" hidden>Cancel follow-ups</button>
+          <button class="btn btn-danger-text unbook-btn" type="button" hidden>Unmark</button>
           <!-- BOK-02: custom branded date+time picker (Marco vetoed the
                native datetime-local control). Rendered by main.js. -->
           <div class="schedule-form book-form" hidden>
@@ -307,9 +334,9 @@
               </div>
             </div>
             <div class="dtp-foot">
-              <span class="dtp-picked mono"></span>
+              <span class="dtp-picked"></span>
+              <button class="btn btn-tertiary book-close-btn" type="button">Back</button>
               <button class="btn btn-primary book-save-btn" type="button">Save appointment</button>
-              <button class="btn btn-ghost book-close-btn" type="button">Back</button>
             </div>
           </div>
           <span class="job-error book-error" hidden></span>
@@ -329,11 +356,12 @@
           <span class="job-send">
             <span class="job-send-relative"></span>
             <span class="job-send-absolute mono"></span>
+            <span class="job-send-in"></span>
           </span>
           <!-- SCH-01: shown on pending rows whose send time Marco picked
                by hand (send_at_manual=1). -->
-          <span class="manual-tag" hidden>Scheduled by you</span>
-          <span class="timeline__sent-stamp" hidden></span>
+          <span class="manual-tag pill" hidden>Scheduled by you</span>
+          <span class="timeline__sent-stamp pill" hidden></span>
         </div>
         <figure class="sms-preview">
           <figcaption class="sms-label">Customer receives</figcaption>
@@ -342,7 +370,7 @@
         <footer class="job-actions">
           <button class="btn btn-primary send-now-btn" type="button">
             <span>Send now</span>
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M3 8h10"></path>
               <path d="M9 4l4 4-4 4"></path>
             </svg>
@@ -351,26 +379,26 @@
                means BOK-01 "Mark scheduled" (moves the estimate to the
                Scheduled section). The POST /queue/schedule endpoint and
                send_at_manual rebase protections remain server-side. -->
-          <button class="btn btn-ghost cancel-btn" type="button">Cancel</button>
+          <button class="btn btn-danger-text cancel-btn" type="button">Cancel</button>
           <!-- GLV-01: Resend lives in the same actions footer as Send-now but
                is shown ONLY when the job is already sent. main.js toggles the
                visibility based on each row's `sent` state. -->
           <button class="btn btn-secondary resend-btn" type="button" hidden>
-            <span>Resend</span>
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M3 8a5 5 0 1 1 1.5 3.5"></path>
               <path d="M3 3v4h4"></path>
             </svg>
+            <span>Resend</span>
           </button>
           <!-- GLV-04: Uncancel — only shown on rows with cancelled=1. Flips
                cancelled back to 0 so the row reappears under its native
                pending filter (Estimates or Work Completed). -->
           <button class="btn btn-secondary uncancel-btn" type="button" hidden>
-            <span>Uncancel</span>
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M3 8a5 5 0 1 1 1.5 3.5"></path>
               <path d="M3 3v4h4"></path>
             </svg>
+            <span>Restore</span>
           </button>
           <span class="job-error" hidden></span>
         </footer>
@@ -378,85 +406,96 @@
     </li>
   </template>
 
-  <!-- Empty state: warm, friendly. Not "NO PENDING JOBS" in caps. -->
+  <!-- Empty state: one sentence that says what to do next. -->
   <template id="empty-state-template">
     <section class="empty">
       <div class="empty-card">
-        <span class="empty-dot" aria-hidden="true"></span>
+        <span class="empty-dot state__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+        </span>
         <h1 class="empty-title">All caught up</h1>
-        <p class="empty-sub">Nothing queued right now — new estimates will appear here automatically.</p>
+        <p class="empty-sub">Nothing queued right now. New estimates show up here on their own.</p>
       </div>
     </section>
   </template>
 
   <template id="error-state-template">
     <section class="error">
-      <p class="error-msg"></p>
+      <div class="state-card">
+        <span class="state__icon state__icon--error" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>
+        </span>
+        <h2 class="state__title">Couldn't load the queue</h2>
+        <p class="error-msg"></p>
+        <button class="btn btn-secondary state__action error-retry" type="button">Try again</button>
+      </div>
     </section>
   </template>
 
-  <!-- WMH-04: one editable template per job_type. Work Sans chips, cream
-       card, oxblood CTA. Reuses .sms-bubble for the preview. -->
+  <!-- WMH-04: one editable template per job_type. -->
   <template id="template-card-template">
     <article class="tpl-card" data-job-type="">
       <header class="tpl-card__head">
         <h2 class="tpl-card__title"></h2>
         <span class="tpl-card__when"></span>
-        <span class="tpl-card__badge" hidden>Custom</span>
-        <span class="tpl-card__dirty-dot" hidden aria-label="Unsaved changes"></span>
+        <span class="tpl-card__badge pill" hidden>Custom</span>
+        <span class="tpl-card__dirty-dot pill" hidden>Unsaved changes</span>
       </header>
-      <p class="tpl-card__hint">Click a variable to insert it at the cursor.</p>
+      <p class="tpl-card__hint">Tap a variable to insert it where the cursor is.</p>
       <div class="tpl-card__chips" role="group" aria-label="Available variables"></div>
       <label class="tpl-card__label"></label>
       <textarea class="tpl-card__body" maxlength="2000" rows="4" spellcheck="true"></textarea>
       <div class="tpl-card__counter mono"><span class="tpl-card__count">0</span> / 2000</div>
       <figure class="tpl-card__preview">
-        <figcaption>Preview — rendered against a real pending job when one exists</figcaption>
+        <figcaption class="tpl-card__preview-label">Preview</figcaption>
         <div class="sms-bubble tpl-card__preview-body"></div>
       </figure>
       <footer class="tpl-card__actions">
-        <button type="button" class="btn btn-primary tpl-save" disabled>Save</button>
-        <button type="button" class="btn btn-ghost   tpl-reset" disabled>Reset to default</button>
+        <button type="button" class="btn btn-primary tpl-save" disabled>Save changes</button>
+        <button type="button" class="btn btn-tertiary tpl-reset" disabled>Reset to default</button>
         <span class="tpl-card__status" role="status" aria-live="polite"></span>
       </footer>
     </article>
   </template>
 
   <!-- SPN-05: one editable schedule per job_type. Numeric input + live (X days)
-       helper, dirty-dot, Save + Reset-to-default. Mirrors .tpl-card. -->
+       helper, unsaved pill, Save + Reset-to-default. Mirrors .tpl-card.
+       UKK-07: the On/Off switch reuses the CAL-05 .switch component. -->
   <template id="schedule-card-template">
     <article class="sched-card" data-job-type="">
       <header class="sched-card__head">
         <h2 class="sched-card__title"></h2>
         <span class="sched-card__when"></span>
-        <label class="sched-card__toggle">
-          <input type="checkbox" class="sched-card__toggle-input" />
-          <span class="sched-card__toggle-track" aria-hidden="true"></span>
-          <span class="sched-card__toggle-label">Enabled</span>
+        <span class="sched-card__badge pill" hidden>Custom</span>
+        <span class="sched-card__dirty-dot pill" hidden>Unsaved changes</span>
+        <label class="switch sched-card__toggle">
+          <input type="checkbox" class="switch__input sched-card__toggle-input" />
+          <span class="switch__track sched-card__toggle-track" aria-hidden="true"></span>
+          <span class="switch__label sched-card__toggle-label">On</span>
         </label>
-        <span class="sched-card__badge" hidden>Custom</span>
-        <span class="sched-card__dirty-dot" hidden aria-label="Unsaved changes"></span>
       </header>
       <div class="sched-card__row">
         <label class="sched-card__label">Delay</label>
         <input type="number" class="sched-card__input mono" min="1" max="720" step="1" inputmode="numeric" />
         <span class="sched-card__unit">hours</span>
-        <span class="sched-card__days mono"></span>
+        <span class="sched-card__days"></span>
       </div>
       <footer class="sched-card__actions">
-        <button type="button" class="btn btn-primary sched-save" disabled>Save</button>
-        <button type="button" class="btn btn-ghost   sched-reset" disabled>Reset to default</button>
+        <button type="button" class="btn btn-primary sched-save" disabled>Save changes</button>
+        <button type="button" class="btn btn-tertiary sched-reset" disabled>Reset to default</button>
         <span class="sched-card__status" role="status" aria-live="polite"></span>
       </footer>
     </article>
   </template>
 
   <!-- Sleep panel: shown when the local admin server has stopped responding
-       after the JS retry window (60s). Friendly, not scary. Same warm palette. -->
+       after the JS retry window (60s). Friendly, not scary. -->
   <template id="sleep-state-template">
     <section class="sleep">
       <div class="sleep-card">
-        <span class="sleep-badge" aria-hidden="true"></span>
+        <span class="sleep-badge" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+        </span>
         <h1 class="sleep-title">Queue Viewer is resting</h1>
         <p class="sleep-sub">
           It goes to sleep after 30&nbsp;minutes to save resources.
@@ -479,7 +518,13 @@
   <div class="drawer" id="tl-drawer" hidden role="dialog" aria-modal="true" aria-labelledby="tl-name">
     <div class="drawer-scrim" data-close></div>
     <div class="drawer-panel">
-      <div class="drawer-head"><div><div class="drawer-name" id="tl-name"></div><div class="drawer-sub" id="tl-sub"></div></div><button class="btn btn-ghost" type="button" data-close aria-label="Close">✕</button></div>
+      <span class="drawer-handle" aria-hidden="true"></span>
+      <div class="drawer-head">
+        <div><div class="drawer-name" id="tl-name" tabindex="-1"></div><div class="drawer-sub" id="tl-sub"></div></div>
+        <button class="btn btn-tertiary btn--icon" type="button" data-close aria-label="Close">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+        </button>
+      </div>
       <ol class="tl" id="tl-list"></ol>
     </div>
   </div>
@@ -490,7 +535,13 @@
   <div class="drawer appt-drawer" id="appt-drawer" hidden role="dialog" aria-modal="true" aria-label="Appointment">
     <div class="drawer-scrim" data-close></div>
     <div class="drawer-panel">
-      <div class="drawer-head"><div class="drawer-sub">Appointment</div><button class="btn btn-ghost" type="button" data-close aria-label="Close">✕</button></div>
+      <span class="drawer-handle" aria-hidden="true"></span>
+      <div class="drawer-head">
+        <div class="drawer-sub" id="appt-title" tabindex="-1">Appointment</div>
+        <button class="btn btn-tertiary btn--icon" type="button" data-close aria-label="Close">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+        </button>
+      </div>
       <div id="appt-body"></div>
     </div>
   </div>
