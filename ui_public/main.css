@@ -125,6 +125,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   text-decoration: none;
 }
 .skip-link:focus { top: 12px; }
+#queue:focus, #queue:focus-visible { outline: none; box-shadow: none; }
 
 .visually-hidden {
   position: absolute !important;
@@ -948,7 +949,8 @@ a.booked-pill[href]:hover { background: #D8ECDF; }
 .diagnostic {
   margin-top: 8px;
   margin-bottom: 40px;
-  padding: 0;
+  padding-top: 0;
+  padding-bottom: 0;
   background: transparent;
   border: 0;
   box-shadow: none;
@@ -956,7 +958,7 @@ a.booked-pill[href]:hover { background: #D8ECDF; }
 .diag-summary {
   list-style: none;
   display: inline-flex; align-items: center; gap: 8px;
-  height: 40px; padding: 0 12px; border-radius: var(--r-btn);
+  height: 40px; padding: 0 12px; margin-left: -12px; border-radius: var(--r-btn);
   color: var(--ink-2); font-size: 14px; font-weight: 600; cursor: pointer;
   user-select: none;
   transition: background-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
@@ -1257,7 +1259,7 @@ a.booked-pill[href]:hover { background: #D8ECDF; }
   /* Controls: chips rail scrolls edge to edge with faded edges; search
      fills the next row with the sort select compact on its right. */
   .controls { padding-top: 12px; gap: 10px; }
-  .filters-rail { flex: 1 1 100%; margin: 0 calc(-1 * var(--gutter)); }
+  .filters-rail { flex: 0 0 calc(100% + 2 * var(--gutter)); max-width: none; margin: 0 calc(-1 * var(--gutter)); }
   .filters-rail::before, .filters-rail::after {
     content: ""; position: absolute; top: 0; bottom: 0; width: 24px; z-index: 1; pointer-events: none;
   }
@@ -1269,13 +1271,13 @@ a.booked-pill[href]:hover { background: #D8ECDF; }
     scroll-snap-type: x proximity; gap: 6px;
     scrollbar-width: none;
   }
-  .filters-rail .filters { padding: 2px var(--gutter); }
+  .filters-rail .filters { padding: 2px var(--gutter); scroll-padding: 0 var(--gutter); }
   .filters-rail .filters::-webkit-scrollbar, .logs-controls .filters::-webkit-scrollbar { display: none; }
   .filters-rail .filter, .logs-controls .filter { flex: 0 0 auto; scroll-snap-align: start; }
   .search-wrap { flex: 1 1 0; min-width: 0; order: 2; }
   .sort-wrap { order: 3; flex: 0 0 auto; }
   .sort-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-  .sort-select { max-width: 150px; font-size: 13px; padding-left: 10px; }
+  .sort-select { max-width: 136px; font-size: 13px; padding-left: 10px; padding-right: 30px; background-position: right 10px center; }
 
   .queue { gap: 12px; padding-top: 12px; padding-bottom: 24px; }
   .estimate-card { padding: 16px; }
@@ -1311,12 +1313,26 @@ a.booked-pill[href]:hover { background: #D8ECDF; }
 
   .tpl-card, .sched-card, .ins-card { padding: 16px; }
   .templates-list, .schedules-list { gap: 12px; }
-  .tpl-card__head .pill, .sched-card__head .pill { margin-left: 0; }
-  .sched-card__toggle { margin-left: auto; }
+  .tpl-card__head .pill { margin-left: 0; }
+  /* Schedules card head: title | switch on row 1, timing + pills on row 2. */
+  .sched-card__head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "title toggle" "meta meta";
+    align-items: center;
+    column-gap: 12px; row-gap: 6px;
+  }
+  .sched-card__title { grid-area: title; }
+  .sched-card__toggle { grid-area: toggle; margin: 0; }
+  .sched-card__when, .sched-card__head .pill { grid-area: meta; }
+  .sched-card__head .pill { justify-self: end; margin-left: 0; }
+  .sched-card__head .pill + .pill { margin-right: 0; }
+  .sched-card__head .sched-card__when { justify-self: start; }
   .tpl-card__actions .tpl-save, .sched-card__actions .sched-save { flex: 1 1 auto; }
   .tpl-card__status, .sched-card__status { flex-basis: 100%; margin-left: 0; }
 
-  .logs-controls { flex-direction: column; align-items: stretch; gap: 10px; }
+  .logs-controls { flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 10px; }
+  .logs-filter-group { max-width: 100%; }
   .logs-filter-group { flex-direction: row; align-items: center; gap: 10px; min-width: 0; }
   .logs-filter-label { flex: 0 0 64px; }
   .logs-controls .filters { flex: 1 1 auto; min-width: 0; padding: 2px 0; }

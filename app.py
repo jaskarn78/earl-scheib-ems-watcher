@@ -3942,17 +3942,15 @@ NAV_HEADER = """<header class="topbar" role="banner">
       <a class="topnav-link" data-view="insights" href="/earlscheib#insights" role="tab" aria-selected="false">Insights</a>
     </nav>
     <div class="stats" aria-label="Queue statistics">
-      <span class="stat"><b id="stat-pending">0</b><span class="stat-label">Pending</span></span>
-      <span class="stat-sep" aria-hidden="true">·</span>
-      <span class="stat"><b id="stat-sent">0</b><span class="stat-label">Sent today</span></span>
-      <span class="stat-sep" aria-hidden="true">·</span>
-      <span class="stat"><b id="stat-failed">0</b><span class="stat-label">Failed</span></span>
+      <span class="stat"><b id="stat-pending">0</b><span class="stat-label">pending</span></span>
+      <span class="stat"><b id="stat-sent">0</b><span class="stat-label">sent today</span></span>
+      <span class="stat"><b id="stat-failed">0</b><span class="stat-label">failed</span></span>
     </div>
     <div class="sync" role="status" aria-live="polite">
       <span id="sync-dot" class="sync-dot" aria-hidden="true"></span>
-      <span id="sync-caption" class="sync-caption">Last synced —</span>
-      <button id="refresh-btn" class="refresh-btn" type="button" aria-label="Refresh (R)" title="Press R to refresh">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <span id="sync-caption" class="sync-caption">Updating…</span>
+      <button id="refresh-btn" class="refresh-btn" type="button" aria-label="Refresh (R)" title="Refresh (press R)">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M13.5 8a5.5 5.5 0 1 1-1.61-3.89"></path>
           <path d="M13.5 2.5v3h-3"></path>
         </svg>
