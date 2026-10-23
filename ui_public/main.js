@@ -236,14 +236,27 @@
     year: 'numeric', month: '2-digit', day: '2-digit',
   });
 
-  function formatAbsolute(unixSeconds) {
+  // Copy rule (spec 4.4): "Today 2:30 PM", "Tomorrow 9:00 AM",
+  // "Tue, Oct 27 · 10:30 AM" (year only when it differs from this year).
+  const weekdayDateFmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Los_Angeles', weekday: 'short', month: 'short', day: 'numeric',
+  });
+  const weekdayDateYearFmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Los_Angeles', weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
+  });
+  const yearFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', year: 'numeric' });
+  function formatWhen(unixSeconds) {
     if (!unixSeconds) return '';
     const d = new Date(unixSeconds * 1000);
-    if (dayKeyFmt.format(d) === dayKeyFmt.format(new Date())) {
-      return timeFmt.format(d);
-    }
-    return dateTimeFmt.format(d);
+    const now = new Date();
+    const dayKey = dayKeyFmt.format(d);
+    if (dayKey === dayKeyFmt.format(now)) return `Today ${timeFmt.format(d)}`;
+    if (dayKey === dayKeyFmt.format(new Date(now.getTime() + 86400000))) return `Tomorrow ${timeFmt.format(d)}`;
+    if (dayKey === dayKeyFmt.format(new Date(now.getTime() - 86400000))) return `Yesterday ${timeFmt.format(d)}`;
+    const dateFmt = yearFmt.format(d) === yearFmt.format(now) ? weekdayDateFmt : weekdayDateYearFmt;
+    return `${dateFmt.format(d)} · ${timeFmt.format(d)}`;
   }
+  function formatAbsolute(unixSeconds) { return formatWhen(unixSeconds); }
 
   function formatRelative(unixSeconds) {
     if (!unixSeconds) return '';
@@ -459,21 +472,24 @@
       const titleEl = queueEl.querySelector('.empty-title');
       const subEl   = queueEl.querySelector('.empty-sub');
       if (titleEl && (currentFilter !== 'all' || needle)) {
-        if (currentFilter === 'scheduled' && !needle) {
-          // BOK-01: teach the empty Scheduled view.
-          titleEl.textContent = 'No booked jobs yet';
-          if (subEl) {
-            subEl.textContent = 'When a customer books their work, hit '
-              + '"Mark scheduled" on their card — it moves here and their '
-              + 'follow-up texts stop.';
-          }
-        } else {
+        const EMPTY = {
+          estimates: ['No open estimates', 'New estimates from CCC show up here within a minute.'],
+          completed: ['No finished work waiting', 'When a repair is marked complete in CCC, the review request appears here.'],
+          scheduled: ['No booked appointments yet', 'When a customer books their work, tap "Mark scheduled" on their card. It moves here and their follow-up texts stop.'],
+          sent: ['Nothing sent yet', 'Texts that went out show up here with the time they were sent.'],
+          cancelled: ['No cancelled follow-ups', 'Texts you cancel land here. You can restore one any time.'],
+          'test-estimates': ['No test estimates', 'Use the reset button to seed fresh test jobs.'],
+          'test-completed': ['No test work completed', 'Use the reset button to seed fresh test jobs.'],
+        };
+        if (needle) {
           titleEl.textContent = 'No matches';
-          if (subEl) {
-            subEl.textContent = needle
-              ? `No jobs match "${currentSearch.trim()}".`
-              : 'No jobs in this view right now.';
-          }
+          if (subEl) subEl.textContent = `Nothing here matches "${currentSearch.trim()}". Try a name, phone, VIN or RO number.`;
+        } else if (EMPTY[currentFilter]) {
+          titleEl.textContent = EMPTY[currentFilter][0];
+          if (subEl) subEl.textContent = EMPTY[currentFilter][1];
+        } else {
+          titleEl.textContent = 'Nothing here';
+          if (subEl) subEl.textContent = 'No jobs in this view right now.';
         }
       }
     }
@@ -513,7 +529,10 @@
     const dateEl = frag.querySelector('.estimate-date');
     if (dateEl && group.created_at) {
       const d = new Date(group.created_at * 1000);
-      dateEl.textContent = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      const sameYear = d.getFullYear() === new Date().getFullYear();
+      dateEl.textContent = 'Estimate ' + d.toLocaleDateString('en-US',
+        sameYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' });
+      dateEl.title = 'Estimate written ' + d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
     }
 
     wireBookingUI(frag, group);
@@ -530,6 +549,15 @@
     });
     sortedJobs.forEach((job) => {
       timeline.appendChild(buildTimelineEntry(job));
+    });
+
+    // One primary action per card: the first pending "Send now" is red,
+    // any further pending ones step down to secondary.
+    const sendBtns = timeline.querySelectorAll(
+      '.timeline__entry[data-state="pending"]:not([data-suppressed]) .send-now-btn:not([hidden])',
+    );
+    sendBtns.forEach((b, i) => {
+      if (i > 0) { b.classList.remove('btn-primary'); b.classList.add('btn-secondary'); }
     });
 
     return frag;
@@ -549,8 +577,14 @@
     chip.textContent = JOB_TYPE_LABELS[job.job_type] || job.job_type;
     chip.setAttribute('data-type', job.job_type);
 
-    frag.querySelector('.job-send-relative').textContent = formatRelative(job.send_at);
-    frag.querySelector('.job-send-absolute').textContent = formatAbsolute(job.send_at);
+    // "Sends Tue, Oct 27 · 8:00 AM" with the countdown as quiet meta.
+    const sendEl = frag.querySelector('.job-send');
+    const overdue = job.send_at && job.send_at < Date.now() / 1000;
+    frag.querySelector('.job-send-relative').textContent = overdue ? 'Overdue' : 'Sends';
+    frag.querySelector('.job-send-absolute').textContent = formatWhen(job.send_at);
+    const inEl = frag.querySelector('.job-send-in');
+    if (inEl) inEl.textContent = overdue ? '' : formatRelative(job.send_at);
+    if (sendEl) sendEl.classList.toggle('job-send--overdue', !!overdue);
 
     // Show a "Sent at …" stamp instead of scheduled-send once delivered.
     // GLV-02: cancelled rows show "Cancelled" instead of "Sent" so the
@@ -564,7 +598,7 @@
       const stampEl = frag.querySelector('.timeline__sent-stamp');
       stampEl.hidden = false;
       const whenTs = job.sent_at && job.sent_at > 0 ? job.sent_at : job.send_at;
-      stampEl.textContent = 'Sent · ' + formatAbsolute(whenTs);
+      stampEl.textContent = 'Sent ' + formatWhen(whenTs);
       frag.querySelector('.job-send').hidden = true;
     } else if (job.booked === 1
                && (job.job_type === '24h' || job.job_type === '3day')) {
@@ -645,15 +679,27 @@
     statPendingEl.textContent = String(counters.pending);
     statSentEl.textContent    = String(counters.sentToday);
     statFailedEl.textContent  = String(counters.failed);
+    statFailedEl.classList.toggle('is-bad', counters.failed > 0);
   }
 
   // ---------- Send-now flow -------------------------------------------
 
+  // Errors Marco reads: what happened and what to do, in the app's voice.
+  // The server's reason is kept for the console; it only reaches the screen
+  // when it is already a sentence (not a snake_case tag or an HTTP code).
+  function friendlyError(what, parsed, status) {
+    const reason = parsed && parsed.error ? String(parsed.error) : '';
+    console.warn(`${what} failed`, status, reason);
+    if (reason && /\s/.test(reason) && !/^http/i.test(reason)) return `${what} didn't go through: ${reason}`;
+    return `${what} didn't go through. Try again.`;
+  }
+  const NETWORK_ERROR = "Can't reach the server. Check your connection and try again.";
+
   async function handleSendNow(job, entryEl, btnEl, errEl) {
-    const type = JOB_TYPE_LABELS[job.job_type] || job.job_type;
+    const type = (JOB_TYPE_LABELS[job.job_type] || job.job_type).toLowerCase();
     const confirmMsg = job.is_test === 1
-      ? `Send "${type}" SMS to test recipients (+15308450190 Jaskarn, +19254215772 Marco) right now?`
-      : `Send "${type}" SMS to ${job.name || 'this customer'} right now?`;
+      ? `Send the ${type} text to the test phones (Jaskarn and Marco) now?`
+      : `Send the ${type} text to ${job.name || 'this customer'} now?`;
     if (!window.confirm(confirmMsg)) return;
 
     btnEl.disabled = true;
@@ -683,22 +729,21 @@
       if (resp.status === 404) {
         counters.failed++;
         updateStats();
-        showEntryError(errEl, 'Already sent or cancelled — refreshing list…');
+        showEntryError(errEl, 'This text was already sent or cancelled. Refreshing…');
         setTimeout(fetchQueue, 600);
         return;
       }
 
       const parsed = await resp.json().catch(() => ({}));
-      const msg = parsed.error ? `Send failed: ${parsed.error}` : `Send failed (${resp.status})`;
       counters.failed++;
       updateStats();
-      showEntryError(errEl, msg);
+      showEntryError(errEl, friendlyError('The text', parsed, resp.status));
       btnEl.disabled = false;
 
     } catch (e) {
       counters.failed++;
       updateStats();
-      showEntryError(errEl, 'Network error — please retry');
+      showEntryError(errEl, NETWORK_ERROR);
       btnEl.disabled = false;
     }
   }
@@ -803,10 +848,7 @@
 
   // "Aug 12, 9:00 AM" (Pacific) — appointment dates are usually days out,
   // so always include the date.
-  function formatAppt(unixSeconds) {
-    if (!unixSeconds) return '';
-    return dateTimeFmt.format(new Date(unixSeconds * 1000));
-  }
+  function formatAppt(unixSeconds) { return formatWhen(unixSeconds); }
 
   // Prefilled Google Calendar event link — creates the event in whatever
   // Google account Marco is signed into. Zero-setup v1 of "connect my
@@ -853,7 +895,7 @@
 
     if (group.booked === 1) {
       pill.hidden = false;
-      whenEl.textContent = '· ' + formatAppt(group.appointment_at);
+      whenEl.textContent = formatAppt(group.appointment_at);
       bookBtn.querySelector('span').textContent = 'Change date';
       if (gcalSyncActive() || group.gcal_synced === 1) {
         // CAL-04/05: the booking is (or will be) on the calendar via the
@@ -922,7 +964,7 @@
   async function handleBook(group, formEl, errEl) {
     const btnEl = formEl.querySelector('.book-save-btn');
     const ts = dtpPickedTs(formEl);
-    if (!Number.isFinite(ts)) { showEntryError(errEl, 'Pick the appointment date first'); return; }
+    if (!Number.isFinite(ts)) { showEntryError(errEl, 'Pick the appointment date first.'); return; }
 
     btnEl.disabled = true;
     errEl.hidden = true; errEl.textContent = '';
@@ -933,7 +975,7 @@
         body: JSON.stringify({ estimate_key: group.key, appointment_at: ts }),
       });
       if (resp.status === 200) {
-        btnEl.textContent = 'Booked ✓';
+        btnEl.textContent = 'Booked';
         // MSG-02 (per Marco): after booking or rebooking, open the
         // customer's Messages thread with the confirmation text typed in,
         // so he only taps Send.
@@ -960,10 +1002,10 @@
         return;
       }
       const parsed = await resp.json().catch(() => ({}));
-      showEntryError(errEl, parsed.error ? `Booking failed: ${parsed.error}` : `Booking failed (${resp.status})`);
+      showEntryError(errEl, friendlyError('Saving the appointment', parsed, resp.status));
       btnEl.disabled = false;
     } catch (e) {
-      showEntryError(errEl, 'Network error — please retry');
+      showEntryError(errEl, NETWORK_ERROR);
       btnEl.disabled = false;
     }
   }
@@ -972,7 +1014,8 @@
     const who = group.name || formatPhone(group.phone) || 'this customer';
     const n = pending.length;
     if (!n) return;
-    if (!window.confirm(`Cancel ${n === 1 ? 'the pending follow-up text' : `all ${n} pending follow-up texts`} for ${who}?`)) return;
+    const first = (who.split(/\s+/)[0]) || who;
+    if (!window.confirm(`Cancel ${n === 1 ? 'the follow-up' : `all ${n} follow-ups`} for ${first}? Their review request after the work still goes out.`)) return;
     btnEl.disabled = true;
     errEl.hidden = true; errEl.textContent = '';
     const failed = [];
@@ -989,7 +1032,7 @@
       }
     }
     if (failed.length) {
-      errEl.textContent = `Could not cancel: ${failed.join(', ')}. Try the individual Cancel buttons.`;
+      errEl.textContent = `Couldn't cancel ${failed.length === 1 ? 'one of the texts' : 'some of the texts'}. Try the Cancel button on each one.`;
       errEl.hidden = false;
       btnEl.disabled = false;
     } else {
@@ -1000,7 +1043,7 @@
 
   async function handleUnbook(group, btnEl, errEl) {
     const who = group.name || formatPhone(group.phone) || 'this customer';
-    if (!window.confirm(`Un-mark ${who} as scheduled? Their follow-up texts will resume.`)) return;
+    if (!window.confirm(`Unmark ${who} as scheduled? Their follow-up texts start again.`)) return;
     btnEl.disabled = true;
     errEl.hidden = true; errEl.textContent = '';
     try {
@@ -1011,10 +1054,10 @@
       });
       if (resp.status === 200) { setTimeout(fetchQueue, 400); return; }
       const parsed = await resp.json().catch(() => ({}));
-      showEntryError(errEl, parsed.error ? `Failed: ${parsed.error}` : `Failed (${resp.status})`);
+      showEntryError(errEl, friendlyError('Unmarking', parsed, resp.status));
       btnEl.disabled = false;
     } catch (e) {
-      showEntryError(errEl, 'Network error — please retry');
+      showEntryError(errEl, NETWORK_ERROR);
       btnEl.disabled = false;
     }
   }
@@ -1158,21 +1201,22 @@
     if (gcalToggleWrap) gcalToggleWrap.hidden = !gcalConnected;
     if (gcalToggle && !gcalToggle.disabled) gcalToggle.checked = gcalEnabled;
     if (gcalToggleLbl) gcalToggleLbl.textContent = gcalEnabled ? 'Auto-sync on' : 'Auto-sync off';
+    gcalBar.classList.toggle('gsync--disconnected', !gcalConnected);
     if (gcalSyncBtn) gcalSyncBtn.hidden = !active;
     if (gcalDiscBtn) gcalDiscBtn.hidden = !gcalConnected;
 
     gcalBar.classList.toggle('gsync--notice', !!gcalNotice);
     let text = gcalFlash || gcalNotice;
     if (!text && !gcalConnected) {
-      text = 'Not connected. Bookings stay in this app; use "Add to Google Calendar" on a booking to add one by hand.';
+      text = 'Sign in once and every booking you mark here lands on your calendar.';
     } else if (!text && !gcalEnabled) {
-      const who = g.account ? `Connected as ${g.account}. ` : '';
-      text = `${who}Auto-sync is paused: new bookings, date changes and cancellations are not sent to your calendar until you turn it back on. Bookings not yet on your calendar show "Add to Google Calendar" meanwhile.`;
+      const who = g.account ? `${g.account} · ` : '';
+      text = `${who}Auto-sync is off. New bookings and changes stay out of your calendar until you turn it back on.`;
     } else if (!text) {
-      const who = g.account ? ` as ${g.account}` : '';
+      const who = g.account ? `${g.account} · ` : '';
       const n = Number(g.events) || 0;
-      text = `Connected${who} · ${n} booking${n === 1 ? '' : 's'} synced · last check ${agoText(g.last_sync)}`;
-      if (g.last_error) text += ` · problem: ${g.last_error}`;
+      text = `${who}${n} booking${n === 1 ? '' : 's'} synced · checked ${agoText(g.last_sync)}`;
+      if (g.last_error) { console.warn('gcal sync problem', g.last_error); text += " · the last sync didn't finish; it retries on its own"; }
     }
     if (gcalText) gcalText.textContent = text;
     // The cards' pill/link state depends on whether the sync is running;
@@ -1189,7 +1233,7 @@
     gcalToggle.addEventListener('change', async () => {
       const enabled = gcalToggle.checked;
       gcalToggle.disabled = true;
-      if (gcalToggleLbl) gcalToggleLbl.textContent = enabled ? 'Turning on…' : 'Pausing…';
+      if (gcalToggleLbl) gcalToggleLbl.textContent = enabled ? 'Turning on…' : 'Turning off…';
       let ok = false;
       try {
         const r = await fetch(`${API_BASE}/gcal/enable`, {
@@ -1203,7 +1247,7 @@
         // Say so instead of letting the next poll silently flip the switch back.
         gcalToggle.disabled = false;
         gcalToggle.checked = !enabled;
-        gcalNotice = `Could not turn auto-sync ${enabled ? 'on' : 'off'}. Check your connection and try again.`;
+        gcalNotice = `Couldn't turn auto-sync ${enabled ? 'on' : 'off'}. Check your connection and try again.`;
         setTimeout(() => { gcalNotice = ''; fetchDiagnostic(); }, 6000);
       }
       fetchDiagnostic();
@@ -1227,7 +1271,7 @@
   }
   if (gcalDiscBtn) {
     gcalDiscBtn.addEventListener('click', async () => {
-      if (!window.confirm('Disconnect Google Calendar? New bookings will stop syncing. Events already on your calendar stay.')) return;
+      if (!window.confirm('Disconnect Google Calendar? New bookings stop syncing. Events already on your calendar stay.')) return;
       try {
         await fetch(`${API_BASE}/gcal/disconnect`, { method: 'POST' });
       } catch (_) { /* next diagnostic poll reconciles */ }
@@ -1243,8 +1287,9 @@
     if (!r) return;
     gcalFlashKind = r === 'connected' ? 'ok' : 'error';
     gcalFlash = r === 'connected'
-      ? 'Google Calendar connected. Upcoming bookings are being added now.'
-      : `Google Calendar sign-in did not finish: ${qs.get('why') || 'unknown error'}. Tap Connect to try again.`;
+      ? 'Google Calendar connected. Your upcoming bookings are being added now.'
+      : "Google sign-in didn't finish. Tap Continue with Google to try again.";
+    if (gcalFlashKind === 'error') console.warn('gcal connect failed:', qs.get('why') || 'unknown');
     if (gcalFlashKind === 'error') { try { localStorage.removeItem(GCAL_BANNER_SNOOZE_KEY); } catch (_) { /* ignore */ } }
     setTimeout(() => { gcalFlash = ''; gcalFlashKind = ''; fetchDiagnostic(); }, 20000);
     const chip = document.querySelector('.filter[data-filter="scheduled"]');
@@ -1307,7 +1352,7 @@
       ? `<a class="btn btn-secondary" href="tel:${escapeHTML(group.phone)}">Call</a>`
         + `<a class="btn btn-secondary" href="/earlscheib/messages#${encodeURIComponent(group.phone)}">Text</a>`
       : '')
-      + '<button class="btn btn-ghost appt-history" type="button">History</button>';
+      + '<button class="btn btn-tertiary appt-history" type="button">History</button>';
     acts.querySelector('.appt-history').addEventListener('click', () => {
       closeApptPopup();
       window.openTimeline(key);
@@ -1315,6 +1360,8 @@
     card.appendChild(acts);
     apptBody.appendChild(frag);
     apptDrawer.hidden = false;
+    const t = document.getElementById('appt-title');
+    if (t) requestAnimationFrame(() => t.focus({ preventScroll: true }));
   }
 
   function closeApptPopup() {
@@ -1387,16 +1434,16 @@
   async function handleSchedule(job, formEl, btnEl, errEl) {
     const input = formEl.querySelector('.schedule-input');
     if (!input.value) {
-      showEntryError(errEl, 'Pick a date and time first');
+      showEntryError(errEl, 'Pick a date and time first.');
       return;
     }
     const ts = Math.floor(new Date(input.value).getTime() / 1000);
     if (!Number.isFinite(ts)) {
-      showEntryError(errEl, "That date didn't parse — try again");
+      showEntryError(errEl, "That date didn't read right. Try again.");
       return;
     }
     if (ts < Math.floor(Date.now() / 1000) - 60) {
-      showEntryError(errEl, 'That time is in the past — pick a future time');
+      showEntryError(errEl, 'That time has already passed. Pick a later one.');
       return;
     }
 
@@ -1424,19 +1471,16 @@
         return;
       }
       if (resp.status === 404) {
-        showEntryError(errEl, 'Already sent or cancelled — refreshing list…');
+        showEntryError(errEl, 'This text was already sent or cancelled. Refreshing…');
         setTimeout(fetchQueue, 600);
         btnEl.disabled = false;
         return;
       }
       const parsed = await resp.json().catch(() => ({}));
-      showEntryError(
-        errEl,
-        parsed.error ? `Schedule failed: ${parsed.error}` : `Schedule failed (${resp.status})`,
-      );
+      showEntryError(errEl, friendlyError('Scheduling', parsed, resp.status));
       btnEl.disabled = false;
     } catch (e) {
-      showEntryError(errEl, 'Network error — please retry');
+      showEntryError(errEl, NETWORK_ERROR);
       btnEl.disabled = false;
     }
   }
@@ -1446,10 +1490,10 @@
   // Resend an already-sent job. Does NOT flip the row's sent flag — the row
   // stays "sent" and the audit trail of repeated sends lives in sms_log.
   async function handleResend(job, entryEl, btnEl, errEl) {
-    const type = JOB_TYPE_LABELS[job.job_type] || job.job_type;
+    const type = (JOB_TYPE_LABELS[job.job_type] || job.job_type).toLowerCase();
     const confirmMsg = job.is_test === 1
-      ? `Resend "${type}" SMS to test recipients now? (original row stays marked sent)`
-      : `Resend "${type}" SMS to ${job.name || 'this customer'} now? (original row stays marked sent)`;
+      ? `Send the ${type} text to the test phones again? The original stays marked sent.`
+      : `Send the ${type} text to ${job.name || 'this customer'} again? The original stays marked sent.`;
     if (!window.confirm(confirmMsg)) return;
 
     btnEl.disabled = true;
@@ -1476,12 +1520,11 @@
         return;
       }
       const parsed = await resp.json().catch(() => ({}));
-      const msg = parsed.error ? `Resend failed: ${parsed.error}` : `Resend failed (${resp.status})`;
-      showEntryError(errEl, msg);
+      showEntryError(errEl, friendlyError('The resend', parsed, resp.status));
       btnEl.disabled = false;
       if (btnEl.querySelector('span')) btnEl.querySelector('span').textContent = origLabel || 'Resend';
     } catch (e) {
-      showEntryError(errEl, 'Network error — please retry');
+      showEntryError(errEl, NETWORK_ERROR);
       btnEl.disabled = false;
       if (btnEl.querySelector('span')) btnEl.querySelector('span').textContent = origLabel || 'Resend';
     }
@@ -1493,8 +1536,8 @@
   // Estimates / Work Completed as pending. No SMS is sent — Marco can then
   // click Send-now (or wait for the scheduler when it's re-enabled).
   async function handleUncancel(job, entryEl, btnEl, errEl) {
-    const type = JOB_TYPE_LABELS[job.job_type] || job.job_type;
-    if (!window.confirm(`Restore "${type}" follow-up for ${job.name || 'this customer'} to pending?`)) return;
+    const type = (JOB_TYPE_LABELS[job.job_type] || job.job_type).toLowerCase();
+    if (!window.confirm(`Restore the ${type} for ${job.name || 'this customer'}? It goes back to pending and sends on schedule.`)) return;
 
     btnEl.disabled = true;
     errEl.hidden = true;
@@ -1516,13 +1559,10 @@
         return;
       }
       const parsed = await resp.json().catch(() => ({}));
-      const msg = parsed.error
-        ? `Uncancel failed: ${parsed.error}`
-        : `Uncancel failed (${resp.status})`;
-      showEntryError(errEl, msg);
+      showEntryError(errEl, friendlyError('Restoring', parsed, resp.status));
       btnEl.disabled = false;
     } catch (e) {
-      showEntryError(errEl, 'Network error — please retry');
+      showEntryError(errEl, NETWORK_ERROR);
       btnEl.disabled = false;
     }
   }
@@ -1533,7 +1573,7 @@
     const stampEl = entryEl.querySelector('.timeline__sent-stamp');
     if (stampEl) {
       stampEl.hidden = false;
-      stampEl.textContent = 'Sent · ' + stamp;
+      stampEl.textContent = 'Sent Today ' + stamp;
     }
     const sendMeta = entryEl.querySelector('.job-send');
     if (sendMeta) sendMeta.hidden = true;
@@ -1549,8 +1589,8 @@
 
   async function handleCancel(job, entryEl, btnEl, errEl) {
     const name = job.name || 'this customer';
-    const type = JOB_TYPE_LABELS[job.job_type] || job.job_type;
-    if (!window.confirm(`Cancel the "${type}" follow-up for ${name}?`)) return;
+    const type = (JOB_TYPE_LABELS[job.job_type] || job.job_type).toLowerCase();
+    if (!window.confirm(`Cancel the ${type} for ${name}? You can restore it later from the Cancelled view.`)) return;
 
     entryEl.dataset.state = 'cancelling';
     btnEl.disabled = true;
@@ -1585,19 +1625,18 @@
         }, 260);
       } else {
         const parsed = await resp.json().catch(() => ({}));
-        const msg = parsed.error ? `Cancel failed: ${parsed.error}` : `Cancel failed (${resp.status})`;
         counters.failed++;
         updateStats();
         entryEl.dataset.state = 'pending';
         btnEl.disabled = false;
-        showEntryError(errEl, msg);
+        showEntryError(errEl, friendlyError('Cancelling', parsed, resp.status));
       }
     } catch (_) {
       counters.failed++;
       updateStats();
       entryEl.dataset.state = 'pending';
       btnEl.disabled = false;
-      showEntryError(errEl, 'Network error — please retry');
+      showEntryError(errEl, NETWORK_ERROR);
     }
   }
 
@@ -1609,7 +1648,8 @@
       const resp = await fetch(`${API_BASE}/queue?status=all`, { cache: 'no-store' });
       if (!resp.ok) {
         const parsed = await resp.json().catch(() => ({}));
-        showError(parsed.error || `queue fetch failed (${resp.status})`);
+        console.warn('queue fetch failed', resp.status, parsed.error || '');
+        showError("The queue didn't load. It retries on its own every few seconds.");
         handlePollFailure();
         return;
       }
@@ -1653,6 +1693,8 @@
     queueEl.innerHTML = '';
     const frag = errorTpl.content.cloneNode(true);
     frag.querySelector('.error-msg').textContent = msg;
+    const retry = frag.querySelector('.error-retry');
+    if (retry) retry.addEventListener('click', () => { retry.disabled = true; fetchQueue(); });
     queueEl.appendChild(frag);
   }
 
@@ -1673,12 +1715,16 @@
     if (!lastFetchedAt || !syncCaptionEl) return;
     const ago = Math.max(0, Math.round((Date.now() - lastFetchedAt) / 1000));
     if (ago < 2) {
-      syncCaptionEl.textContent = 'Last synced just now';
+      syncCaptionEl.textContent = 'Updated just now';
     } else if (ago < 60) {
-      syncCaptionEl.textContent = `Last synced ${ago}s ago`;
+      syncCaptionEl.textContent = `Updated ${ago} s ago`;
     } else {
       const m = Math.floor(ago / 60);
-      syncCaptionEl.textContent = `Last synced ${m}m ago`;
+      syncCaptionEl.textContent = `Updated ${m} min ago`;
+    }
+    // Dot: green while polls land on time, amber once the data is stale.
+    if (syncDotEl) {
+      syncDotEl.classList.toggle('is-stale', ago >= REFRESH_MS / 1000 * 2 || inRetryMode);
     }
   }
 
@@ -1937,6 +1983,63 @@
     });
   }
 
+  // ---------- Empty / error blocks for Templates, Schedules, Logs -------
+  // Same shape as the queue's states: icon well, title, one sentence, and
+  // (for errors) a Try again button. Never shows codes or tags to Marco.
+  const STATE_ICONS = {
+    inbox: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>',
+    alert: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>',
+    chat:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>',
+  };
+  function stateBlock(opts) {
+    const el = document.createElement('div');
+    el.className = 'state' + (opts.error ? ' state--error' : '') + (opts.inline ? ' state--inline' : '');
+    const icon = document.createElement('span');
+    icon.className = 'state__icon' + (opts.error ? ' state__icon--error' : '');
+    icon.setAttribute('aria-hidden', 'true');
+    icon.innerHTML = STATE_ICONS[opts.icon || (opts.error ? 'alert' : 'inbox')];
+    el.appendChild(icon);
+    const title = document.createElement('h3');
+    title.className = 'state__title';
+    title.textContent = opts.title;
+    el.appendChild(title);
+    if (opts.text) {
+      const text = document.createElement('p');
+      text.className = 'state__text';
+      text.textContent = opts.text;
+      el.appendChild(text);
+    }
+    if (opts.action && opts.onAction) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn btn-secondary state__action';
+      btn.textContent = opts.action;
+      btn.addEventListener('click', () => { btn.disabled = true; opts.onAction(); });
+      el.appendChild(btn);
+    }
+    return el;
+  }
+
+  // Plain-English tooltips for the Templates variable chips (spec 4.4).
+  const PLACEHOLDER_HELP = {
+    first_name:   "Customer's first name",
+    name:         "Customer's full name",
+    phone:        "Customer's phone number",
+    vin:          'Vehicle VIN',
+    year:         'Vehicle year',
+    make:         'Vehicle make (e.g. Honda)',
+    model:        'Vehicle model (e.g. Civic LX)',
+    short_model:  'Short model name (e.g. Civic)',
+    vehicle_desc: 'Full vehicle description',
+    ro_id:        'Repair order number',
+    doc_id:       'CCC estimate ID',
+    email:        "Customer's email",
+    appt_time:    'Booked drop-off date and time',
+    shop_name:    'Shop name',
+    shop_phone:   'Shop phone number',
+    review_url:   'Google review link',
+  };
+
   // ---------- Templates page (WMH-04) ---------------------------------
   //
   // URL paths (respect API_BASE_PATH):
@@ -1979,11 +2082,10 @@
     try {
       const resp = await fetch(tplListURL, { cache: 'no-store' });
       if (!resp.ok) {
+        console.warn('templates fetch failed', resp.status);
         listEl.innerHTML = '';
-        const err = document.createElement('p');
-        err.className = 'templates-error';
-        err.textContent = `Couldn't load templates (${resp.status}).`;
-        listEl.appendChild(err);
+        listEl.appendChild(stateBlock({ error: true, title: "Couldn't load the templates",
+          text: 'The server answered, but not with the templates.', action: 'Try again', onAction: () => loadTemplates(true) }));
         return;
       }
       const data = await resp.json();
@@ -2005,10 +2107,8 @@
       templateState.loaded = true;
     } catch (_) {
       listEl.innerHTML = '';
-      const err = document.createElement('p');
-      err.className = 'templates-error';
-      err.textContent = "Couldn't reach the server. Please retry.";
-      listEl.appendChild(err);
+      listEl.appendChild(stateBlock({ error: true, title: "Can't reach the server",
+        text: 'Check your connection, then try again.', action: 'Try again', onAction: () => loadTemplates(true) }));
     }
   }
 
@@ -2031,11 +2131,22 @@
     allPlaceholders.forEach((name) => {
       const chip = document.createElement('button');
       chip.type = 'button';
-      chip.className = 'tpl-chip';
+      chip.className = 'tpl-chip mono';
       chip.textContent = `{${name}}`;
       chip.setAttribute('data-var', name);
+      chip.title = PLACEHOLDER_HELP[name] || name.replace(/_/g, ' ');
+      chip.setAttribute('aria-label', `Insert ${chip.title}`);
       chipsEl.appendChild(chip);
     });
+
+    // "Preview · sent to Carla's 2021 Civic" when a real pending job exists.
+    const previewCap = frag.querySelector('.tpl-card__preview-label');
+    if (previewCap) {
+      const smp = templateState.sample || {};
+      const who = smp.first_name || (smp.name ? String(smp.name).split(/\s+/)[0] : '');
+      const car = [smp.year, smp.short_model || smp.model].filter(Boolean).join(' ');
+      previewCap.textContent = who ? `Preview · sent to ${who}'s ${car || 'vehicle'}` : 'Preview';
+    }
 
     // Textarea + preview + counter.
     const taId = `tpl-body-${jt.job_type}`;
@@ -2054,9 +2165,20 @@
     const statusEl  = frag.querySelector('.tpl-card__status');
 
     // Initial render.
-    counter.textContent = String(textarea.value.length);
+    const counterWrap = frag.querySelector('.tpl-card__counter');
+    const paintCounter = (n) => {
+      counter.textContent = String(n);
+      if (counterWrap) {
+        counterWrap.classList.toggle('is-warn', n >= 1500 && n < 2000);
+        counterWrap.classList.toggle('is-max', n >= 2000);
+      }
+    };
+    paintCounter(textarea.value.length);
     previewEl.textContent = renderTemplate(textarea.value, templateState.sample);
     resetBtn.disabled = !jt.is_override;
+    // Auto-grow the body with its content (min 4 rows via CSS min-height).
+    const autoGrow = () => { textarea.style.height = 'auto'; textarea.style.height = `${textarea.scrollHeight + 2}px`; };
+    requestAnimationFrame(autoGrow);
 
     // Chip click -> insert at cursor.
     chipsEl.addEventListener('click', (ev) => {
@@ -2072,7 +2194,8 @@
     // Debounced preview + dirty tracking.
     let previewTimer = null;
     textarea.addEventListener('input', () => {
-      counter.textContent = String(textarea.value.length);
+      paintCounter(textarea.value.length);
+      autoGrow();
       if (previewTimer) clearTimeout(previewTimer);
       previewTimer = setTimeout(() => {
         previewEl.textContent = renderTemplate(textarea.value, templateState.sample);
@@ -2081,6 +2204,7 @@
       const saved = templateState.cards[jt.job_type] || { body: '' };
       const isDirty = textarea.value !== saved.body;
       dirtyDot.hidden = !isDirty;
+      article.classList.toggle('is-dirty', isDirty);
       saveBtn.disabled = !isDirty;
       // Reset enabled when an override exists (regardless of dirty) so Marco
       // can revert to default after saving without needing to clear the box.
@@ -2096,7 +2220,7 @@
       // Instant client-side validation: balanced braces. Server validates
       // authoritatively; this just gives instant UX feedback.
       if (!bracesBalanced(val)) {
-        showStatus(statusEl, 'Unclosed { or mismatched braces', 'error');
+        showStatus(statusEl, 'A { is missing its closing }. Fix the braces and save again.', 'error');
         return;
       }
       saveBtn.disabled = true;
@@ -2109,7 +2233,8 @@
         });
         const parsed = await resp.json().catch(() => ({}));
         if (!resp.ok) {
-          const msg = parsed.detail || parsed.error || `Save failed (${resp.status})`;
+          console.warn('template save failed', resp.status, parsed);
+          const msg = parsed.detail || friendlyError('Saving', parsed, resp.status);
           showStatus(statusEl, msg, 'error');
           // Re-enable so user can retry.
           saveBtn.disabled = false;
@@ -2119,7 +2244,7 @@
         applySavedTemplate(jt.job_type, parsed, textarea, badge, dirtyDot,
                            saveBtn, resetBtn, statusEl, previewEl);
       } catch (_) {
-        showStatus(statusEl, 'Network error — please retry', 'error');
+        showStatus(statusEl, NETWORK_ERROR, 'error');
         saveBtn.disabled = false;
         resetBtn.disabled = !(templateState.cards[jt.job_type] || {}).is_override;
       }
@@ -2127,7 +2252,7 @@
 
     // Reset to default — PUT with empty body (server DELETEs the row).
     resetBtn.addEventListener('click', async () => {
-      if (!window.confirm('Restore the default copy for this follow-up?')) return;
+      if (!window.confirm('Put the default text back for this follow-up? Your custom version is removed.')) return;
       saveBtn.disabled = true;
       resetBtn.disabled = true;
       try {
@@ -2138,7 +2263,7 @@
         });
         const parsed = await resp.json().catch(() => ({}));
         if (!resp.ok) {
-          showStatus(statusEl, parsed.error || `Reset failed (${resp.status})`, 'error');
+          showStatus(statusEl, friendlyError('Resetting', parsed, resp.status), 'error');
           saveBtn.disabled = false;
           resetBtn.disabled = false;
           return;
@@ -2146,7 +2271,7 @@
         applySavedTemplate(jt.job_type, parsed, textarea, badge, dirtyDot,
                            saveBtn, resetBtn, statusEl, previewEl);
       } catch (_) {
-        showStatus(statusEl, 'Network error — please retry', 'error');
+        showStatus(statusEl, NETWORK_ERROR, 'error');
         saveBtn.disabled = false;
         resetBtn.disabled = false;
       }
@@ -2184,10 +2309,15 @@
 
     badge.hidden = !parsed.is_override;
     dirtyDot.hidden = true;
+    const card = textarea.closest('.tpl-card');
+    if (card) card.classList.remove('is-dirty');
+    const tCounter = card ? card.querySelector('.tpl-card__counter') : null;
+    if (tCounter) { tCounter.classList.toggle('is-warn', newBody.length >= 1500 && newBody.length < 2000); tCounter.classList.toggle('is-max', newBody.length >= 2000); }
+    textarea.style.height = 'auto'; textarea.style.height = `${textarea.scrollHeight + 2}px`;
     saveBtn.disabled = true;
     resetBtn.disabled = !parsed.is_override;
 
-    const msg = parsed.is_override ? 'Saved · just now' : 'Reverted to default';
+    const msg = parsed.is_override ? 'Saved' : 'Default text restored';
     showStatus(statusEl, msg, 'ok');
   }
 
@@ -2274,11 +2404,10 @@
     try {
       const resp = await fetch(schedListURL, { cache: 'no-store' });
       if (!resp.ok) {
+        console.warn('schedules fetch failed', resp.status);
         listEl.innerHTML = '';
-        const err = document.createElement('p');
-        err.className = 'schedules-error';
-        err.textContent = `Couldn't load schedules (${resp.status}).`;
-        listEl.appendChild(err);
+        listEl.appendChild(stateBlock({ error: true, title: "Couldn't load the schedules",
+          text: 'The server answered, but not with the schedules.', action: 'Try again', onAction: () => loadSchedules(true) }));
         return;
       }
       const data = await resp.json();
@@ -2301,10 +2430,8 @@
       scheduleState.loaded = true;
     } catch (_) {
       listEl.innerHTML = '';
-      const err = document.createElement('p');
-      err.className = 'schedules-error';
-      err.textContent = "Couldn't reach the server. Please retry.";
-      listEl.appendChild(err);
+      listEl.appendChild(stateBlock({ error: true, title: "Can't reach the server",
+        text: 'Check your connection, then try again.', action: 'Try again', onAction: () => loadSchedules(true) }));
     }
   }
 
@@ -2335,7 +2462,7 @@
     const toggleLabel = frag.querySelector('.sched-card__toggle-label');
     const enabled = jt.enabled !== false;
     toggleInput.checked = enabled;
-    toggleLabel.textContent = enabled ? 'Enabled' : 'Disabled';
+    toggleLabel.textContent = enabled ? 'On' : 'Off';
     article.classList.toggle('is-disabled', !enabled);
 
     input.min  = String(scheduleState.bounds.min);
@@ -2349,6 +2476,7 @@
       const cur = parseInt(input.value, 10);
       const isDirty = Number.isFinite(cur) && cur !== saved.delay_hours;
       dirtyDot.hidden = !isDirty;
+      article.classList.toggle('is-dirty', isDirty);
       saveBtn.disabled = !isDirty;
       resetBtn.disabled = !saved.is_override;
       statusEl.textContent = '';
@@ -2368,7 +2496,7 @@
           || cur < scheduleState.bounds.min
           || cur > scheduleState.bounds.max) {
         showStatus(statusEl,
-          `Must be ${scheduleState.bounds.min}–${scheduleState.bounds.max} hours`,
+          `Pick a delay between ${scheduleState.bounds.min} and ${scheduleState.bounds.max} hours.`,
           'error');
         return;
       }
@@ -2382,7 +2510,7 @@
         });
         const parsed = await resp.json().catch(() => ({}));
         if (!resp.ok) {
-          showStatus(statusEl, parsed.error || `Save failed (${resp.status})`, 'error');
+          showStatus(statusEl, friendlyError('Saving', parsed, resp.status), 'error');
           saveBtn.disabled = false;
           resetBtn.disabled = !(scheduleState.cards[jt.job_type] || {}).is_override;
           return;
@@ -2390,7 +2518,7 @@
         applySavedSchedule(jt.job_type, parsed, input, daysEl, badge,
                            dirtyDot, saveBtn, resetBtn, statusEl);
       } catch (_) {
-        showStatus(statusEl, 'Network error — please retry', 'error');
+        showStatus(statusEl, NETWORK_ERROR, 'error');
         saveBtn.disabled = false;
         resetBtn.disabled = !(scheduleState.cards[jt.job_type] || {}).is_override;
       }
@@ -2398,7 +2526,7 @@
 
     // Reset to default: PUT {} so server reverts.
     resetBtn.addEventListener('click', async () => {
-      if (!window.confirm('Restore the default delay for this follow-up?')) return;
+      if (!window.confirm('Put the default delay back for this follow-up? Pending texts move to the default timing.')) return;
       saveBtn.disabled = true;
       resetBtn.disabled = true;
       try {
@@ -2409,7 +2537,7 @@
         });
         const parsed = await resp.json().catch(() => ({}));
         if (!resp.ok) {
-          showStatus(statusEl, parsed.error || `Reset failed (${resp.status})`, 'error');
+          showStatus(statusEl, friendlyError('Resetting', parsed, resp.status), 'error');
           saveBtn.disabled = false;
           resetBtn.disabled = false;
           return;
@@ -2417,12 +2545,12 @@
         // Reset reverts both fields server-side; the toggle visual must follow.
         const newEnabled = parsed.enabled !== false;
         toggleInput.checked = newEnabled;
-        toggleLabel.textContent = newEnabled ? 'Enabled' : 'Disabled';
+        toggleLabel.textContent = newEnabled ? 'On' : 'Off';
         article.classList.toggle('is-disabled', !newEnabled);
         applySavedSchedule(jt.job_type, parsed, input, daysEl, badge,
                            dirtyDot, saveBtn, resetBtn, statusEl);
       } catch (_) {
-        showStatus(statusEl, 'Network error — please retry', 'error');
+        showStatus(statusEl, NETWORK_ERROR, 'error');
         saveBtn.disabled = false;
         resetBtn.disabled = false;
       }
@@ -2444,15 +2572,15 @@
         if (!resp.ok) {
           // Revert checkbox on failure.
           toggleInput.checked = !next;
-          toggleLabel.textContent = !next ? 'Enabled' : 'Disabled';
+          toggleLabel.textContent = !next ? 'On' : 'Off';
           article.classList.toggle('is-disabled', next);
-          showStatus(statusEl, parsed.error || `Toggle failed (${resp.status})`, 'error');
+          showStatus(statusEl, friendlyError(next ? 'Turning on' : 'Turning off', parsed, resp.status), 'error');
           return;
         }
         // Reflect server state.
         const newEnabled = parsed.enabled !== false;
         toggleInput.checked = newEnabled;
-        toggleLabel.textContent = newEnabled ? 'Enabled' : 'Disabled';
+        toggleLabel.textContent = newEnabled ? 'On' : 'Off';
         article.classList.toggle('is-disabled', !newEnabled);
 
         // Update cached state.
@@ -2469,18 +2597,18 @@
           ? parsed.cancelled_jobs : 0;
         let msg;
         if (newEnabled) {
-          msg = 'Enabled';
+          msg = 'Turned on. New texts of this kind go out on schedule.';
         } else {
           msg = cancelled > 0
-            ? `Disabled · ${cancelled} pending job${cancelled === 1 ? '' : 's'} cancelled`
-            : 'Disabled';
+            ? `Turned off. ${cancelled} pending text${cancelled === 1 ? '' : 's'} cancelled.`
+            : 'Turned off. No new texts of this kind go out.';
         }
         showStatus(statusEl, msg, 'ok');
       } catch (_) {
         toggleInput.checked = !next;
-        toggleLabel.textContent = !next ? 'Enabled' : 'Disabled';
+        toggleLabel.textContent = !next ? 'On' : 'Off';
         article.classList.toggle('is-disabled', next);
-        showStatus(statusEl, 'Network error — please retry', 'error');
+        showStatus(statusEl, NETWORK_ERROR, 'error');
       } finally {
         toggleInput.disabled = false;
       }
@@ -2511,20 +2639,14 @@
 
     badge.hidden = !parsed.is_override;
     dirtyDot.hidden = true;
+    const card = input.closest('.sched-card');
+    if (card) card.classList.remove('is-dirty');
     saveBtn.disabled = true;
     resetBtn.disabled = !parsed.is_override;
 
     const rebased = typeof parsed.rebased_jobs === 'number' ? parsed.rebased_jobs : 0;
-    let msg;
-    if (parsed.is_override) {
-      msg = rebased > 0
-        ? `Saved · ${rebased} pending job${rebased === 1 ? '' : 's'} rebased`
-        : 'Saved';
-    } else {
-      msg = rebased > 0
-        ? `Reverted · ${rebased} pending job${rebased === 1 ? '' : 's'} rebased`
-        : 'Reverted to default';
-    }
+    const moved = rebased > 0 ? ` ${rebased} pending text${rebased === 1 ? '' : 's'} moved to the new timing.` : '';
+    const msg = parsed.is_override ? `Saved.${moved}` : `Default delay restored.${moved}`;
     showStatus(statusEl, msg, 'ok');
   }
 
@@ -2544,6 +2666,7 @@
         const on = a.getAttribute('data-view') === target;
         a.classList.toggle('is-active', on);
         a.setAttribute('aria-selected', on ? 'true' : 'false');
+        if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
       });
       viewQueue.hidden = target !== 'queue';
       viewTpl.hidden   = target !== 'templates';
@@ -2568,6 +2691,15 @@
     });
 
     // Allow direct-link via hash (e.g. refreshes on /earlscheib#templates).
+    // The Queue link is /earlscheib#queue and #queue is the cards container:
+    // the browser's fragment scroll would land past the chips and search, so
+    // put the view back at the top (both scroll containers: window on
+    // desktop, the view itself on the mobile app-shell).
+    if (window.location.hash === '#queue') {
+      const toTop = () => { window.scrollTo(0, 0); viewQueue.scrollTop = 0; };
+      toTop();
+      window.addEventListener('load', () => requestAnimationFrame(toTop), { once: true });
+    }
     if (window.location.hash === '#templates') activate('templates');
     if (window.location.hash === '#schedules') activate('schedules');
     if (window.location.hash === '#logs')      activate('logs');
@@ -2602,13 +2734,16 @@
         headers: { 'Accept': 'application/json' },
       });
       if (!resp.ok) {
-        // 502 with a body still has useful diagnostic — show the tag.
+        // The tag (e.g. twilio_creds_missing) goes to the console, not to Marco.
         let detail = `HTTP ${resp.status}`;
         try {
           const data = await resp.json();
           if (data && data.error) detail = `${detail} (${data.error})`;
         } catch (_) { /* body wasn't JSON */ }
-        listEl.innerHTML = `<div class="logs-empty">Failed to load: ${escapeHTML(detail)}.</div>`;
+        console.warn('message log fetch failed', detail);
+        listEl.innerHTML = '';
+        listEl.appendChild(stateBlock({ error: true, title: "Couldn't load the log from Twilio",
+          text: 'Retrying in 15 seconds.', action: 'Try again', onAction: loadTwilioMessages }));
         updateLogsFreshness(null);
         return;
       }
@@ -2616,7 +2751,10 @@
       renderTwilioMessages(data.rows || []);
       updateLogsFreshness(data);
     } catch (exc) {
-      listEl.innerHTML = `<div class="logs-empty">Failed to load: ${escapeHTML(String(exc))}.</div>`;
+      console.warn('message log fetch failed', exc);
+      listEl.innerHTML = '';
+      listEl.appendChild(stateBlock({ error: true, title: "Can't reach the server",
+        text: 'Retrying in 15 seconds.', action: 'Try again', onAction: loadTwilioMessages }));
       updateLogsFreshness(null);
     }
   }
@@ -2625,46 +2763,52 @@
     const listEl = document.getElementById('logs-list');
     if (!listEl) return;
     if (!rows.length) {
-      listEl.innerHTML = '<div class="logs-empty">No messages in this range.</div>';
+      listEl.innerHTML = '';
+      listEl.appendChild(stateBlock({ icon: 'chat', title: 'No messages in this range',
+        text: 'Nothing went in or out for these filters. Try a wider range.' }));
       return;
     }
-    const frag = document.createDocumentFragment();
+    const ARROW_OUT = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12L12 4M6 4h6v6"/></svg>';
+    const ARROW_IN  = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4L4 12M10 12H4V6"/></svg>';
+    const STATUS_LABEL = { delivered: 'Delivered', sent: 'Sent', failed: 'Failed', undelivered: 'Undelivered',
+      received: 'Received', queued: 'Queued', sending: 'Sending', accepted: 'Accepted', receiving: 'Receiving' };
+    const table = document.createElement('div');
+    table.className = 'logs-table';
+    table.setAttribute('role', 'table');
+    table.innerHTML = '<div class="logs-table__head" role="row" aria-hidden="true">'
+      + '<span>When</span><span></span><span>Customer</span><span>Message</span><span style="text-align:right">Status</span></div>';
     rows.forEach((row) => {
       const div = document.createElement('div');
       div.className = 'log-row';
-      const ts = new Date((row.date_sent || 0) * 1000);
-      const tsStr = isFinite(ts.getTime()) && row.date_sent
-        ? `${ts.toLocaleDateString()} ${ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-        : '—';
+      div.setAttribute('role', 'row');
       const direction = row.direction === 'inbound' ? 'inbound' : 'outbound';
-      const arrow = direction === 'inbound' ? '↓' : '↑';
+      div.dataset.direction = direction;
+      const tsStr = row.date_sent ? formatWhen(row.date_sent) : '—';
       const status = (row.status || '').toLowerCase();
-      const customer = row.customer_name || '—';
+      const statusLabel = STATUS_LABEL[status] || (status ? status.charAt(0).toUpperCase() + status.slice(1) : '—');
+      const customer = row.customer_name || (direction === 'inbound' ? 'Unknown number' : 'Customer');
       const matchPhone = direction === 'inbound' ? (row.from || '') : (row.to || '');
-      const phone = matchPhone || '—';
-      const jobType = row.job_type || '—';
+      const phone = matchPhone ? formatPhone(matchPhone) : '';
+      const jobType = row.job_type && JOB_TYPE_LABELS[row.job_type] ? JOB_TYPE_LABELS[row.job_type] : (row.job_type && row.job_type !== '—' ? row.job_type : '');
       const body = row.body || '';
-      const errParts = [];
-      if (row.error_code) errParts.push(`code ${row.error_code}`);
-      if (row.error_message) errParts.push(row.error_message);
-      const err = errParts.length
-        ? `<small>${escapeHTML(errParts.join(' — '))}</small>`
-        : '';
-      const sidShort = row.sid ? row.sid.slice(0, 8) : '—';
+      // Carrier failures: the message, never the numeric code (that stays in the title).
+      let err = '';
+      if (row.error_message || row.error_code) {
+        const txt = row.error_message || 'The carrier could not deliver this text.';
+        err = `<small title="${escapeAttr(row.error_code ? `Twilio error ${row.error_code}` : '')}">${escapeHTML(txt)}</small>`;
+      }
       div.innerHTML = `
         <div class="log-row__ts">${escapeHTML(tsStr)}</div>
-        <div class="log-row__direction" data-direction="${escapeAttr(direction)}" title="${escapeAttr(direction)}">${arrow}</div>
-        <div class="log-row__customer">${escapeHTML(customer)}</div>
-        <div class="log-row__phone">${escapeHTML(phone)}</div>
-        <div class="log-row__job-type">${escapeHTML(jobType)}</div>
-        <div class="log-row__status" data-status="${escapeAttr(status)}">${escapeHTML(status || '—')}</div>
+        <div class="log-row__direction" data-direction="${escapeAttr(direction)}" title="${direction === 'inbound' ? 'From the customer' : 'From the shop'}">${direction === 'inbound' ? ARROW_IN : ARROW_OUT}</div>
+        <div class="log-row__customer">${escapeHTML(customer)}<span class="log-row__phone mono">${escapeHTML(phone)}</span><span class="log-row__job-type">${escapeHTML(jobType)}</span></div>
         <div class="log-row__body">${escapeHTML(body)}${err}</div>
-        <div class="log-row__sid" title="${escapeAttr(row.sid || '')}">${escapeHTML(sidShort)}</div>
+        <div class="log-row__status pill" data-status="${escapeAttr(status)}">${escapeHTML(statusLabel)}</div>
+        <div class="log-row__sid" title="${escapeAttr(row.sid || '')}" hidden>${escapeHTML(row.sid ? row.sid.slice(0, 8) : '')}</div>
       `;
-      frag.appendChild(div);
+      table.appendChild(div);
     });
     listEl.innerHTML = '';
-    listEl.appendChild(frag);
+    listEl.appendChild(table);
   }
 
   function updateLogsFreshness(data) {
@@ -2676,10 +2820,13 @@
     }
     const stale = Number(data.stale_seconds || 0);
     const count = Number(data.count || 0);
+    const noun = count === 1 ? 'message' : 'messages';
     if (stale <= 1) {
-      el.textContent = `${count} messages · just refreshed`;
+      el.textContent = `${count} ${noun} · checked just now`;
+    } else if (stale < 60) {
+      el.textContent = `${count} ${noun} · checked ${stale} s ago`;
     } else {
-      el.textContent = `${count} messages · ${stale}s ago`;
+      el.textContent = `${count} ${noun} · checked ${Math.floor(stale / 60)} min ago`;
     }
   }
 
@@ -2735,6 +2882,9 @@
   const rel = (ts) => { if (!ts) return 'never'; const d = Math.floor((Date.now() / 1000 - ts) / 86400); return d <= 0 ? 'today' : d === 1 ? '1 day ago' : d + ' days ago'; };
   const when = (ts) => new Date(ts * 1000).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
   const nameBtn = (row) => `<button class="ins-name" type="button" data-timeline-key="${esc(row.key)}">${esc(row.name || fmtPhone(row.phone))}</button>`;
+  // Phone under the name as quiet mono meta (the insights payload carries no vehicle).
+  const phoneMeta = (row) => (row.name && row.phone ? `<span class="mono">${esc(fmtPhone(row.phone))}</span>` : '');
+  const CHEV = '<span class="ins-chev" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3l5 5-5 5"/></svg></span>';
 
   async function loadInsights(refresh) {
     const root = document.getElementById('view-insights');
@@ -2753,7 +2903,11 @@
       const resp = await fetch(`${API_BASE}/insights?days=${insDays}`);
       if (!resp.ok) throw new Error(resp.status);
       data = await resp.json();
-    } catch (err) { root.querySelector('#ins-foot').textContent = 'Could not load insights.'; return; }
+    } catch (err) {
+      console.warn('insights fetch failed', err);
+      root.querySelector('#ins-foot').textContent = "Couldn't load the numbers. Tap Refresh to try again.";
+      return;
+    }
     renderInsights(data);
   }
 
@@ -2762,28 +2916,36 @@
       const el = document.querySelector(`#${id} .ins-list`);
       el.innerHTML = rows.length ? rows.map(fmt).join('') : `<div class="ins-empty">${empty}</div>`;
     };
-    list('ins-warm', d.warm_leads, (w) => `<div class="ins-row"><div>${nameBtn(w)}<div class="ins-sub">${esc(w.last_reply)}</div></div><div class="ins-meta">${rel(w.last_reply_at)}<br>${w.estimate_total ? money(w.estimate_total) : ''}</div><a class="btn btn-sm" href="/earlscheib/messages#${encodeURIComponent(w.phone)}">Reply</a></div>`, 'No open replies right now.');
-    list('ins-upcoming', d.bookings_upcoming, (b) => `<div class="ins-row"><div>${nameBtn(b)}<div class="ins-sub">${when(b.appointment_at)}</div></div><div class="ins-meta">${b.estimate_total ? money(b.estimate_total) : ''}</div></div>`, 'Nothing booked yet.');
+    list('ins-warm', d.warm_leads, (w) => `<div class="ins-row"><div style="min-width:0">${nameBtn(w)}<div class="ins-sub">${phoneMeta(w)}${phoneMeta(w) ? ' · ' : ''}${esc(w.last_reply)}</div></div><div class="ins-meta">${rel(w.last_reply_at)}${w.estimate_total ? '<br>' + money(w.estimate_total) : ''}</div><a class="btn btn-sm" href="/earlscheib/messages#${encodeURIComponent(w.phone)}">Reply</a></div>`, 'No open replies right now. Replies that have not turned into a booking show up here.');
+    list('ins-upcoming', d.bookings_upcoming, (b) => `<div class="ins-row"><div style="min-width:0">${nameBtn(b)}<div class="ins-sub">${phoneMeta(b)}</div></div><div class="ins-meta">${esc(formatWhen(b.appointment_at))}${b.estimate_total ? '<br>' + money(b.estimate_total) : ''}</div>${CHEV}</div>`, 'Nothing booked for this week yet.');
     const ns = document.getElementById('ins-noshows'); ns.hidden = d.no_shows.length === 0;
-    list('ins-noshows', d.no_shows, (n) => `<div class="ins-row"><div>${nameBtn(n)}<div class="ins-sub">was due ${when(n.appointment_at)}</div></div><div class="ins-meta">${n.days_overdue} ${n.days_overdue === 1 ? 'day' : 'days'}</div><a class="btn btn-sm" href="/earlscheib/messages#${encodeURIComponent(n.phone)}">Text</a></div>`, '');
+    list('ins-noshows', d.no_shows, (n) => `<div class="ins-row"><div style="min-width:0">${nameBtn(n)}<div class="ins-sub">Was due ${esc(formatWhen(n.appointment_at))}</div></div><div class="ins-meta">${n.days_overdue} ${n.days_overdue === 1 ? 'day' : 'days'} ago</div><a class="btn btn-sm" href="/earlscheib/messages#${encodeURIComponent(n.phone)}">Text</a></div>`, '');
     const t = d.tiles;
     const tile = (label, v, prev, fmt) => { const delta = prev ? Math.round((v - prev) / prev * 100) : null; return `<div class="ins-tile"><div class="ins-v">${fmt(v)}</div><div class="ins-l">${label}</div>${delta === null ? '' : `<div class="ins-d ${delta >= 0 ? 'up' : 'down'}">${delta >= 0 ? '▲' : '▼'} ${Math.abs(delta)}% vs prior</div>`}</div>`; };
     document.querySelector('#ins-tiles .ins-tiles').innerHTML = [
       tile('estimates', t.estimates.value, t.estimates.prev, String), tile('texted', t.texted.value, t.texted.prev, String),
       tile('replies', t.replies.value, t.replies.prev, String), tile('bookings', t.bookings.value, t.bookings.prev, String),
       tile('closed ROs', t.closed_ros.value, t.closed_ros.prev, String), tile('revenue per CCC', t.revenue.value, t.revenue.prev, money),
-      tile('avg ticket', t.avg_ticket.value, t.avg_ticket.prev, money), tile('your median reply', t.marco_reply_median_min.value, t.marco_reply_median_min.prev, (m) => m ? (m < 90 ? Math.round(m) + ' min' : (m / 60).toFixed(1) + ' h') : '–'),
+      tile('avg ticket', t.avg_ticket.value, t.avg_ticket.prev, money), tile('your median reply', t.marco_reply_median_min.value, t.marco_reply_median_min.prev, (m) => m ? (m < 90 ? Math.round(m) + ' min' : (m / 60).toFixed(1) + ' h') : '—'),
     ].join('');
     const max = Math.max(1, d.funnel[0].n);
     document.querySelector('#ins-funnel .ins-bars').innerHTML = d.funnel.map((f) => `<div class="ins-bar"><span class="ins-bar-l">${esc(f.label)}</span><span class="ins-bar-t"><span class="ins-bar-f" style="width:${(f.n / max * 100).toFixed(1)}%"></span></span><span class="ins-bar-v">${f.n}${f.revenue ? ' · ' + money(f.revenue) : ''}</span></div>`).join('');
     const tp = d.template_reply_rate;
-    document.querySelector('#ins-funnel .ins-tpl').innerHTML = ['24h', '3day', 'review'].map((k) => `<span>${k === '24h' ? '24-hour' : k === '3day' ? '3-day' : 'Review'}: ${tp[k].replied}/${tp[k].sent} replied</span>`).join(' · ');
+    document.querySelector('#ins-funnel .ins-tpl').innerHTML = ['24h', '3day', 'review'].map((k) => `<span>${k === '24h' ? '24-hour follow-up' : k === '3day' ? '3-day check-in' : 'Review request'}: ${tp[k].replied} of ${tp[k].sent} replied</span>`).join(' · ');
     const mmax = Math.max(1, ...d.revenue_by_month.map((m) => m.revenue));
-    document.querySelector('#ins-revenue .ins-cols').innerHTML = d.revenue_by_month.map((m) => `<div class="ins-col"><div class="ins-col-v">${money(m.revenue)}</div><div class="ins-col-b" style="height:${(m.revenue / mmax * 100).toFixed(0)}%"></div><div class="ins-col-l">${m.month.slice(5)}/${m.month.slice(2, 4)} · ${m.closed_ros}</div></div>`).join('') || '<div class="ins-empty">No closed repair orders yet.</div>';
+    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const colsEl = document.querySelector('#ins-revenue .ins-cols');
+    colsEl.classList.toggle('is-empty', !d.revenue_by_month.length);
+    if (d.revenue_by_month.length) {
+      colsEl.innerHTML = d.revenue_by_month.map((m) => `<div class="ins-col"><div class="ins-col-v">${money(m.revenue)}</div><div class="ins-col-b" style="height:${(m.revenue / mmax * 100).toFixed(0)}%"></div><div class="ins-col-l">${MONTHS[Number(m.month.slice(5, 7)) - 1] || m.month.slice(5)} ${m.month.slice(2, 4)} · ${m.closed_ros} RO${m.closed_ros === 1 ? '' : 's'}</div></div>`).join('');
+    } else {
+      colsEl.innerHTML = '';
+      colsEl.appendChild(stateBlock({ inline: true, title: 'No closed repair orders yet', text: 'Revenue appears here once a repair order closes in CCC.' }));
+    }
     // Cents matter here and nowhere else: the whole period's texting bill is a
     // couple of dollars, so money()'s rounding would print "$1" for $0.83.
     document.getElementById('ins-foot').textContent = `Twilio cost $${Number(d.twilio_cost).toFixed(2)} this period · ${d.placeholder_estimates.n} of ${d.placeholder_estimates.of} open estimates still at the $472.50 placeholder`;
-    const s = d.synced_at; document.getElementById('ins-synced').textContent = `exports synced ${rel(s.ro_exports)} · texts synced ${rel(s.inbound_sms)}`;
+    const s = d.synced_at; document.getElementById('ins-synced').textContent = `CCC exports synced ${rel(s.ro_exports)} · texts synced ${rel(s.inbound_sms)}`;
     document.querySelectorAll('[data-timeline-key]').forEach((b) => b.addEventListener('click', () => window.openTimeline && window.openTimeline(b.dataset.timelineKey)));
   }
 
@@ -2800,15 +2962,24 @@
   window.openTimeline = async function (key) {
     const dr = document.getElementById('tl-drawer'); if (!dr) return;
     dr.hidden = false; document.getElementById('tl-list').innerHTML = '<li class="tl-empty">Loading…</li>';
+    const nameEl = document.getElementById('tl-name');
+    if (nameEl) requestAnimationFrame(() => nameEl.focus({ preventScroll: true }));
     try {
       const resp = await fetch(`${API_BASE}/customer?key=${encodeURIComponent(key)}`);
       if (!resp.ok) throw new Error(resp.status);
       const d = await resp.json();
       document.getElementById('tl-name').textContent = d.header.name || d.header.phone;
       document.getElementById('tl-sub').textContent = [d.header.vehicle, d.header.estimate_total ? '$' + Math.round(d.header.estimate_total).toLocaleString('en-US') + ' est.' : '', d.header.status].filter(Boolean).join(' · ');
-      const icon = { estimate: '📄', text: '💬', reply: '↩︎', booking: '📅', ro_closed: '✅' };
-      document.getElementById('tl-list').innerHTML = d.events.map((e) => `<li class="tl-ev tl-${e.kind}"><span class="tl-ic">${icon[e.kind] || '•'}</span><div><div class="tl-l">${esc(e.label)}</div>${e.detail ? `<div class="tl-d">${esc(e.detail)}</div>` : ''}<div class="tl-t">${new Date(e.t * 1000).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</div></div></li>`).join('') || '<li class="tl-empty">No events.</li>';
-    } catch (err) { document.getElementById('tl-list').innerHTML = '<li class="tl-empty">Could not load this customer.</li>'; }
+      const ic = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+      const icon = {
+        estimate:  ic('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h6"/>'),
+        text:      ic('<path d="M4 12L12 4M6 4h6v6"/>'),
+        reply:     ic('<path d="M12 4L4 12M10 12H4V6"/>'),
+        booking:   ic('<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/>'),
+        ro_closed: ic('<path d="M5 12l4 4L19 6"/>'),
+      };
+      document.getElementById('tl-list').innerHTML = d.events.map((e) => `<li class="tl-ev tl-${e.kind}"><span class="tl-ic">${icon[e.kind] || ic('<circle cx="12" cy="12" r="3"/>')}</span><div><div class="tl-l">${esc(e.label)}</div>${e.detail ? `<div class="tl-d">${esc(e.detail)}</div>` : ''}<div class="tl-t">${new Date(e.t * 1000).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</div></div></li>`).join('') || '<li class="tl-empty">No events.</li>';
+    } catch (err) { console.warn('timeline fetch failed', err); document.getElementById('tl-list').innerHTML = "<li class=\"tl-empty\">Couldn't load this customer's history. Close and try again.</li>"; }
   };
   document.querySelectorAll('#tl-drawer [data-close]').forEach((b) => b.addEventListener('click', () => { document.getElementById('tl-drawer').hidden = true; }));
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { const dr = document.getElementById('tl-drawer'); if (dr) dr.hidden = true; } });
