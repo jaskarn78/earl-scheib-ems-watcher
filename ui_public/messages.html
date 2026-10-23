@@ -256,6 +256,10 @@
   .bk-label{margin:16px 0 8px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);}
   .bk-days{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 6px;scroll-snap-type:x proximity;scrollbar-width:none;}
   .bk-days::-webkit-scrollbar{display:none;}
+  .bk-label-row{display:flex;align-items:center;justify-content:space-between;}
+  .bk-arrows{display:flex;gap:6px;}
+  .bk-arrow{width:32px;height:28px;border:1px solid var(--hairline-strong);border-radius:8px;background:var(--surface);color:var(--ink);font:inherit;font-size:18px;line-height:1;cursor:pointer;}
+  .bk-arrow:hover{border-color:var(--ink-3);}
   .bk-day{flex:0 0 auto;width:58px;padding:8px 0;display:flex;flex-direction:column;align-items:center;gap:2px;border:1px solid var(--hairline-strong);border-radius:12px;background:var(--surface);font:inherit;color:var(--ink);cursor:pointer;scroll-snap-align:start;transition:background-color .14s ease-out,border-color .14s ease-out;}
   .bk-day:hover{border-color:var(--ink-3);}
   .bk-dow{font-size:11px;font-weight:600;letter-spacing:.03em;color:var(--ink-2);}
@@ -406,7 +410,7 @@
   <div class="drawer-panel bk-panel">
     <div class="drawer-head"><div><div class="drawer-name" id="bk-title" tabindex="-1">Book</div><div class="drawer-sub" id="bk-sub"></div></div><button class="btn btn-ghost" type="button" data-bk-close aria-label="Close">✕</button></div>
     <p class="bk-current" id="bk-current" hidden></p>
-    <div class="bk-label" id="bk-days-label">Drop-off day</div>
+    <div class="bk-label bk-label-row"><span id="bk-days-label">Drop-off day</span><span class="bk-arrows"><button class="bk-arrow" type="button" data-bk-scroll="-1" aria-label="Earlier days">‹</button><button class="bk-arrow" type="button" data-bk-scroll="1" aria-label="Later days">›</button></span></div>
     <div class="bk-days" id="bk-days" role="listbox" aria-labelledby="bk-days-label"></div>
     <div class="bk-label" id="bk-slots-label">Time</div>
     <div class="bk-slots" id="bk-slots" role="listbox" aria-labelledby="bk-slots-label"></div>
@@ -721,7 +725,8 @@
   const bkWhen=ts=>new Date(ts*1000).toLocaleString("en-US",{weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"});
   function bkRender(){
     const today=bkMidnight(Date.now()); let html="";
-    for(let i=0;i<30;i++){
+    // BKT-02: 120 days (Marco booked a job a month out and the old 30 ran out)
+    for(let i=0;i<120;i++){
       const d=new Date(today); d.setDate(today.getDate()+i);
       const sel=bk.day&&d.getTime()===bk.day.getTime();
       html+=`<button type="button" class="bk-day" role="option" aria-selected="${sel}" data-i="${i}">`+
@@ -766,6 +771,8 @@
   function showDone(msg){ if(!bkDone) return; bkDone.textContent=msg; bkDone.hidden=false; announce(msg); clearTimeout(showDone._t); showDone._t=setTimeout(()=>{bkDone.hidden=true;},6000); }
   if(bkEl){
     bkDays.addEventListener("click",e=>{ const b=e.target.closest(".bk-day"); if(!b) return; const d=bkMidnight(Date.now()); d.setDate(d.getDate()+Number(b.dataset.i)); bk.day=d; bkRender(); });
+    // BKT-02: arrows page the day strip a week at a time (no scrollbar on a desktop mouse)
+    bkEl.querySelectorAll("[data-bk-scroll]").forEach(b=>b.addEventListener("click",()=>{ bkDays.scrollBy({left:Number(b.dataset.bkScroll)*7*66,behavior:"smooth"}); }));
     bkSlots.addEventListener("click",e=>{ const b=e.target.closest(".bk-slot:not([disabled])"); if(!b) return; bk.mins=Number(b.dataset.m); bkRender(); });
     bkEl.querySelectorAll("[data-bk-close]").forEach(b=>b.addEventListener("click",closeBook));
     document.addEventListener("keydown",e=>{ if(e.key==="Escape"&&!bkEl.hidden) closeBook(); });
