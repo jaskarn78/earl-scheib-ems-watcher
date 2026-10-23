@@ -42,3 +42,7 @@ server.py
 /admin-ui-*.png
 CLAUDE_CODE_PROMPT.md
 claude-code-project/
+
+# CAL-04: Google Calendar OAuth token (Pi runtime, 0600) — NEVER commit
+gcal_token.json
+gcal_token.json.tmp

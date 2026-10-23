@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse, parse_qs
 from urllib.request import urlopen, Request
-from urllib.error import URLError
+from urllib.error import URLError, HTTPError
 import base64
 import json
 
@@ -104,6 +104,37 @@ SMS_ALLOWLIST = set()
 # this env var is "1". Useful for inside-a-shift end-to-end testing; leave
 # dedup intact so duplicate /estimate POSTs still skip.
 IMMEDIATE_SEND_FOR_TESTING = os.getenv("IMMEDIATE_SEND_FOR_TESTING", "") == "1"
+
+# CAL-04 (R-0001): Google Calendar sync. Bookings made in the admin UI are
+# mirrored into Marco's Google Calendar automatically once he has connected
+# the app (one-time Google sign-in). Client id/secret come from the Pi .env;
+# the OAuth refresh token lives in GCAL_TOKEN_PATH (0600, never in git).
+# The *_URL / *_BASE overrides exist so tests can point at a fake Google.
+GCAL_CLIENT_ID = os.getenv("GCAL_CLIENT_ID", "")
+GCAL_CLIENT_SECRET = os.getenv("GCAL_CLIENT_SECRET", "")
+GCAL_REDIRECT_URI = os.getenv(
+    "GCAL_REDIRECT_URI",
+    "https://notify.earlscheibconcord.com/earlscheibconcord/gcal/callback",
+)
+GCAL_TOKEN_PATH = os.getenv(
+    "GCAL_TOKEN_PATH",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "gcal_token.json"),
+)
+GCAL_AUTH_URL = os.getenv("GCAL_AUTH_URL", "https://accounts.google.com/o/oauth2/v2/auth")
+GCAL_TOKEN_URL = os.getenv("GCAL_TOKEN_URL", "https://oauth2.googleapis.com/token")
+GCAL_REVOKE_URL = os.getenv("GCAL_REVOKE_URL", "https://oauth2.googleapis.com/revoke")
+GCAL_USERINFO_URL = os.getenv("GCAL_USERINFO_URL", "https://www.googleapis.com/oauth2/v3/userinfo")
+GCAL_API_BASE = os.getenv("GCAL_API_BASE", "https://www.googleapis.com/calendar/v3")
+GCAL_CALENDAR_ID = os.getenv("GCAL_CALENDAR_ID", "primary")
+GCAL_SCOPES = (
+    "https://www.googleapis.com/auth/calendar.events "
+    "https://www.googleapis.com/auth/userinfo.email"
+)
+GCAL_TZ = "America/Los_Angeles"
+GCAL_EVENT_DURATION_S = 3600          # bookings have no end time; show 1h
+GCAL_SYNC_EVERY_S = int(os.getenv("GCAL_SYNC_EVERY_S", "60"))
+GCAL_STATE_TTL_S = 600                # OAuth state nonce lifetime
+GCAL_HTTP_TIMEOUT_S = 20
 
 # WNC-01: Persistent auto-send toggle backed by the app_settings DB table.
 # The SCHEDULER_ENABLED env var is only a first-boot seed — once the
@@ -502,6 +533,23 @@ def init_db():
     cur.execute(
         "INSERT OR IGNORE INTO app_settings(key, value, updated_at) VALUES (?, ?, ?)",
         (AUTO_SEND_SETTING_KEY, _AUTO_SEND_SEED, int(time.time())),
+    )
+    con.commit()
+
+    # CAL-04: one row per booking that has been pushed to Google Calendar.
+    # body_hash lets the reconcile pass PATCH only when the event content
+    # (time, name, vehicle) actually changed. Rows are deleted when the
+    # booking is unmarked and the Google event has been removed.
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS gcal_events (
+            estimate_key   TEXT PRIMARY KEY,
+            event_id       TEXT NOT NULL,
+            appointment_at INTEGER NOT NULL,
+            body_hash      TEXT NOT NULL DEFAULT '',
+            synced_at      INTEGER NOT NULL
+        )
+        """
     )
     con.commit()
 
@@ -1363,6 +1411,490 @@ def _run_insights_sync():
         _INSIGHTS_SYNC_LOCK.release()
 
 
+# ---------------------------------------------------------------------------
+# CAL-04 (R-0001): Google Calendar sync
+# ---------------------------------------------------------------------------
+#
+# Design: the HTTP server is single-threaded, so the book/unbook handlers
+# never talk to Google inline. They commit to SQLite and kick a daemon
+# thread; the scheduler also kicks one every GCAL_SYNC_EVERY_S. Each run is
+# a full reconcile of `appointments` against `gcal_events`:
+#   - active booking, no mapping      -> insert event (or adopt one found by
+#                                        its esw_key private property, so a
+#                                        crash between insert and record
+#                                        never duplicates)
+#   - active booking, content changed -> patch event
+#   - mapping, booking gone/unmarked  -> delete event (404 = already gone)
+# A run that fails leaves gcal_last_error set; the next tick retries.
+# stdlib only: the Pi venv has no google client libraries and needs none.
+
+_GCAL_SYNC_LOCK = threading.Lock()
+_GCAL_TOKEN_LOCK = threading.Lock()
+_gcal_last_kick = 0.0
+
+
+class GcalError(Exception):
+    def __init__(self, status: int, message: str):
+        super().__init__(f"{status}: {message}")
+        self.status = status
+        self.message = message
+
+
+def _gcal_configured() -> bool:
+    return bool(GCAL_CLIENT_ID and GCAL_CLIENT_SECRET)
+
+
+def _gcal_load_token() -> dict:
+    try:
+        with open(GCAL_TOKEN_PATH, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _gcal_save_token(data: dict) -> None:
+    """Write the token file with 0600 perms, atomically (tmp + rename)."""
+    tmp = GCAL_TOKEN_PATH + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    os.replace(tmp, GCAL_TOKEN_PATH)
+
+
+def _gcal_clear_token() -> None:
+    try:
+        os.unlink(GCAL_TOKEN_PATH)
+    except FileNotFoundError:
+        pass
+
+
+def _gcal_connected() -> bool:
+    return bool(_gcal_load_token().get("refresh_token"))
+
+
+def _gcal_http(method: str, url: str, body=None, token: str = "",
+               form: bool = False) -> tuple:
+    """One HTTPS call. Returns (status, parsed-json-or-{}). Raises GcalError
+    on 4xx/5xx with Google's error message, URLError on network failure."""
+    from urllib.parse import urlencode
+    headers = {"Accept": "application/json"}
+    data = None
+    if body is not None:
+        if form:
+            data = urlencode(body).encode("utf-8")
+            headers["Content-Type"] = "application/x-www-form-urlencoded"
+        else:
+            data = json.dumps(body).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = Request(url, data=data, headers=headers, method=method)
+    try:
+        with urlopen(req, timeout=GCAL_HTTP_TIMEOUT_S) as resp:
+            raw = resp.read()
+            status = resp.status
+    except HTTPError as exc:
+        raw = exc.read()
+        try:
+            err = json.loads(raw.decode("utf-8")) if raw else {}
+        except ValueError:
+            err = {}
+        msg = ""
+        if isinstance(err, dict):
+            e = err.get("error")
+            if isinstance(e, dict):
+                msg = str(e.get("message") or "")
+            elif e:
+                msg = str(e)
+                if err.get("error_description"):
+                    msg += f" ({err['error_description']})"
+        raise GcalError(exc.code, msg or exc.reason or "request failed")
+    if not raw:
+        return status, {}
+    try:
+        return status, json.loads(raw.decode("utf-8"))
+    except ValueError:
+        return status, {}
+
+
+def _gcal_access_token() -> str:
+    """Return a valid access token, refreshing via the stored refresh token
+    when it is missing or within 60 s of expiry. A refresh that Google
+    rejects as invalid_grant means Marco revoked access (or the consent
+    expired): forget the token so the UI shows 'not connected'."""
+    with _GCAL_TOKEN_LOCK:
+        tok = _gcal_load_token()
+        if not tok.get("refresh_token"):
+            raise GcalError(401, "not connected")
+        if tok.get("access_token") and tok.get("expires_at", 0) > time.time() + 60:
+            return tok["access_token"]
+        try:
+            _, data = _gcal_http("POST", GCAL_TOKEN_URL, {
+                "client_id": GCAL_CLIENT_ID,
+                "client_secret": GCAL_CLIENT_SECRET,
+                "refresh_token": tok["refresh_token"],
+                "grant_type": "refresh_token",
+            }, form=True)
+        except GcalError as exc:
+            if "invalid_grant" in exc.message:
+                _gcal_clear_token()
+                _set_setting("gcal_last_error",
+                             "Google disconnected the app; tap Connect to sign in again")
+                log.warning("gcal: refresh token rejected (invalid_grant); disconnected")
+            raise
+        tok["access_token"] = data.get("access_token", "")
+        tok["expires_at"] = int(time.time()) + int(data.get("expires_in", 3600))
+        if not tok["access_token"]:
+            raise GcalError(502, "token refresh returned no access_token")
+        _gcal_save_token(tok)
+        return tok["access_token"]
+
+
+def _gcal_api(method: str, path: str, body=None, params: dict | None = None):
+    """Calendar API call with bearer auth; one retry after a 401 refresh."""
+    from urllib.parse import urlencode
+    url = f"{GCAL_API_BASE}{path}"
+    if params:
+        url += ("&" if "?" in url else "?") + urlencode(params)
+    token = _gcal_access_token()
+    try:
+        return _gcal_http(method, url, body, token=token)
+    except GcalError as exc:
+        if exc.status != 401:
+            raise
+        with _GCAL_TOKEN_LOCK:
+            tok = _gcal_load_token()
+            tok.pop("access_token", None)
+            tok["expires_at"] = 0
+            if tok.get("refresh_token"):
+                _gcal_save_token(tok)
+        token = _gcal_access_token()
+        return _gcal_http(method, url, body, token=token)
+
+
+def _gcal_fmt_phone(raw: str) -> str:
+    d = re.sub(r"\D", "", raw or "")
+    if len(d) == 11 and d.startswith("1"):
+        return f"({d[1:4]}) {d[4:7]}-{d[7:]}"
+    return raw or ""
+
+
+def _gcal_event_body(row) -> dict:
+    """Build the Calendar event for one active booking row (appointments
+    joined to its latest jobs row). Mirrors the UI's gcalHref() content so
+    the automatic and manual paths produce the same event."""
+    from zoneinfo import ZoneInfo
+    name = (row["name"] or "").strip() or _gcal_fmt_phone(row["phone"]) or "Customer"
+    vehicle = (row["vehicle_desc"] or "").strip()
+    if not vehicle:
+        vehicle = " ".join(
+            str(row[k]).strip() for k in ("year", "make", "model")
+            if row[k] not in (None, "", 0)
+        ).strip()
+    tz = ZoneInfo(GCAL_TZ)
+    start = datetime.fromtimestamp(int(row["appointment_at"]), tz)
+    end = start + timedelta(seconds=GCAL_EVENT_DURATION_S)
+    title = f"{SHOP_CONSTANTS['shop_name']}: {name}" + (f" ({vehicle})" if vehicle else "")
+    lines = ["Booked repair work."]
+    phone = _gcal_fmt_phone(row["phone"])
+    lines.append(f"Customer: {name} {phone}".rstrip() if name != phone else f"Customer: {phone}")
+    if vehicle:
+        lines.append(f"Vehicle: {vehicle}")
+    if row["vin"]:
+        lines.append(f"VIN: {row['vin']}")
+    if row["ro_id"]:
+        lines.append(f"RO {row['ro_id']}")
+    lines.append("")
+    lines.append("Added by the Earl Scheib follow-up app. Change the date in the app, "
+                 "not here: the app overwrites this event.")
+    return {
+        "summary": title,
+        "description": "\n".join(lines),
+        "location": "Earl Scheib Auto Body, Concord CA",
+        "start": {"dateTime": start.isoformat(), "timeZone": GCAL_TZ},
+        "end": {"dateTime": end.isoformat(), "timeZone": GCAL_TZ},
+        "extendedProperties": {"private": {"esw_key": str(row["estimate_key"])}},
+        "reminders": {"useDefault": True},
+    }
+
+
+def _gcal_body_hash(body: dict) -> str:
+    return hashlib.sha256(json.dumps(body, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def _gcal_find_event(estimate_key: str) -> str:
+    """Event id of a live event carrying this esw_key, or ''. Guards against
+    a crash between the insert call and recording the id."""
+    _, data = _gcal_api("GET", f"/calendars/{GCAL_CALENDAR_ID}/events", params={
+        "privateExtendedProperty": f"esw_key={estimate_key}",
+        "showDeleted": "false",
+        "maxResults": "5",
+        "singleEvents": "true",
+    })
+    for item in data.get("items", []) or []:
+        if item.get("status") != "cancelled" and item.get("id"):
+            return str(item["id"])
+    return ""
+
+
+def _gcal_active_rows(con) -> list:
+    return con.execute(
+        "SELECT a.estimate_key, a.appointment_at, "
+        "       j.name, j.phone, j.vehicle_desc, j.ro_id, j.vin, "
+        "       j.year, j.make, j.model, j.is_test "
+        "FROM appointments a "
+        "JOIN jobs j ON j.id = (SELECT id FROM jobs "
+        "                       WHERE estimate_key = a.estimate_key "
+        "                       ORDER BY id DESC LIMIT 1) "
+        "WHERE a.unbooked_at = 0 "
+        "ORDER BY a.appointment_at"
+    ).fetchall()
+
+
+def _gcal_sync_once() -> dict:
+    """One reconcile pass. Returns counters; raises only when not connected.
+    Per-event Google errors are logged, recorded in gcal_last_error and do
+    not stop the pass (one bad row must not block the others)."""
+    stats = {"created": 0, "updated": 0, "deleted": 0, "skipped": 0, "errors": 0}
+    if not _gcal_connected():
+        return stats
+    now = int(time.time())
+    first_error = ""
+    con = get_db()
+    try:
+        mapped = {r["estimate_key"]: r for r in con.execute("SELECT * FROM gcal_events")}
+        active = _gcal_active_rows(con)
+        active_keys = set()
+        for row in active:
+            key = row["estimate_key"]
+            if row["is_test"] == 1 or str(key).startswith("test|"):
+                stats["skipped"] += 1
+                continue
+            active_keys.add(key)
+            existing = mapped.get(key)
+            if existing is None and int(row["appointment_at"]) < now - 86400:
+                # Never synced and already in the past: nothing to put on
+                # the calendar. (A synced past event is left as it is.)
+                stats["skipped"] += 1
+                continue
+            body = _gcal_event_body(row)
+            h = _gcal_body_hash(body)
+            try:
+                if existing is None:
+                    event_id = _gcal_find_event(key)
+                    if event_id:
+                        _gcal_api("PATCH", f"/calendars/{GCAL_CALENDAR_ID}/events/{event_id}", body)
+                    else:
+                        _, created = _gcal_api("POST", f"/calendars/{GCAL_CALENDAR_ID}/events", body)
+                        event_id = str(created.get("id", ""))
+                        if not event_id:
+                            raise GcalError(502, "insert returned no event id")
+                    con.execute(
+                        "INSERT INTO gcal_events (estimate_key, event_id, appointment_at, body_hash, synced_at) "
+                        "VALUES (?, ?, ?, ?, ?) ON CONFLICT(estimate_key) DO UPDATE SET "
+                        " event_id = excluded.event_id, appointment_at = excluded.appointment_at, "
+                        " body_hash = excluded.body_hash, synced_at = excluded.synced_at",
+                        (key, event_id, int(row["appointment_at"]), h, now),
+                    )
+                    con.commit()
+                    stats["created"] += 1
+                    log.info("gcal: created event for %s at %s", key, row["appointment_at"])
+                elif existing["body_hash"] != h:
+                    event_id = existing["event_id"]
+                    try:
+                        _gcal_api("PATCH", f"/calendars/{GCAL_CALENDAR_ID}/events/{event_id}", body)
+                    except GcalError as exc:
+                        if exc.status not in (404, 410):
+                            raise
+                        # Marco deleted it by hand: recreate.
+                        _, created = _gcal_api("POST", f"/calendars/{GCAL_CALENDAR_ID}/events", body)
+                        event_id = str(created.get("id", ""))
+                    con.execute(
+                        "UPDATE gcal_events SET event_id = ?, appointment_at = ?, body_hash = ?, synced_at = ? "
+                        "WHERE estimate_key = ?",
+                        (event_id, int(row["appointment_at"]), h, now, key),
+                    )
+                    con.commit()
+                    stats["updated"] += 1
+                    log.info("gcal: updated event for %s at %s", key, row["appointment_at"])
+            except (GcalError, URLError, OSError) as exc:
+                stats["errors"] += 1
+                first_error = first_error or f"{key}: {exc}"
+                log.warning("gcal: sync of %s failed: %s", key, exc)
+                if isinstance(exc, GcalError) and (exc.status == 401 or "invalid_grant" in exc.message):
+                    break   # not connected any more; stop hammering
+
+        for key, existing in mapped.items():
+            if key in active_keys:
+                continue
+            try:
+                try:
+                    _gcal_api("DELETE", f"/calendars/{GCAL_CALENDAR_ID}/events/{existing['event_id']}")
+                except GcalError as exc:
+                    if exc.status not in (404, 410):
+                        raise
+                con.execute("DELETE FROM gcal_events WHERE estimate_key = ?", (key,))
+                con.commit()
+                stats["deleted"] += 1
+                log.info("gcal: deleted event for %s", key)
+            except (GcalError, URLError, OSError) as exc:
+                stats["errors"] += 1
+                first_error = first_error or f"{key}: {exc}"
+                log.warning("gcal: delete for %s failed: %s", key, exc)
+                if isinstance(exc, GcalError) and (exc.status == 401 or "invalid_grant" in exc.message):
+                    break
+    finally:
+        con.close()
+
+    _set_setting("gcal_last_sync", str(now))
+    if _gcal_connected():
+        # A refresh rejected mid-pass already wrote the "connect again"
+        # message and dropped the token; keep that one.
+        _set_setting("gcal_last_error", first_error[:300] if first_error else "")
+    if any(stats[k] for k in ("created", "updated", "deleted", "errors")):
+        log.info("gcal: sync %s", stats)
+    return stats
+
+
+def _run_gcal_sync():
+    """Daemon-thread entry. Never raises; overlapping runs are skipped."""
+    if not _GCAL_SYNC_LOCK.acquire(blocking=False):
+        return
+    try:
+        _gcal_sync_once()
+    except Exception as exc:
+        log.warning("gcal: sync failed (non-fatal): %s", exc)
+        try:
+            _set_setting("gcal_last_error", str(exc)[:300])
+        except Exception:
+            pass
+    finally:
+        _GCAL_SYNC_LOCK.release()
+
+
+def _gcal_kick() -> None:
+    """Start a sync on a daemon thread if the app is connected."""
+    if _gcal_configured() and _gcal_connected():
+        threading.Thread(target=_run_gcal_sync, daemon=True).start()
+
+
+def _gcal_status() -> dict:
+    tok = _gcal_load_token()
+    con = get_db()
+    try:
+        n = con.execute("SELECT COUNT(1) FROM gcal_events").fetchone()[0]
+        rows = con.execute(
+            "SELECT key, value FROM app_settings WHERE key IN ('gcal_last_sync', 'gcal_last_error')"
+        ).fetchall()
+    finally:
+        con.close()
+    settings = {r["key"]: r["value"] for r in rows}
+    try:
+        last_sync = int(settings.get("gcal_last_sync") or 0)
+    except ValueError:
+        last_sync = 0
+    return {
+        "configured": _gcal_configured(),
+        "connected": bool(tok.get("refresh_token")),
+        "account": tok.get("email", "") if tok.get("refresh_token") else "",
+        "last_sync": last_sync,
+        "last_error": settings.get("gcal_last_error", ""),
+        "events": int(n),
+    }
+
+
+def _gcal_auth_redirect_url() -> str:
+    """Build the Google consent URL and remember the state nonce."""
+    import secrets as _secrets
+    from urllib.parse import urlencode
+    state = _secrets.token_urlsafe(24)
+    _set_setting("gcal_oauth_state", f"{state}:{int(time.time())}")
+    params = {
+        "client_id": GCAL_CLIENT_ID,
+        "redirect_uri": GCAL_REDIRECT_URI,
+        "response_type": "code",
+        "scope": GCAL_SCOPES,
+        "access_type": "offline",
+        "prompt": "consent",
+        "include_granted_scopes": "true",
+        "state": state,
+    }
+    return f"{GCAL_AUTH_URL}?{urlencode(params)}"
+
+
+def _gcal_finish_oauth(code: str, state: str) -> str:
+    """Exchange the code, store the refresh token, return the account email.
+    Raises GcalError on a bad state or a failed exchange."""
+    stored = _get_setting("gcal_oauth_state", "")
+    _set_setting("gcal_oauth_state", "")
+    nonce, _, ts = stored.partition(":")
+    try:
+        age = int(time.time()) - int(ts or 0)
+    except ValueError:
+        age = GCAL_STATE_TTL_S + 1
+    if not state or not nonce or not hmac.compare_digest(state, nonce) or age > GCAL_STATE_TTL_S:
+        raise GcalError(400, "sign-in link expired; tap Connect again")
+    _, data = _gcal_http("POST", GCAL_TOKEN_URL, {
+        "code": code,
+        "client_id": GCAL_CLIENT_ID,
+        "client_secret": GCAL_CLIENT_SECRET,
+        "redirect_uri": GCAL_REDIRECT_URI,
+        "grant_type": "authorization_code",
+    }, form=True)
+    refresh = data.get("refresh_token", "")
+    access = data.get("access_token", "")
+    if not refresh:
+        raise GcalError(502, "Google did not return a refresh token; remove the app at "
+                             "myaccount.google.com/permissions and connect again")
+    email = ""
+    try:
+        _, info = _gcal_http("GET", GCAL_USERINFO_URL, token=access)
+        email = str(info.get("email") or "")
+    except (GcalError, URLError, OSError) as exc:
+        log.warning("gcal: userinfo lookup failed (non-fatal): %s", exc)
+    with _GCAL_TOKEN_LOCK:
+        _gcal_save_token({
+            "refresh_token": refresh,
+            "access_token": access,
+            "expires_at": int(time.time()) + int(data.get("expires_in", 3600)),
+            "email": email,
+            "connected_at": int(time.time()),
+        })
+    _set_setting("gcal_last_error", "")
+    log.info("gcal: connected as %s", email or "(unknown account)")
+    return email
+
+
+def _gcal_disconnect() -> None:
+    """Forget the token and the event mapping. Events already on the
+    calendar are left in place (Marco may still want them)."""
+    tok = _gcal_load_token()
+    with _GCAL_TOKEN_LOCK:
+        _gcal_clear_token()
+    if tok.get("refresh_token"):
+        try:
+            _gcal_http("POST", GCAL_REVOKE_URL, {"token": tok["refresh_token"]}, form=True)
+        except (GcalError, URLError, OSError) as exc:
+            log.info("gcal: revoke skipped: %s", exc)
+    con = get_db()
+    try:
+        con.execute("DELETE FROM gcal_events")
+        con.commit()
+    finally:
+        con.close()
+    _set_setting("gcal_last_error", "")
+    _set_setting("gcal_last_sync", "0")
+    log.info("gcal: disconnected")
+
+
 def scheduler_loop():
     """Background thread: fires due jobs every 30 seconds.
 
@@ -1373,7 +1905,7 @@ def scheduler_loop():
     and continues to fire on operator click.
     """
     log.info("Scheduler started (auto_send_enabled=%s)", get_auto_send_enabled())
-    global _last_gated_log_ts, _insights_last_sync
+    global _last_gated_log_ts, _insights_last_sync, _gcal_last_kick
     while True:
         try:
             if get_auto_send_enabled():
@@ -1395,6 +1927,12 @@ def scheduler_loop():
             if time.time() - _insights_last_sync >= _INSIGHTS_SYNC_EVERY:
                 _insights_last_sync = time.time()
                 threading.Thread(target=_run_insights_sync, daemon=True).start()
+            # CAL-04: mirror bookings to Google Calendar. Not gated on
+            # auto_send_enabled either (sends nothing to customers); the
+            # kick is a no-op until Marco has connected.
+            if _gcal_configured() and time.time() - _gcal_last_kick >= GCAL_SYNC_EVERY_S:
+                _gcal_last_kick = time.time()
+                _gcal_kick()
         except Exception as exc:
             log.error("Scheduler error: %s", exc)
         time.sleep(30)
@@ -3951,6 +4489,48 @@ class WebhookHandler(BaseHTTPRequestHandler):
         # freshness, current commands.json state (READ-ONLY), log tail of the
         # most recently uploaded client log, and the count of logs received.
         # HMAC-authed so only holders of CCC_SECRET can inspect.
+        # CAL-04 (R-0001): Google Calendar sync routes.
+        if path == "/earlscheibconcord/gcal/status":
+            # Auth: CF Access (edge gate).
+            self._send_json(200, _gcal_status())
+            return
+
+        if path == "/earlscheibconcord/gcal/connect":
+            # Auth: CF Access (edge gate). Sends Marco to Google's consent
+            # screen; Google returns him to /gcal/callback below.
+            if not _gcal_configured():
+                self._send_json(503, {"error": "not_configured"})
+                return
+            self.send_response(302)
+            self.send_header("Location", _gcal_auth_redirect_url())
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            return
+
+        if path == "/earlscheibconcord/gcal/callback":
+            # Auth: CF Access (edge gate) plus the state nonce from /connect.
+            from urllib.parse import quote
+            qs = parse_qs(parsed.query)
+            code = (qs.get("code") or [""])[0]
+            state = (qs.get("state") or [""])[0]
+            err = (qs.get("error") or [""])[0]
+            if err or not code:
+                dest = "/earlscheib?gcal=error&why=" + quote((err or "no code")[:200])
+            else:
+                try:
+                    _gcal_finish_oauth(code, state)
+                    _gcal_kick()
+                    dest = "/earlscheib?gcal=connected"
+                except (GcalError, URLError, OSError) as exc:
+                    log.warning("gcal: oauth callback failed: %s", exc)
+                    msg = exc.message if isinstance(exc, GcalError) else str(exc)
+                    dest = "/earlscheib?gcal=error&why=" + quote(msg[:200])
+            self.send_response(302)
+            self.send_header("Location", dest)
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            return
+
         if path == "/earlscheibconcord/diagnostic":
             import os as _os
             # Auth: CF Access (edge gate) — no origin-side check needed
@@ -4008,6 +4588,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 "scheduler_enabled": get_auto_send_enabled(),
                 # GLV-incident-260514: masked Twilio sender number.
                 "twilio_from_masked": twilio_from_masked,
+                # CAL-04: Google Calendar sync state for the Scheduled view.
+                # None when the Pi has no GCAL_CLIENT_ID (UI hides the line).
+                "gcal": _gcal_status() if _gcal_configured() else None,
             })
             return
 
@@ -4670,6 +5253,22 @@ class WebhookHandler(BaseHTTPRequestHandler):
             self._send_json(202, {"started": True})
             return
 
+        # CAL-04 (R-0001): Google Calendar sync controls.
+        if self.path.split("?")[0] == "/earlscheibconcord/gcal/sync":
+            # Auth: CF Access (edge gate).
+            if not _gcal_connected():
+                self._send_json(409, {"error": "not_connected"})
+                return
+            _gcal_kick()
+            self._send_json(202, {"started": True})
+            return
+
+        if self.path.split("?")[0] == "/earlscheibconcord/gcal/disconnect":
+            # Auth: CF Access (edge gate).
+            _gcal_disconnect()
+            self._send_json(200, {"disconnected": True})
+            return
+
         # BOK-01: Book — customer committed to the work. Upserts the
         # appointment for this estimate; the scheduler then suppresses this
         # estimate's pre-work follow-ups (24h/3day) at fire time. The
@@ -4779,6 +5378,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 "appointment_at=%s (reminder armed)",
                 estimate_key, appointment_at,
             )
+            _gcal_kick()   # CAL-04: push the booking to Google Calendar
             self._send_json(200, {"booked": 1, "appointment_at": appointment_at})
             return
 
@@ -4845,6 +5445,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
                     "Estimate unbooked via admin UI: estimate_key=%s "
                     "(%d overdue row(s) rebased)", estimate_key, rebased,
                 )
+                _gcal_kick()   # CAL-04: remove the event from Google Calendar
                 self._send_json(200, {"unbooked": 1, "rebased": rebased})
             else:
                 self._send_json(404, {"error": "not_found_or_not_booked"})

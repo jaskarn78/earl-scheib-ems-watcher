@@ -173,6 +173,9 @@
   // QAJ-02 filter + search state. Re-applied against the cached `lastJobs`
   // array on chip click or search keystroke — avoids a network round-trip.
   let currentFilter = 'estimates';
+  // CAL-04: true while the Pi reports a connected Google Calendar; the
+  // manual 'Add to Google Calendar' link is hidden then (sync does it).
+  let gcalConnected = false;
   let currentSearch = '';
   let lastJobs      = [];
   let searchTimerId = null;
@@ -848,10 +851,19 @@
       pill.hidden = false;
       whenEl.textContent = '· ' + formatAppt(group.appointment_at);
       bookBtn.querySelector('span').textContent = 'Change date';
-      gcalEl.hidden = false;
-      gcalEl.href = gcalHref(group);
-      // BOK-03: tapping the date/time pill itself adds to the calendar.
-      pill.href = gcalHref(group);
+      if (gcalConnected) {
+        // CAL-04: the booking is synced automatically; a manual add would
+        // only create a duplicate.
+        gcalEl.hidden = true;
+        pill.removeAttribute('href');
+        pill.title = 'Synced to Google Calendar';
+      } else {
+        gcalEl.hidden = false;
+        gcalEl.href = gcalHref(group);
+        // BOK-03: tapping the date/time pill itself adds to the calendar.
+        pill.href = gcalHref(group);
+        pill.title = 'Tap to add to your calendar';
+      }
       unbookBtn.hidden = false;
     }
 
@@ -1071,6 +1083,90 @@
       { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
     ));
   }
+
+  // ---------- Google Calendar sync (CAL-04) ----------------------------
+  // Status line under the calendar header. Hidden in the local Go admin
+  // and when the Pi has no GCAL_CLIENT_ID (diagnostic.gcal is null).
+  const gcalBar       = document.getElementById('cal-gcal');
+  const gcalText      = document.getElementById('cal-gcal-text');
+  const gcalConnectEl = document.getElementById('cal-gcal-connect');
+  const gcalSyncBtn   = document.getElementById('cal-gcal-sync');
+  const gcalDiscBtn   = document.getElementById('cal-gcal-disconnect');
+  let gcalFlash = '';   // one-shot message after the Google redirect
+
+  function agoText(unixSeconds) {
+    if (!unixSeconds) return 'never';
+    const s = Math.max(0, Math.floor(Date.now() / 1000) - unixSeconds);
+    if (s < 60) return 'just now';
+    if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+    if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+    return `${Math.floor(s / 86400)} d ago`;
+  }
+
+  function renderGcal(g) {
+    if (!gcalBar) return;
+    if (IS_LOCAL_ADMIN || !g || !g.configured) { gcalBar.hidden = true; return; }
+    const wasConnected = gcalConnected;
+    gcalConnected = !!g.connected;
+    gcalBar.hidden = false;
+    gcalBar.classList.toggle('cal-gcal--error', !!g.last_error);
+    if (gcalConnectEl) {
+      gcalConnectEl.hidden = gcalConnected;
+      gcalConnectEl.href = `${API_BASE}/gcal/connect`;
+    }
+    if (gcalSyncBtn) gcalSyncBtn.hidden = !gcalConnected;
+    if (gcalDiscBtn) gcalDiscBtn.hidden = !gcalConnected;
+    let text = gcalFlash;
+    if (!text && !gcalConnected) {
+      text = 'Google Calendar: not connected. Bookings stay in this app only.';
+    } else if (!text) {
+      const who = g.account ? ` as ${g.account}` : '';
+      const n = Number(g.events) || 0;
+      text = `Google Calendar: connected${who} · ${n} booking${n === 1 ? '' : 's'} synced · last check ${agoText(g.last_sync)}`;
+      if (g.last_error) text += ` · problem: ${g.last_error}`;
+    }
+    if (gcalText) gcalText.textContent = text;
+    // The cards' pill/link state depends on the connection; redraw on change.
+    if (wasConnected !== gcalConnected && lastJobs) renderQueue(lastJobs);
+  }
+
+  if (gcalSyncBtn) {
+    gcalSyncBtn.addEventListener('click', async () => {
+      gcalSyncBtn.disabled = true;
+      try {
+        await fetch(`${API_BASE}/gcal/sync`, { method: 'POST' });
+      } catch (_) { /* next diagnostic poll reconciles */ }
+      setTimeout(() => { gcalSyncBtn.disabled = false; fetchDiagnostic(); }, 2500);
+    });
+  }
+  if (gcalDiscBtn) {
+    gcalDiscBtn.addEventListener('click', async () => {
+      if (!window.confirm('Disconnect Google Calendar? New bookings will stop syncing. Events already on your calendar stay.')) return;
+      try {
+        await fetch(`${API_BASE}/gcal/disconnect`, { method: 'POST' });
+      } catch (_) { /* next diagnostic poll reconciles */ }
+      fetchDiagnostic();
+    });
+  }
+  // After Google sends Marco back (/earlscheib?gcal=connected|error): land
+  // on the Scheduled view, show the result once, clean the URL. Deferred so
+  // wireFilters() has attached the chip handlers first.
+  setTimeout(() => {
+    const qs = new URLSearchParams(window.location.search);
+    const r = qs.get('gcal');
+    if (!r) return;
+    gcalFlash = r === 'connected'
+      ? 'Google Calendar connected. Upcoming bookings are being added now.'
+      : `Google Calendar sign-in did not finish: ${qs.get('why') || 'unknown error'}. Tap Connect to try again.`;
+    setTimeout(() => { gcalFlash = ''; }, 20000);
+    const chip = document.querySelector('.filter[data-filter="scheduled"]');
+    if (chip) chip.click();
+    qs.delete('gcal');
+    qs.delete('why');
+    const clean = window.location.pathname + (qs.toString() ? `?${qs}` : '') + window.location.hash;
+    window.history.replaceState(null, '', clean);
+    fetchDiagnostic();
+  }, 0);
 
   // CAL-02 (per Marco): tapping an appointment jumps to that customer's
   // card below and flashes it. A search that hides the card is cleared.
@@ -1535,6 +1631,9 @@
       } else if (toggleBar) {
         toggleBar.hidden = true;
       }
+
+      // CAL-04: Google Calendar sync line on the Scheduled view.
+      renderGcal(d.gcal);
     } catch (_) {
       // Transient errors at 5s poll cadence — silent by design.
     }

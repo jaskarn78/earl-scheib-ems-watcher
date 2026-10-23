@@ -69,6 +69,26 @@ The page **auto-refreshes every 15 seconds**. Press **`R`** (with no text field 
 
 Full guide: [`docs/admin-ui-guide.md`](docs/admin-ui-guide.md).
 
+### 3b. Bookings on your Google Calendar
+
+On the **Scheduled** view, above the month calendar, there is a line that says
+**Google Calendar: not connected** with a **Connect Google Calendar** button.
+
+1. Tap **Connect Google Calendar** once. Google asks you to sign in to the Gmail
+   account whose calendar you use for the shop, then asks you to allow
+   "Earl Scheib follow-up" to manage events on your calendar. Tap **Allow**.
+2. You land back on the Scheduled view. Every upcoming booking is added to your
+   Google Calendar within a minute, as a one-hour event named
+   "Earl Scheib Of Concord: *customer* (*vehicle*)" with the phone number inside.
+3. From then on it is automatic: **Mark scheduled** adds the event, **Change date**
+   moves it, **Unmark** removes it. Change dates in the app, not in Google
+   Calendar: the app overwrites its own events.
+
+The line shows how many bookings are synced and when it last checked. **Sync now**
+forces a check; **Disconnect** stops syncing and leaves the existing events in
+your calendar. If the line ever says "Google disconnected the app", tap
+**Connect Google Calendar** again.
+
 ### 4. Something's wrong — what do I check?
 
 | Symptom | What to do |
@@ -231,8 +251,43 @@ CI reads `GSD_HMAC_SECRET` from GitHub Actions secrets; local dev uses the dev f
 | `/earlscheibconcord/remote-config` | GET | HMAC empty body | Returns whitelisted config overrides |
 | `/earlscheibconcord/queue` | GET | HMAC empty body | List pending SMS jobs (Phase 5) |
 | `/earlscheibconcord/queue` | DELETE | HMAC body | Cancel one pending job by id |
+| `/earlscheibconcord/gcal/connect` | GET | CF Access | Start Marco's one-time Google sign-in (CAL-04) |
+| `/earlscheibconcord/gcal/callback` | GET | CF Access + state nonce | Google redirect target; stores the refresh token |
+| `/earlscheibconcord/gcal/status` | GET | CF Access | Connected?, account, synced count, last check/error |
+| `/earlscheibconcord/gcal/sync` | POST | CF Access | Kick a reconcile pass now |
+| `/earlscheibconcord/gcal/disconnect` | POST | CF Access | Revoke + forget the token and the event mapping |
 
 Twilio sends WhatsApp (sandbox) today; switching to production SMS is documented as a one-line change in `app.py`.
+
+### Google Calendar sync (CAL-04, R-0001)
+
+Bookings (`appointments` rows) are mirrored into the connected Google Calendar
+by a reconcile pass: book/unbook handlers commit and kick a daemon thread, and
+`scheduler_loop` kicks one every `GCAL_SYNC_EVERY_S` (default 60 s). The pass
+inserts events for active bookings with no `gcal_events` row (adopting an
+existing event by its `esw_key` private property first, so a crash between
+insert and record never duplicates), patches events whose content hash changed,
+and deletes events whose booking is gone or unmarked. Test rows and never-synced
+bookings more than a day in the past are skipped. stdlib only: no Google client
+library is installed on the Pi.
+
+Pi `.env` (secrets live in 1Password; never commit them):
+
+```
+GCAL_CLIENT_ID=...apps.googleusercontent.com      # OAuth "Web application" client
+GCAL_CLIENT_SECRET=...
+# optional overrides (defaults shown)
+# GCAL_REDIRECT_URI=https://notify.earlscheibconcord.com/earlscheibconcord/gcal/callback
+# GCAL_TOKEN_PATH=/opt/esw/app/gcal_token.json   # written 0600 by app.py, gitignored
+# GCAL_CALENDAR_ID=primary
+# GCAL_SYNC_EVERY_S=60
+```
+
+The OAuth client must list `GCAL_REDIRECT_URI` as an authorized redirect URI,
+and the consent screen must grant `calendar.events` + `userinfo.email`. Marco
+connects from the Scheduled view (see "3b" above); the refresh token is stored
+in `GCAL_TOKEN_PATH`, not in the database. Tests: `tests/test_gcal.py` runs
+against an in-process fake Google.
 
 ### Deploying
 

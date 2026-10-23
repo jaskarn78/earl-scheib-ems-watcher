@@ -88,6 +88,15 @@
           <button class="btn btn-ghost cal-next" type="button" aria-label="Next month">›</button>
         </div>
       </header>
+      <!-- CAL-04: Google Calendar sync status + controls. Hidden until
+           /diagnostic returns a gcal object (Pi-served, GCAL_CLIENT_ID set);
+           main.js renders it on every diagnostic poll. -->
+      <div class="cal-gcal" id="cal-gcal" hidden role="status" aria-live="polite">
+        <span class="cal-gcal__text" id="cal-gcal-text"></span>
+        <a class="btn btn-ghost" id="cal-gcal-connect" hidden>Connect Google Calendar</a>
+        <button class="btn btn-ghost" id="cal-gcal-sync" type="button" hidden>Sync now</button>
+        <button class="btn btn-ghost" id="cal-gcal-disconnect" type="button" hidden>Disconnect</button>
+      </div>
       <div class="cal-grid" id="cal-grid"></div>
     </section>
 

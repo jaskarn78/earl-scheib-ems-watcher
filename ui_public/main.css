@@ -925,6 +925,19 @@ a.booked-pill:hover { background-color: rgba(31, 122, 82, 0.18); box-shadow: 0 1
 }
 .cal-nav { display: flex; gap: 6px; }
 .cal-nav .btn { padding: 6px 12px; font-size: 13px; }
+/* CAL-04: Google Calendar sync line under the calendar header. */
+.cal-gcal {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: -2px 0 12px;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+.cal-gcal[hidden] { display: none; }
+.cal-gcal--error .cal-gcal__text { color: var(--terra); }
+.cal-gcal .btn { padding: 6px 12px; font-size: 13px; }
 .cal-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
