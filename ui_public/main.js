@@ -207,7 +207,7 @@
 
   function jobsRenderKey(jobs, filter, search, sort) {
     const parts = (jobs || []).map((j) =>
-      `${j.id}:${j.sent || 0}:${j.send_at || 0}:${j.sent_at || 0}:${j.send_at_manual || 0}:${j.booked || 0}:${j.appointment_at || 0}`,
+      `${j.id}:${j.sent || 0}:${j.send_at || 0}:${j.sent_at || 0}:${j.send_at_manual || 0}:${j.booked || 0}:${j.appointment_at || 0}:${j.appointment_source || ''}`,
     );
     return `${filter}|${search}|${sort}|${parts.join(',')}`;
   }
@@ -366,6 +366,7 @@
           booked:         job.booked === 1 ? 1 : 0,
           appointment_at: job.appointment_at || 0,
           gcal_synced:    job.gcal_synced === 1 ? 1 : 0,   // CAL-05: already on his calendar
+          appt_source:    job.appointment_source || '',      // SET-01: 'setmore' = booked in Setmore
           is_test:        job.is_test === 1 ? 1 : 0,
           jobs:         [],
         });
@@ -900,9 +901,15 @@
 
     if (group.booked === 1) {
       pill.hidden = false;
-      whenEl.textContent = formatAppt(group.appointment_at);
+      whenEl.textContent = formatAppt(group.appointment_at) +
+        (group.appt_source === 'setmore' ? ' · via Setmore' : '');
       bookBtn.querySelector('span').textContent = 'Change date';
-      if (gcalSyncActive() || group.gcal_synced === 1) {
+      if (group.appt_source === 'setmore') {
+        // SET-01: Setmore put this booking on his calendar itself.
+        gcalEl.hidden = true;
+        pill.removeAttribute('href');
+        pill.title = 'Booked in Setmore (already on your Google Calendar)';
+      } else if (gcalSyncActive() || group.gcal_synced === 1) {
         // CAL-04/05: the booking is (or will be) on the calendar via the
         // sync; a manual add would only create a duplicate. While paused,
         // only bookings that never synced get the manual link back.

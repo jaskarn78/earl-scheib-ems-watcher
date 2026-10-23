@@ -522,6 +522,7 @@ def test_disconnect_forgets_token_and_mapping_but_keeps_events(gcal_env, monkeyp
     assert len(fake.live_events()) == 1               # left on the calendar
     assert any(c[1] == "/revoke" for c in fake.calls)
     st = get_json(f"{gcal_env['base']}/earlscheibconcord/gcal/status")
+    st.pop("setmore", None)   # SET-01 block, covered in test_setmore.py
     assert st == {"configured": True, "connected": False, "enabled": True, "account": "",
                   "last_sync": 0, "last_error": "", "events": 0}
 

@@ -149,6 +149,16 @@ GCAL_HTTP_TIMEOUT_S = 20
 # disconnecting (token kept; reconcile skipped while off). Absent row = ON.
 GCAL_ENABLED_SETTING_KEY = "gcal_sync_enabled"
 
+# SET-01 (R-0006): Setmore bookings count as booked. Setmore already writes
+# each booking to Marco's Google Calendar ("APPOINTMENT DETAILS / SERVICE /
+# NAME / MOBILE" block), so the import reads that calendar through the same
+# grant instead of a Setmore API key. Absent row = import ON; reminder OFF
+# (Setmore sends its own reminders, so arming ours would double-text).
+SETMORE_IMPORT_KEY = "setmore_import_enabled"
+SETMORE_REMINDER_KEY = "setmore_arm_reminder"
+SETMORE_LOOKAHEAD_DAYS = 120
+SETMORE_ESTIMATE_MAX_AGE_DAYS = 90
+
 # WNC-01: Persistent auto-send toggle backed by the app_settings DB table.
 # The SCHEDULER_ENABLED env var is only a first-boot seed — once the
 # app_settings row exists, env changes have no effect. The DB value is the
@@ -454,6 +464,29 @@ def init_db():
             created_at     INTEGER NOT NULL,
             updated_at     INTEGER NOT NULL,
             unbooked_at    INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
+    # SET-01 (R-0006): where the booking came from. '' = Marco's Mark
+    # scheduled; 'setmore' = imported from a Setmore calendar event, whose
+    # Google event id sits in source_ref.
+    appt_cols = {r[1] for r in cur.execute("PRAGMA table_info(appointments)")}
+    if "source" not in appt_cols:
+        cur.execute("ALTER TABLE appointments ADD COLUMN source TEXT NOT NULL DEFAULT ''")
+    if "source_ref" not in appt_cols:
+        cur.execute("ALTER TABLE appointments ADD COLUMN source_ref TEXT NOT NULL DEFAULT ''")
+    # One row per Setmore event the import has acted on. state:
+    # imported | dismissed (Marco unmarked it; never re-import) |
+    # cancelled (gone from Setmore).
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS setmore_seen (
+            event_id       TEXT PRIMARY KEY,
+            estimate_key   TEXT NOT NULL,
+            state          TEXT NOT NULL,
+            appointment_at INTEGER NOT NULL,
+            service        TEXT NOT NULL DEFAULT '',
+            updated_at     INTEGER NOT NULL
         )
         """
     )
@@ -1743,6 +1776,9 @@ def _gcal_active_rows(con) -> list:
         "                       WHERE estimate_key = a.estimate_key "
         "                       ORDER BY id DESC LIMIT 1) "
         "WHERE a.unbooked_at = 0 "
+        # SET-01: Setmore bookings are on the calendar already (Setmore
+        # put them there); a second event would be a duplicate.
+        "  AND a.source != 'setmore' "
         "ORDER BY a.appointment_at"
     ).fetchall()
 
@@ -1867,6 +1903,15 @@ def _run_gcal_sync():
         for _ in range(3):            # bounded: at most 2 follow-up passes
             _gcal_rerun.clear()
             try:
+                _setmore_import_once()     # SET-01 (R-0006)
+                _set_setting("setmore_last_error", "")
+            except Exception as exc:
+                log.warning("setmore: import failed (non-fatal): %s", exc)
+                try:
+                    _set_setting("setmore_last_error", str(exc)[:300])
+                except Exception:
+                    pass
+            try:
                 _gcal_sync_once()
             except Exception as exc:
                 log.warning("gcal: sync failed (non-fatal): %s", exc)
@@ -1893,8 +1938,12 @@ def _gcal_status() -> dict:
     try:
         n = con.execute("SELECT COUNT(1) FROM gcal_events").fetchone()[0]
         rows = con.execute(
-            "SELECT key, value FROM app_settings WHERE key IN ('gcal_last_sync', 'gcal_last_error')"
+            "SELECT key, value FROM app_settings WHERE key IN "
+            "('gcal_last_sync', 'gcal_last_error', 'setmore_last_import', 'setmore_last_error')"
         ).fetchall()
+        n_setmore = con.execute(
+            "SELECT COUNT(1) FROM appointments WHERE unbooked_at = 0 AND source = 'setmore'"
+        ).fetchone()[0]
     finally:
         con.close()
     settings = {r["key"]: r["value"] for r in rows}
@@ -1910,6 +1959,14 @@ def _gcal_status() -> dict:
         "last_sync": last_sync,
         "last_error": settings.get("gcal_last_error", ""),
         "events": int(n),
+        # SET-01 (R-0006)
+        "setmore": {
+            "enabled": _setmore_import_enabled(),
+            "arm_reminder": _get_setting(SETMORE_REMINDER_KEY, "0") == "1",
+            "active_bookings": int(n_setmore),
+            "last_import": int(settings.get("setmore_last_import") or 0),
+            "last_error": settings.get("setmore_last_error", ""),
+        },
     }
 
 
@@ -1997,6 +2054,314 @@ def _gcal_disconnect() -> None:
     _set_setting("gcal_last_error", "")
     _set_setting("gcal_last_sync", "0")
     log.info("gcal: disconnected")
+
+
+# ---------------------------------------------------------------------------
+# Booking helpers shared by Mark scheduled / Unmark and the Setmore import
+# ---------------------------------------------------------------------------
+
+def _arm_appt_reminder(cur, estimate_key: str, appointment_at: int, now: int) -> None:
+    """RMD-01: create/refresh the appointment-reminder text.
+    Fires APPT_REMINDER_LEAD_H before drop-off; if booked closer than that,
+    fires shortly after booking. A re-book (Change date) retimes the existing
+    row and re-arms it (sent=0) so a date moved AFTER a reminder already went
+    out produces a fresh reminder for the new date. Caller commits."""
+    reminder_at = appointment_at - APPT_REMINDER_LEAD_H * 3600
+    if reminder_at < now + 120:
+        reminder_at = now + 120
+    existing_rem = cur.execute(
+        "SELECT id FROM jobs "
+        "WHERE estimate_key = ? AND job_type = 'appt_reminder' "
+        "ORDER BY id DESC LIMIT 1",
+        (estimate_key,),
+    ).fetchone()
+    if appointment_at <= now:
+        # Marco logging a drop-off that already happened —
+        # a reminder would be nonsense; park any pending one.
+        if existing_rem:
+            cur.execute(
+                "UPDATE jobs SET cancelled = 1 WHERE id = ? AND sent = 0",
+                (existing_rem["id"],),
+            )
+    elif existing_rem:
+        cur.execute(
+            "UPDATE jobs SET send_at = ?, sent = 0, sent_at = 0, "
+            " cancelled = 0 WHERE id = ?",
+            (reminder_at, existing_rem["id"]),
+        )
+    else:
+        src = cur.execute(
+            "SELECT * FROM jobs WHERE estimate_key = ? ORDER BY id DESC LIMIT 1",
+            (estimate_key,),
+        ).fetchone()
+        cur.execute(
+            "INSERT INTO jobs "
+            "(doc_id, job_type, phone, name, send_at, sent, "
+            " created_at, vin, vehicle_desc, ro_id, email, "
+            " address, sent_at, estimate_key, year, make, model, "
+            " is_test) "
+            "VALUES (?, 'appt_reminder', ?, ?, ?, 0, ?, ?, ?, ?, "
+            " ?, ?, 0, ?, ?, ?, ?, ?)",
+            (src["doc_id"], src["phone"], src["name"],
+             reminder_at, now, src["vin"], src["vehicle_desc"],
+             src["ro_id"], src["email"], src["address"],
+             estimate_key, src["year"], src["make"],
+             src["model"], src["is_test"]),
+        )
+
+
+def _unbook_estimate(cur, estimate_key: str, now: int) -> tuple:
+    """BOK-01: the booking fell through; follow-ups resume. Returns
+    (appointments unbooked, overdue rows rebased). Caller commits.
+    Burst-guard: while booked, pending pre-work rows keep sliding past due.
+    Without a rebase they would ALL fire on the scheduler's next 30s tick —
+    the customer gets the 24h and 3day text back-to-back, weeks late.
+    Rebase any past-due row to now + its effective delay."""
+    cur.execute(
+        "UPDATE appointments SET unbooked_at = ? "
+        "WHERE estimate_key = ? AND unbooked_at = 0",
+        (now, estimate_key),
+    )
+    affected = cur.rowcount
+    rebased = 0
+    if affected:
+        # RMD-01: no booking → no reminder. Soft-cancel any
+        # pending reminder row for this estimate.
+        cur.execute(
+            "UPDATE jobs SET cancelled = 1 "
+            "WHERE estimate_key = ? AND job_type = 'appt_reminder' "
+            "  AND sent = 0",
+            (estimate_key,),
+        )
+        due = cur.execute(
+            "SELECT id, job_type FROM jobs "
+            "WHERE estimate_key = ? AND sent = 0 AND cancelled = 0 "
+            "  AND job_type NOT IN ('review', 'appt_reminder') "
+            "  AND send_at <= ?",
+            (estimate_key, now),
+        ).fetchall()
+        for r in due:
+            new_send_at = next_send_window(
+                now + get_effective_schedule(r["job_type"]) * 3600
+            )
+            # send_at_manual cleared: the hand-picked time is in
+            # the past — this row is machine-timed again.
+            cur.execute(
+                "UPDATE jobs SET send_at = ?, send_at_manual = 0 WHERE id = ?",
+                (int(new_send_at), int(r["id"])),
+            )
+            rebased += 1
+    return affected, rebased
+
+
+# ---------------------------------------------------------------------------
+# SET-01 (R-0006): Setmore bookings count as booked
+# ---------------------------------------------------------------------------
+#
+# Setmore writes every booking to Marco's Google Calendar as an event whose
+# description carries an "APPOINTMENT DETAILS" block (SERVICE, NAME,
+# MOBILE). Each pass, on the GCal sync thread:
+#   - future Setmore event, mobile matches an estimate written BEFORE the
+#     event start with a pending 24h/3day text, no active booking
+#       -> appointments row (source='setmore'): follow-ups pause. No booking
+#          confirmation (Setmore sent one); the reminder only if
+#          setmore_arm_reminder = 1.
+#   - imported event moved            -> retime the booking (and reminder)
+#   - imported event cancelled/deleted (checked by id, never inferred from
+#     absence in the listing)         -> unbook; follow-ups resume
+# Marco's Mark scheduled always wins, both ways: an estimate he booked is
+# never touched, and an imported booking he unmarks or re-dates is dismissed
+# and never re-imported. The estimate visit itself (the Setmore booking that
+# produced the estimate) starts before the estimate exists, so it never
+# matches.
+
+_SETMORE_TAG_RE = re.compile(r"<br\s*/?>|</p>|</div>", re.I)
+_SETMORE_STRIP_RE = re.compile(r"<[^>]+>")
+_SETMORE_FIELD_RE = re.compile(r"^\s*(SERVICE|NAME|MOBILE|PHONE)\s*:\s*(.*?)\s*$", re.I | re.M)
+
+
+def _phone10(raw: str) -> str:
+    d = re.sub(r"\D", "", raw or "")
+    return d[-10:] if len(d) >= 10 else ""
+
+
+def _parse_event_start(ev: dict) -> int:
+    dt = ((ev.get("start") or {}).get("dateTime") or "")
+    if not dt:
+        return 0           # all-day events are never bookings
+    try:
+        return int(datetime.fromisoformat(dt.replace("Z", "+00:00")).timestamp())
+    except ValueError:
+        return 0
+
+
+def _setmore_parse(ev: dict):
+    """A Setmore booking event -> {event_id, start, service, name, phone10};
+    anything else (the app's own events, Marco's notes) -> None."""
+    if ev.get("status") == "cancelled" or not ev.get("id"):
+        return None
+    if ((ev.get("extendedProperties") or {}).get("private") or {}).get("esw_key"):
+        return None        # pushed by this app
+    desc = ev.get("description") or ""
+    text = _SETMORE_STRIP_RE.sub("", _SETMORE_TAG_RE.sub("\n", desc))
+    if "APPOINTMENT DETAILS" not in text.upper():
+        return None
+    fields = {}
+    for k, v in _SETMORE_FIELD_RE.findall(text):
+        fields.setdefault(k.upper(), v)
+    phone = _phone10(fields.get("MOBILE") or fields.get("PHONE") or "")
+    start = _parse_event_start(ev)
+    if not phone or not start or "SERVICE" not in fields:
+        return None
+    return {"event_id": str(ev["id"]), "start": start,
+            "service": fields.get("SERVICE", "")[:80],
+            "name": fields.get("NAME", "")[:80], "phone10": phone}
+
+
+def _setmore_import_enabled() -> bool:
+    return _get_setting(SETMORE_IMPORT_KEY, "1") == "1"
+
+
+def _setmore_list_events(now: int) -> list:
+    """Every event from now to the lookahead, all pages, recurring expanded."""
+    def iso(ts):
+        return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    items, page = [], ""
+    for _ in range(20):
+        params = {"timeMin": iso(now), "timeMax": iso(now + SETMORE_LOOKAHEAD_DAYS * 86400),
+                  "singleEvents": "true", "showDeleted": "false", "maxResults": "250"}
+        if page:
+            params["pageToken"] = page
+        _, data = _gcal_api("GET", f"/calendars/{GCAL_CALENDAR_ID}/events", params=params)
+        items.extend(data.get("items", []) or [])
+        page = data.get("nextPageToken") or ""
+        if not page:
+            return items
+    raise GcalError(502, "event listing did not end after 20 pages")
+
+
+def _setmore_match(cur, phone10: str, start: int, now: int) -> str:
+    """Latest real estimate for this mobile written before the booking
+    starts, within SETMORE_ESTIMATE_MAX_AGE_DAYS, that still has a pending
+    24h/3day text. '' when none."""
+    rows = cur.execute(
+        "SELECT estimate_key, phone, created_at FROM jobs "
+        "WHERE job_type IN ('24h', '3day') AND sent = 0 AND cancelled = 0 "
+        "  AND is_test = 0 AND estimate_key != '' AND estimate_key NOT LIKE 'test|%' "
+        "  AND created_at < ? AND created_at >= ?",
+        (start, now - SETMORE_ESTIMATE_MAX_AGE_DAYS * 86400),
+    ).fetchall()
+    best, best_at = "", -1
+    for r in rows:
+        if _phone10(r["phone"]) == phone10 and int(r["created_at"]) > best_at:
+            best, best_at = str(r["estimate_key"]), int(r["created_at"])
+    return best
+
+
+def _setmore_import_once() -> dict:
+    """One import pass. Raises only on a listing failure (nothing changed)."""
+    stats = {"imported": 0, "moved": 0, "cancelled": 0, "unmatched": 0}
+    # The CAL-05 pause stops every calendar call, reads included.
+    if not _gcal_connected() or not _gcal_sync_enabled() or not _setmore_import_enabled():
+        return stats
+    arm_reminder = _get_setting(SETMORE_REMINDER_KEY, "0") == "1"
+    now = int(time.time())
+    events = [p for p in (_setmore_parse(e) for e in _setmore_list_events(now)) if p]
+    listed = {p["event_id"]: p for p in events}
+
+    con = get_db()
+    try:
+        cur = con.cursor()
+        seen = {r["event_id"]: r for r in cur.execute("SELECT * FROM setmore_seen")}
+        imported = {r["source_ref"]: r for r in cur.execute(
+            "SELECT * FROM appointments WHERE unbooked_at = 0 AND source = 'setmore'")}
+
+        for p in events:
+            eid, start = p["event_id"], p["start"]
+            if start <= now:
+                continue
+            appt = imported.get(eid)
+            if appt is not None:
+                if int(appt["appointment_at"]) != start:
+                    cur.execute(
+                        "UPDATE appointments SET appointment_at = ?, updated_at = ? "
+                        "WHERE estimate_key = ?", (start, now, appt["estimate_key"]))
+                    if arm_reminder:
+                        _arm_appt_reminder(cur, appt["estimate_key"], start, now)
+                    cur.execute(
+                        "UPDATE setmore_seen SET appointment_at = ?, updated_at = ? "
+                        "WHERE event_id = ?", (start, now, eid))
+                    stats["moved"] += 1
+                    log.info("setmore: booking %s moved to %s", appt["estimate_key"], start)
+                continue
+            if eid in seen:
+                continue   # dismissed, cancelled, or imported then replaced by Marco
+            key = _setmore_match(cur, p["phone10"], start, now)
+            if not key:
+                stats["unmatched"] += 1
+                continue
+            if cur.execute("SELECT 1 FROM appointments WHERE estimate_key = ? AND unbooked_at = 0",
+                           (key,)).fetchone():
+                continue   # already booked (by Marco, or by another Setmore event)
+            cur.execute(
+                "INSERT INTO appointments "
+                "(estimate_key, appointment_at, created_at, updated_at, "
+                " unbooked_at, source, source_ref) VALUES (?, ?, ?, ?, 0, 'setmore', ?) "
+                "ON CONFLICT(estimate_key) DO UPDATE SET "
+                " appointment_at = excluded.appointment_at, updated_at = excluded.updated_at, "
+                " unbooked_at = 0, source = 'setmore', source_ref = excluded.source_ref",
+                (key, start, now, now, eid),
+            )
+            if arm_reminder:
+                _arm_appt_reminder(cur, key, start, now)
+            cur.execute(
+                "INSERT OR REPLACE INTO setmore_seen "
+                "(event_id, estimate_key, state, appointment_at, service, updated_at) "
+                "VALUES (?, ?, 'imported', ?, ?, ?)",
+                (eid, key, start, p["service"], now),
+            )
+            stats["imported"] += 1
+            log.info("setmore: %s booked from Setmore (%s) for %s",
+                     key, p["service"], start)
+        con.commit()
+
+        # Imported bookings whose event was not listed: ask Google about that
+        # one event. Unbook only when Google says it is cancelled or gone;
+        # an event moved beyond the window is retimed instead.
+        for eid, appt in imported.items():
+            if eid in listed or int(appt["appointment_at"]) <= now:
+                continue
+            try:
+                _, ev = _gcal_api("GET", f"/calendars/{GCAL_CALENDAR_ID}/events/{eid}")
+                gone = ev.get("status") == "cancelled"
+            except GcalError as exc:
+                if exc.status not in (404, 410):
+                    raise
+                gone, ev = True, {}
+            key = appt["estimate_key"]
+            if gone:
+                _unbook_estimate(cur, key, now)
+                cur.execute(
+                    "UPDATE setmore_seen SET state = 'cancelled', updated_at = ? "
+                    "WHERE event_id = ?", (now, eid))
+                stats["cancelled"] += 1
+                log.info("setmore: booking for %s cancelled in Setmore; follow-ups resume", key)
+            else:
+                start = _parse_event_start(ev)
+                if start and start != int(appt["appointment_at"]):
+                    cur.execute(
+                        "UPDATE appointments SET appointment_at = ?, updated_at = ? "
+                        "WHERE estimate_key = ?", (start, now, key))
+                    if arm_reminder:
+                        _arm_appt_reminder(cur, key, start, now)
+                    stats["moved"] += 1
+            con.commit()
+    finally:
+        con.close()
+    _set_setting("setmore_last_import", str(now))
+    if stats["imported"] or stats["moved"] or stats["cancelled"]:
+        log.info("setmore: import %s", stats)
+    return stats
 
 
 def scheduler_loop():
@@ -4500,7 +4865,14 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 # CAL-05: the UI shows the manual "Add to Google Calendar"
                 # link only for bookings that are not already on the calendar.
                 "       EXISTS(SELECT 1 FROM gcal_events g "
-                "              WHERE g.estimate_key = jobs.estimate_key) AS gcal_synced "
+                "              WHERE g.estimate_key = jobs.estimate_key) "
+                # SET-01: a Setmore booking is on his calendar already.
+                "       OR EXISTS(SELECT 1 FROM appointments a "
+                "              WHERE a.estimate_key = jobs.estimate_key "
+                "                AND a.unbooked_at = 0 AND a.source = 'setmore') AS gcal_synced, "
+                "       COALESCE((SELECT a.source FROM appointments a "
+                "         WHERE a.estimate_key = jobs.estimate_key "
+                "           AND a.unbooked_at = 0), '') AS appointment_source "
                 "FROM jobs"
             )
             # GLV-02: "pending" means literally pending — exclude cancelled
@@ -5655,69 +6027,30 @@ class WebhookHandler(BaseHTTPRequestHandler):
                     "SELECT 1 FROM appointments WHERE estimate_key = ? AND unbooked_at = 0",
                     (estimate_key,),
                 ).fetchone() is not None
+                # SET-01: Marco's own mark (or Change date) makes the booking
+                # his: source cleared, so the Setmore import leaves it alone.
+                prior = cur.execute(
+                    "SELECT source, source_ref FROM appointments "
+                    "WHERE estimate_key = ? AND unbooked_at = 0",
+                    (estimate_key,),
+                ).fetchone()
+                if prior is not None and prior["source"] == "setmore" and prior["source_ref"]:
+                    cur.execute(
+                        "UPDATE setmore_seen SET state = 'dismissed', updated_at = ? "
+                        "WHERE event_id = ?",
+                        (now, prior["source_ref"]),
+                    )
                 cur.execute(
                     "INSERT INTO appointments "
                     "(estimate_key, appointment_at, created_at, updated_at, "
-                    " unbooked_at) VALUES (?, ?, ?, ?, 0) "
+                    " unbooked_at, source, source_ref) VALUES (?, ?, ?, ?, 0, '', '') "
                     "ON CONFLICT(estimate_key) DO UPDATE SET "
                     " appointment_at = excluded.appointment_at, "
                     " updated_at = excluded.updated_at, "
-                    " unbooked_at = 0",
+                    " unbooked_at = 0, source = '', source_ref = ''",
                     (estimate_key, appointment_at, now, now),
                 )
-
-                # RMD-01: create/refresh the appointment-reminder text.
-                # Fires APPT_REMINDER_LEAD_H before drop-off; if booked
-                # closer than that, fires shortly after booking. A re-book
-                # (Change date) retimes the existing row and re-arms it
-                # (sent=0) so a date moved AFTER a reminder already went
-                # out produces a fresh reminder for the new date.
-                reminder_at = appointment_at - APPT_REMINDER_LEAD_H * 3600
-                if reminder_at < now + 120:
-                    reminder_at = now + 120
-                cur.execute(
-                    "SELECT id FROM jobs "
-                    "WHERE estimate_key = ? AND job_type = 'appt_reminder' "
-                    "ORDER BY id DESC LIMIT 1",
-                    (estimate_key,),
-                )
-                existing_rem = cur.fetchone()
-                if appointment_at <= now:
-                    # Marco logging a drop-off that already happened —
-                    # a reminder would be nonsense; park any pending one.
-                    if existing_rem:
-                        cur.execute(
-                            "UPDATE jobs SET cancelled = 1 "
-                            "WHERE id = ? AND sent = 0",
-                            (existing_rem["id"],),
-                        )
-                elif existing_rem:
-                    cur.execute(
-                        "UPDATE jobs SET send_at = ?, sent = 0, sent_at = 0, "
-                        " cancelled = 0 WHERE id = ?",
-                        (reminder_at, existing_rem["id"]),
-                    )
-                else:
-                    cur.execute(
-                        "SELECT * FROM jobs WHERE estimate_key = ? "
-                        "ORDER BY id DESC LIMIT 1",
-                        (estimate_key,),
-                    )
-                    src = cur.fetchone()
-                    cur.execute(
-                        "INSERT INTO jobs "
-                        "(doc_id, job_type, phone, name, send_at, sent, "
-                        " created_at, vin, vehicle_desc, ro_id, email, "
-                        " address, sent_at, estimate_key, year, make, model, "
-                        " is_test) "
-                        "VALUES (?, 'appt_reminder', ?, ?, ?, 0, ?, ?, ?, ?, "
-                        " ?, ?, 0, ?, ?, ?, ?, ?)",
-                        (src["doc_id"], src["phone"], src["name"],
-                         reminder_at, now, src["vin"], src["vehicle_desc"],
-                         src["ro_id"], src["email"], src["address"],
-                         estimate_key, src["year"], src["make"],
-                         src["model"], src["is_test"]),
-                    )
+                _arm_appt_reminder(cur, estimate_key, appointment_at, now)
                 con.commit()
             finally:
                 con.close()
@@ -5753,41 +6086,20 @@ class WebhookHandler(BaseHTTPRequestHandler):
             con = get_db()
             try:
                 cur = con.cursor()
-                cur.execute(
-                    "UPDATE appointments SET unbooked_at = ? "
+                # SET-01: Marco unmarking an imported booking dismisses its
+                # Setmore event, so the next import pass does not re-book it.
+                prior = cur.execute(
+                    "SELECT source, source_ref FROM appointments "
                     "WHERE estimate_key = ? AND unbooked_at = 0",
-                    (now, estimate_key),
-                )
-                affected = cur.rowcount
-                rebased = 0
-                if affected:
-                    # RMD-01: no booking → no reminder. Soft-cancel any
-                    # pending reminder row for this estimate.
+                    (estimate_key,),
+                ).fetchone()
+                affected, rebased = _unbook_estimate(cur, estimate_key, now)
+                if affected and prior["source"] == "setmore" and prior["source_ref"]:
                     cur.execute(
-                        "UPDATE jobs SET cancelled = 1 "
-                        "WHERE estimate_key = ? AND job_type = 'appt_reminder' "
-                        "  AND sent = 0",
-                        (estimate_key,),
+                        "UPDATE setmore_seen SET state = 'dismissed', updated_at = ? "
+                        "WHERE event_id = ?",
+                        (now, prior["source_ref"]),
                     )
-                    cur.execute(
-                        "SELECT id, job_type FROM jobs "
-                        "WHERE estimate_key = ? AND sent = 0 AND cancelled = 0 "
-                        "  AND job_type NOT IN ('review', 'appt_reminder') "
-                        "  AND send_at <= ?",
-                        (estimate_key, now),
-                    )
-                    for r in cur.fetchall():
-                        new_send_at = next_send_window(
-                            now + get_effective_schedule(r["job_type"]) * 3600
-                        )
-                        # send_at_manual cleared: the hand-picked time is in
-                        # the past — this row is machine-timed again.
-                        cur.execute(
-                            "UPDATE jobs SET send_at = ?, send_at_manual = 0 "
-                            "WHERE id = ?",
-                            (int(new_send_at), int(r["id"])),
-                        )
-                        rebased += 1
                 con.commit()
             finally:
                 con.close()
