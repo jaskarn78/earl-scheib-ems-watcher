@@ -105,3 +105,57 @@ def test_confirmation_template_is_editable(env):
     assert "booking_confirm" in jts
     sched = get(env, "/earlscheibconcord/schedules")
     assert "booking_confirm" not in json.dumps(sched)          # no delay editor for it
+
+
+# ---------------------------------------------------------------------------
+# R-0003: review requests follow their own switch, like the reminder.
+# ---------------------------------------------------------------------------
+
+class _StopLoop(BaseException):
+    pass
+
+
+def _one_scheduler_tick(app, monkeypatch):
+    def _stop(_s):
+        raise _StopLoop
+    with monkeypatch.context() as m:
+        m.setattr(app, "_insights_last_sync", time.time())
+        m.setattr(app, "_gcal_configured", lambda: False)
+        m.setattr(app.time, "sleep", _stop)
+        with pytest.raises(_StopLoop):
+            app.scheduler_loop()
+
+
+def _seed_due(app, job_type, phone):
+    now = int(time.time())
+    con = sqlite3.connect(app.DB_PATH)
+    con.execute("INSERT INTO jobs (doc_id, job_type, phone, name, send_at, sent, created_at, vin, vehicle_desc, "
+                "estimate_key, year, make, model, is_test) VALUES (?,?,?,'ann a',?,0,?,'VIN2','2020 Toyota Camry',"
+                "?, '2020','Toyota','Camry',0)", ("RV-" + job_type, job_type, phone, now - 5, now - 3600, "est|RV-" + job_type))
+    con.commit(); con.close()
+
+
+@pytest.mark.parametrize("auto_send,review_auto,want", [
+    (False, False, set()),
+    (False, True, {"review"}),
+    (True, False, {"24h"}),
+    (True, True, {"24h", "review"}),
+])
+def test_review_switch_routes_scheduler(env, monkeypatch, auto_send, review_auto, want):
+    app = env["app"]
+    phones = {"+15105550201": "review", "+15105550202": "24h"}
+    for p, jt in phones.items():
+        _seed_due(app, jt, p)
+    app.set_auto_send_enabled(auto_send)
+    st = post(env, "/earlscheibconcord/booking-texts", {"review_auto": review_auto})
+    assert st["review_auto"] is review_auto and st["reminder_auto"] is False
+    _one_scheduler_tick(app, monkeypatch)
+    assert {phones[to] for to, _ in env["sent"] if to in phones} == want
+
+
+def test_review_switch_defaults_off(env):
+    st = get(env, "/earlscheibconcord/booking-texts")
+    assert st["review_auto"] is False
+    with pytest.raises(HTTPError) as ei:
+        post(env, "/earlscheibconcord/booking-texts", {"review_auto": "on"})
+    assert ei.value.code == 400

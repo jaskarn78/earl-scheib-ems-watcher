@@ -280,6 +280,10 @@ JOB_TYPE_META = [
 #     global auto-send switch is off (off = it waits for Send now).
 BOOKING_CONFIRM_AUTO_KEY = "booking_confirm_auto"
 APPT_REMINDER_AUTO_KEY = "appt_reminder_auto"
+# R-0003: the post-repair review request gets the same kind of switch as the
+# reminder. Default OFF (it waits for Send now), which matches today on the
+# shop server, where global auto-send is off.
+REVIEW_AUTO_KEY = "review_auto"
 
 # Placeholder catalog — rendered as clickable chips on the Templates page.
 # Order matters: Templates UI lays out chips in this exact sequence.
@@ -1984,15 +1988,18 @@ def scheduler_loop():
     global _last_gated_log_ts, _insights_last_sync, _gcal_last_kick
     while True:
         try:
-            # BKT-01: appointment reminders follow their own switch, in both
-            # directions: on = they fire even with auto-send off; off = they
-            # wait for Send now even with auto-send on.
-            reminder_auto = _get_setting(APPT_REMINDER_AUTO_KEY, "0") == "1"
+            # BKT-01 / R-0003: appointment reminders and review requests
+            # follow their own switches, in both directions: on = they fire
+            # even with auto-send off; off = they wait for Send now even with
+            # auto-send on.
+            own = _own_switch_types()
+            on_types = tuple(t for t, v in own.items() if v)
+            off_types = tuple(t for t, v in own.items() if not v)
             if get_auto_send_enabled():
-                _fire_due_jobs(exclude_types=() if reminder_auto else ("appt_reminder",))
+                _fire_due_jobs(exclude_types=off_types)
             else:
-                if reminder_auto:
-                    _fire_due_jobs(only_types=("appt_reminder",))
+                if on_types:
+                    _fire_due_jobs(only_types=on_types)
                 now = int(time.time())
                 if now - _last_gated_log_ts >= _GATED_LOG_INTERVAL_S:
                     log.info(
@@ -2191,12 +2198,22 @@ def _get_setting(key: str, default: str) -> str:
         con.close()
 
 
+def _own_switch_types() -> dict:
+    """BKT-01 / R-0003: job types whose automatic firing follows their own
+    switch instead of the global auto-send. {job_type: switch_on}"""
+    return {
+        "appt_reminder": _get_setting(APPT_REMINDER_AUTO_KEY, "0") == "1",
+        "review": _get_setting(REVIEW_AUTO_KEY, "0") == "1",
+    }
+
+
 def _booking_texts_state() -> dict:
-    """BKT-01: the two Booking texts switches, plus the global auto-send
-    state so the UI can explain what Off means."""
+    """BKT-01: the Booking texts switches (plus R-0003's review switch), and
+    the global auto-send state so the UI can explain what Off means."""
     return {
         "confirm_auto": _get_setting(BOOKING_CONFIRM_AUTO_KEY, "0") == "1",
         "reminder_auto": _get_setting(APPT_REMINDER_AUTO_KEY, "0") == "1",
+        "review_auto": _get_setting(REVIEW_AUTO_KEY, "0") == "1",
         "auto_send": get_auto_send_enabled(),
     }
 
@@ -5432,18 +5449,20 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
         if self.path.split("?")[0] == "/earlscheibconcord/booking-texts":
             # Auth: CF Access (edge gate). BKT-01: {confirm_auto?, reminder_auto?}
+            # R-0003: plus review_auto?
             try:
                 body = json.loads(raw.decode("utf-8")) if raw else {}
-                if not isinstance(body, dict) or not ({"confirm_auto", "reminder_auto"} & set(body)):
+                if not isinstance(body, dict) or not ({"confirm_auto", "reminder_auto", "review_auto"} & set(body)):
                     raise ValueError
                 for k, key in (("confirm_auto", BOOKING_CONFIRM_AUTO_KEY),
-                               ("reminder_auto", APPT_REMINDER_AUTO_KEY)):
+                               ("reminder_auto", APPT_REMINDER_AUTO_KEY),
+                               ("review_auto", REVIEW_AUTO_KEY)):
                     if k in body:
                         if not isinstance(body[k], bool):
                             raise ValueError
                         _set_setting(key, "1" if body[k] else "0")
             except (ValueError, TypeError, UnicodeDecodeError):
-                self._send_json(400, {"error": "confirm_auto / reminder_auto (bool) required"})
+                self._send_json(400, {"error": "confirm_auto / reminder_auto / review_auto (bool) required"})
                 return
             self._send_json(200, _booking_texts_state())
             return

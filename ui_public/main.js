@@ -2424,8 +2424,10 @@
     card: document.getElementById('booking-texts'),
     confirm: document.getElementById('btexts-confirm'),
     reminder: document.getElementById('btexts-reminder'),
+    review: document.getElementById('btexts-review'),
     confirmLbl: document.getElementById('btexts-confirm-label'),
     reminderLbl: document.getElementById('btexts-reminder-label'),
+    reviewLbl: document.getElementById('btexts-review-label'),
     status: document.getElementById('btexts-status'),
   };
   function renderBookingTexts(st) {
@@ -2435,6 +2437,10 @@
     bt.reminder.checked = !!st.reminder_auto;
     bt.confirmLbl.textContent = st.confirm_auto ? 'On' : 'Off';
     bt.reminderLbl.textContent = st.reminder_auto ? 'On' : 'Off';
+    if (bt.review) {
+      bt.review.checked = !!st.review_auto;
+      bt.reviewLbl.textContent = st.review_auto ? 'On' : 'Off';
+    }
   }
   async function loadBookingTexts() {
     if (!bt.card || IS_LOCAL_ADMIN) return;
@@ -2465,6 +2471,7 @@
   }
   if (bt.confirm) bt.confirm.addEventListener('change', () => saveBookingText('confirm_auto', bt.confirm));
   if (bt.reminder) bt.reminder.addEventListener('change', () => saveBookingText('reminder_auto', bt.reminder));
+  if (bt.review) bt.review.addEventListener('change', () => saveBookingText('review_auto', bt.review));
   const btEdit = document.getElementById('btexts-edit');
   if (btEdit) btEdit.addEventListener('click', () => { if (window.eswActivate) window.eswActivate('settings', 'templates'); });
 
